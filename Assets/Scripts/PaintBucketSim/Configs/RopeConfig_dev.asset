@@ -1,0 +1,52 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc4381032b6c39d4bb73f9237a106ba1, type: 3}
+  m_Name: RopeConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeConfig
+  lengthMeters: 4
+  segmentCount: 24
+  physicalRadiusMeters: 0.024
+  visualRadiusMeters: 0.024
+  initialDirection: {x: 0, y: -1, z: 0}
+  ropeMassKg: 0.12
+  temporaryTipMassKg: 0
+  integrationMode: 0
+  complianceMode: 1
+  manualStretchCompliance: 0.000001
+  manualBendCompliance: 0.0005
+  youngModulusPa: 100000000
+  stretchComplianceScale: 1
+  bendComplianceScale: 1
+  solverIterations: 12
+  bendingModel: 1
+  enableBending: 1
+  restBendAngleDegrees: 0
+  dampingMode: 3
+  exponentialDampingPerSecond: 0.08
+  segmentDampingRatio: 0.08
+  enableBreakByTension: 0
+  breakTensionNewton: 240
+  enableBreakByStrain: 1
+  breakStrain: 0.35
+  pivotMotionMode: 0
+  pivotMotionAmplitude: {x: 0.05, y: 0, z: 0}
+  pivotMotionFrequencyHz: 0.5
+  pivotNoiseStrength: 0.02
+  pivotNoiseSpeed: 0.5
+  airDragMode: 1
+  linearAirDragKgPerSecond: 0.015
+  quadraticDragCoefficient: 1.1
+  gravityScale: 1
+  enableTwistData: 1
+  twistStiffnessScale: 1
+  twistDamping: 0.1
+  enableTensionDiagnostics: 1

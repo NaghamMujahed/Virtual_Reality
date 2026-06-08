@@ -1,0 +1,11 @@
+Model Information:
+* title:	Paint Bucket | Game Ready 3D Prop
+* source:	https://sketchfab.com/3d-models/paint-bucket-game-ready-3d-prop-02dfb6f2fba04a6bae1784926015dac1
+* author:	GAMICO (https://sketchfab.com/gamico)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Paint Bucket | Game Ready 3D Prop" (https://sketchfab.com/3d-models/paint-bucket-game-ready-3d-prop-02dfb6f2fba04a6bae1784926015dac1) by GAMICO (https://sketchfab.com/gamico) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

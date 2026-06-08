@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dcb3c21e652dbb943a7d6f2cd5691731, type: 3}
+  m_Name: PaintFluidConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintFluidConfig
+  initializationMode: 0
+  targetParticleCount: 1500
+  manualParticleSpacingMeters: 0.035
+  fillFraction01: 0.5
+  particleRadiusToSpacing: 0.35
+  wallClearanceMeters: 0.01
+  holeClearanceMeters: 0.02
+  previewMode: 0
+  maxParticleCapacity: 10000
+  renderParticles: 1
+  visualParticleSizeScale: 1
+  highParticleWarningThreshold: 50000

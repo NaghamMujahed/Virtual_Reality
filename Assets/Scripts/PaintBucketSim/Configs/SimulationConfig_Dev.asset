@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa9787b0cb6d9a94aa81925515849a32, type: 3}
+  m_Name: SimulationConfig_Dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.SimulationConfig
+  fixedDeltaTime: 0.016666668
+  substeps: 2
+  simulationTimeScale: 1
+  startPaused: 0
+  applyToUnityFixedDeltaTime: 1
+  maximumAllowedTimestep: 0.1
+  oneUnityUnitEqualsOneMeter: 1
+  enableDiagnostics: 1
+  randomSeed: 12345

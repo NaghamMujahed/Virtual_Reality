@@ -1,0 +1,11 @@
+Model Information:
+* title:	painting canvas
+* source:	https://sketchfab.com/3d-models/painting-canvas-f7a16f7cc31545fbbe2dbe32d6d70e9e
+* author:	alfhana (https://sketchfab.com/alfhana)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "painting canvas" (https://sketchfab.com/3d-models/painting-canvas-f7a16f7cc31545fbbe2dbe32d6d70e9e) by alfhana (https://sketchfab.com/alfhana) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

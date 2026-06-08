@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f8a6322b99da94c448cc8f98c17c15e5, type: 3}
+  m_Name: PbfSolverConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PbfSolverConfig
+  enablePbf: 0
+  solverIterations: 4
+  smoothingRadiusMeters: 0.1
+  lambdaEpsilon: 120
+  enableArtificialPressure: 1
+  artificialPressureK: 0.001
+  artificialPressureN: 4
+  artificialPressureDeltaQRatio: 0.3
+  velocityDampingPerSecond: 0.1
+  maxParticleSpeed: 6
+  useBoundaryParticleCollision: 1
+  boundaryCollisionStrength: 0.3
+  boundaryParticleRadiusMultiplier: 0.22
+  useAnalyticBucketProjection: 1
+  analyticProjectionStrength: 1
+  classifyNearHoleParticles: 1
+  nearHoleHeightMeters: 0.08
+  nearHoleRadialPaddingMeters: 0.03
+  hashCapacityMultiplier: 2
+  maxPositionCorrectionPerIteration: 0.025
+  fluidGravityScale: 1

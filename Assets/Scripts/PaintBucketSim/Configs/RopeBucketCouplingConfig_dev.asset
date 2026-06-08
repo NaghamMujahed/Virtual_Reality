@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 174d9f263d46dfc46b542991f09077c6, type: 3}
+  m_Name: RopeBucketCouplingConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeBucketCouplingConfig
+  enableCoupling: 1
+  attachmentCompliance: 0.000001
+  solverIterations: 6
+  correctRopeEnd: 1
+  correctBucket: 1
+  maxLinearCorrectionPerSubstep: 0.25
+  maxAngularCorrectionPerSubstep: 0.4
+  updateVelocitiesFromCorrection: 1
+  enableDiagnostics: 1

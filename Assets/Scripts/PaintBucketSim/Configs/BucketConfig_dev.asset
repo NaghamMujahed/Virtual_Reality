@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d2cd6e91d06cd064ba458f3537c589a3, type: 3}
+  m_Name: BucketConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.BucketConfig
+  shapeType: 1
+  heightMeters: 0.55
+  topRadiusMeters: 0.18
+  bottomRadiusMeters: 0.14
+  wallThicknessMeters: 0.01
+  massKg: 1
+  automaticInertiaTensor: 1
+  manualInertiaTensor: {x: 0.025, y: 0.02, z: 0.025}
+  motionMode: 1
+  applyGravityInDynamicMode: 1
+  linearDampingPerSecond: 0.15
+  angularDampingPerSecond: 0.15
+  autoPlaceAttachmentTopCenter: 1
+  handleHeightMeters: 0.08
+  localAttachmentPoint: {x: 0, y: 0.35, z: 0}
+  jointVisualRadiusMeters: 0.035
+  holes:
+  - name: Bottom Hole
+    shape: 0
+    autoPlaceAtBottomCenter: 1
+    localCenter: {x: 0, y: -0.5, z: 0}
+    localNormal: {x: 0, y: -1, z: 0}
+    radiusMeters: 0.035
+    wallThicknessMeters: 0.01
+    active: 1
+  visualRadialSegments: 48
+  bucketColor: {r: 0.55, g: 0.55, b: 0.58, a: 1}
+  holeColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
+  jointColor: {r: 1, g: 0.75, b: 0.25, a: 1}
