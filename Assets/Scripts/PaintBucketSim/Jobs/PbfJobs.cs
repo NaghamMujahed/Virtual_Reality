@@ -316,6 +316,9 @@ namespace PaintBucketSim.Jobs
         public NativeArray<float3> velocities;
         [ReadOnly] public NativeArray<float> radii;
 
+        public bool preventCollisionEnergyInjection;
+        public NativeArray<float3> previousPositions;
+
         public void Execute(int index)
         {
             float3 p = positions[index];
@@ -373,7 +376,13 @@ namespace PaintBucketSim.Jobs
 
             if (correctionCount > 0)
             {
-                positions[index] += correctionSum / correctionCount;
+                float3 correction = correctionSum / correctionCount;
+                positions[index] += correction;
+
+                if (preventCollisionEnergyInjection)
+                {
+                    previousPositions[index] += correction;
+                }
             }
         }
     }
@@ -402,8 +411,15 @@ namespace PaintBucketSim.Jobs
         [ReadOnly] public NativeArray<float> radii;
         public NativeArray<int> states;
 
+        public int topBoundaryMode;
+        public float topBoundaryPadding;
+        public bool preventProjectionEnergyInjection;
+
+        public NativeArray<float3> previousPositions;
+
         public void Execute(int index)
         {
+            float3 originalWorld = positions[index];
             float3 world = positions[index];
             float3 local = math.rotate(inverseBucketRotation, world - bucketPosition);
 
@@ -412,6 +428,18 @@ namespace PaintBucketSim.Jobs
             float halfHeight = height * 0.5f;
             float bottomY = -halfHeight;
             float topY = halfHeight;
+
+            if (topBoundaryMode == 1)
+            {
+                float maxY = topY - particleRadius - topBoundaryPadding;
+                if (local.y > maxY)
+                    local.y = math.lerp(local.y, maxY, projectionStrength);
+            }
+            else if (topBoundaryMode == 2)
+            {
+                if (local.y > topY + topBoundaryPadding)
+                    states[index] = (int)FluidParticleState.Lost;
+            }
 
             bool nearHole = false;
 
@@ -454,11 +482,17 @@ namespace PaintBucketSim.Jobs
             }
 
             float3 projectedWorld = bucketPosition + math.rotate(bucketRotation, local);
+            
+            float3 correction = projectedWorld - originalWorld;
+
             positions[index] = projectedWorld;
 
-            states[index] = nearHole
-                ? (int)FluidParticleState.NearHole
-                : (int)FluidParticleState.InsideFluid;
+            if (preventProjectionEnergyInjection)
+            {
+                previousPositions[index] += correction;
+            }
+
+            states[index] = nearHole ? (int)FluidParticleState.NearHole : (int)FluidParticleState.InsideFluid;
         }
     }
 
@@ -491,6 +525,103 @@ namespace PaintBucketSim.Jobs
                 v = v / speed * maxSpeed;
 
             velocities[index] = v;
+        }
+    }
+
+    [BurstCompile]
+    public struct XsphViscosityJob : IJobParallelFor
+    {
+        public float smoothingRadius;
+        public float cellSize;
+        public float xsphStrength;
+        public float maxVelocityChange;
+
+        [ReadOnly] public NativeArray<float3> positions;
+        [ReadOnly] public NativeArray<float3> velocities;
+        [ReadOnly] public NativeParallelMultiHashMap<int, int> fluidHashMap;
+
+        public NativeArray<float3> outputVelocities;
+
+        public void Execute(int index)
+        {
+            float3 xi = positions[index];
+            float3 vi = velocities[index];
+
+            float3 weightedDelta = float3.zero;
+            float weightSum = 0.0f;
+
+            int3 baseCell = SpatialHashUtility.PositionToCell(xi, cellSize);
+
+            for (int x = -1; x <= 1; x++)
+            {
+                for (int y = -1; y <= 1; y++)
+                {
+                    for (int z = -1; z <= 1; z++)
+                    {
+                        int3 cell = baseCell + new int3(x, y, z);
+                        int hash = SpatialHashUtility.HashCell(cell);
+
+                        NativeParallelMultiHashMapIterator<int> iterator;
+                        int j;
+
+                        if (fluidHashMap.TryGetFirstValue(hash, out j, out iterator))
+                        {
+                            do
+                            {
+                                if (j == index)
+                                    continue;
+
+                                float3 rij = xi - positions[j];
+                                float r2 = math.lengthsq(rij);
+
+                                if (r2 <= smoothingRadius * smoothingRadius)
+                                {
+                                    float w = Poly6(r2, smoothingRadius);
+                                    weightedDelta += (velocities[j] - vi) * w;
+                                    weightSum += w;
+                                }
+                            }
+                            while (fluidHashMap.TryGetNextValue(out j, ref iterator));
+                        }
+                    }
+                }
+            }
+
+            float3 dv = float3.zero;
+
+            if (weightSum > 1e-8f)
+                dv = xsphStrength * (weightedDelta / weightSum);
+
+            float dvLen = math.length(dv);
+            if (dvLen > maxVelocityChange && dvLen > 1e-8f)
+                dv = dv / dvLen * maxVelocityChange;
+
+            outputVelocities[index] = vi + dv;
+        }
+
+        private static float Poly6(float r2, float h)
+        {
+            float h2 = h * h;
+
+            if (r2 >= h2)
+                return 0.0f;
+
+            float x = h2 - r2;
+            float coeff = 315.0f / (64.0f * math.PI * math.pow(h, 9.0f));
+
+            return coeff * x * x * x;
+        }
+    }
+
+    [BurstCompile]
+    public struct CopyFloat3ArrayJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<float3> source;
+        public NativeArray<float3> destination;
+
+        public void Execute(int index)
+        {
+            destination[index] = source[index];
         }
     }
 }

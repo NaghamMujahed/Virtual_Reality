@@ -2,6 +2,13 @@
 
 namespace PaintBucketSim.Configs
 {
+    public enum FluidTopBoundaryMode
+    {
+        Open = 0,
+        TemporaryLid = 1,
+        MarkLost = 2
+    }
+
     [CreateAssetMenu(
         fileName = "PbfSolverConfig",
         menuName = "Paint Bucket Sim/PBF Solver Config")]
@@ -79,6 +86,44 @@ namespace PaintBucketSim.Configs
         [Range(0.0f, 1.0f)]
         public float fluidGravityScale = 0.5f;
 
+        [Header("Performance")]
+        [Tooltip("If false, fluid hash is built once per substep and reused during solver iterations. Faster and usually acceptable.")]
+        public bool rebuildFluidHashEveryIteration = false;
+
+        [Tooltip("Update expensive fluid diagnostics every N simulation steps.")]
+        [Min(1)]
+        public int diagnosticsUpdateInterval = 8;
+
+        [Header("Warmup / Rest Relaxation")]
+        public bool enableWarmupOnInitialize = true;
+
+        [Range(0, 80)]
+        public int warmupSteps = 20;
+
+        [Tooltip("During warmup, gravity is usually reduced to let particles settle without explosion.")]
+        [Range(0.0f, 1.0f)]
+        public float warmupGravityScale = 0.1f;
+
+        [Header("XSPH Viscosity")]
+        public bool enableXsphViscosity = true;
+
+        [Tooltip("Velocity smoothing strength. Higher = more viscous/cohesive-looking motion.")]
+        [Range(0.0f, 0.5f)]
+        public float xsphStrength = 0.08f;
+
+        [Tooltip("Clamp how much XSPH can change velocity per step.")]
+        [Min(0.0f)]
+        public float maxXsphVelocityChange = 1.5f;
+
+        [Header("Containment / Stability")]
+        public FluidTopBoundaryMode topBoundaryMode = FluidTopBoundaryMode.TemporaryLid;
+
+        [Min(0.0f)]
+        public float topBoundaryPaddingMeters = 0.02f;
+
+        [Tooltip("If true, projection corrections also move previous positions to avoid converting correction into velocity.")]
+        public bool preventProjectionEnergyInjection = true;
+
         private void OnValidate()
         {
             if (solverIterations < 1)
@@ -92,6 +137,12 @@ namespace PaintBucketSim.Configs
 
             if (maxParticleSpeed < 0.1f)
                 maxParticleSpeed = 0.1f;
+
+            if (diagnosticsUpdateInterval < 1)
+                diagnosticsUpdateInterval = 1;
+
+            if (maxPositionCorrectionPerIteration < 0.001f)
+                maxPositionCorrectionPerIteration = 0.001f;
         }
     }
 }

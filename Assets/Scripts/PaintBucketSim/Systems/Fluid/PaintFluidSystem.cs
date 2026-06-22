@@ -2,41 +2,59 @@
 using PaintBucketSim.Configs;
 using PaintBucketSim.Core;
 using PaintBucketSim.Data;
-using PaintBucketSim.Jobs;
 using PaintBucketSim.Runtime;
 using PaintBucketSim.Systems.Boundary;
 using PaintBucketSim.Systems.Bucket;
+using PaintBucketSim.Systems.Fluid.GPU;
+using PaintBucketSim.Systems.Fluid.Solvers;
 using Unity.Collections;
-using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
+using PaintBucketSim.Jobs;
+using Unity.Jobs;
 
 namespace PaintBucketSim.Systems.Fluid
 {
     public class PaintFluidSystem : MonoBehaviour
     {
+        [Header("Architecture")]
+        [SerializeField] private FluidSolverArchitectureConfig architectureConfig;
+
         [Header("Configs")]
         [SerializeField] private PaintMaterialConfig paintMaterialConfig;
         [SerializeField] private PaintFluidConfig paintFluidConfig;
         [SerializeField] private PbfSolverConfig pbfSolverConfig;
+        
+        [Header("GPU Solver")]
+        [SerializeField] private GpuMpmSolverConfig gpuMpmSolverConfig;
+        [SerializeField] private GpuFluidBufferSet gpuFluidBufferSet;
 
         [Header("Systems")]
         [SerializeField] private BucketSystem bucketSystem;
         [SerializeField] private BoundarySystem boundarySystem;
 
         private FluidParticleData _data;
-        private bool _initialized;
+        private FluidSolverContext _solverContext;
+        private IFluidSolver _activeSolver;
 
-        private NativeParallelMultiHashMap<int, int> _fluidHashMap;
-        private NativeParallelMultiHashMap<int, int> _boundaryHashMap;
+        private bool _initialized;
+        private int _solverStepIndex;
 
         public PaintMaterialConfig MaterialConfig => paintMaterialConfig;
         public PaintFluidConfig FluidConfig => paintFluidConfig;
         public PbfSolverConfig PbfConfig => pbfSolverConfig;
+        public FluidSolverArchitectureConfig ArchitectureConfig => architectureConfig;
 
         public bool IsInitialized => _initialized && _data != null && _data.IsCreated;
+
         public int ParticleCount => IsInitialized ? _data.Count : 0;
         public int Capacity => IsInitialized ? _data.Capacity : 0;
+
+        public FluidSolverStats SolverStats =>
+            _activeSolver != null ? _activeSolver.Stats : default;
+
+        private FluidParticlePoolStats _poolStats;
+        public FluidParticlePoolStats PoolStats => _poolStats;
 
         public FluidDiagnostics Diagnostics
         {
@@ -56,6 +74,9 @@ namespace PaintBucketSim.Systems.Fluid
 
             if (boundarySystem == null)
                 boundarySystem = FindFirstObjectByType<BoundarySystem>();
+
+            if (gpuFluidBufferSet == null)
+                gpuFluidBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
         }
 
         private void OnDestroy()
@@ -65,25 +86,139 @@ namespace PaintBucketSim.Systems.Fluid
 
         public void Initialize(SimulationContext context)
         {
+            if (!ValidateRequiredReferences())
+            {
+                _initialized = false;
+                return;
+            }
+
+            DisposeSolverOnly();
+
+            if (_data == null)
+                _data = new FluidParticleData();
+
+            _data.Allocate(paintFluidConfig.maxParticleCapacity, Allocator.Persistent);
+
+            GenerateParticlesInsideBucket();
+
+            _initialized = true;
+            _solverStepIndex = 0;
+
+            BuildSolverContext();
+            CreateAndInitializeSolver();
+
+            UpdateDiagnostics();
+            UpdatePoolStats();
+
+            if (pbfSolverConfig.enableWarmupOnInitialize &&
+                pbfSolverConfig.enablePbf &&
+                _activeSolver != null)
+            {
+                RunWarmup(context);
+            }
+
+            UpdateDiagnostics();
+            UpdatePoolStats();
+        }
+
+        public void ResetSystem(SimulationContext context)
+        {
+            Initialize(context);
+        }
+
+        public void Dispose()
+        {
+            DisposeSolverOnly();
+
+            if (_data != null)
+            {
+                _data.Dispose();
+                _data = null;
+            }
+
+            _initialized = false;
+        }
+
+        private void DisposeSolverOnly()
+        {
+            if (_activeSolver != null)
+            {
+                _activeSolver.Dispose();
+                _activeSolver = null;
+            }
+        }
+
+        public void Step(SimulationContext context, float dt)
+        {
+            if (!IsInitialized)
+                return;
+
+            if (_activeSolver == null || !_activeSolver.IsInitialized)
+                return;
+
+            // If PBF is disabled while CPU PBF is selected, keep the old preview behavior.
+            if (_activeSolver.SolverType == FluidSolverType.CpuPbf &&
+                pbfSolverConfig != null &&
+                !pbfSolverConfig.enablePbf)
+            {
+                if (paintFluidConfig.previewMode == FluidPreviewMode.FollowBucketKinematically)
+                {
+                    UpdateWorldFromLocalPreview();
+
+                    StepParticlePool(dt);
+                }
+
+                UpdateDiagnostics();
+                UpdatePoolStats();
+
+                return;
+            }
+
+            var input = new FluidSolverStepInput
+            {
+                dt = dt,
+                gravityScale = pbfSolverConfig.fluidGravityScale,
+                isWarmup = false
+            };
+
+            _activeSolver.Step(_solverContext, context, input);
+
+            StepParticlePool(dt);
+
+            _solverStepIndex++;
+
+            if (_solverStepIndex % pbfSolverConfig.diagnosticsUpdateInterval == 0)
+            {
+                UpdateDiagnostics();
+
+                UpdatePoolStats();
+            }
+        }
+
+        private bool ValidateRequiredReferences()
+        {
+            if (architectureConfig == null)
+            {
+                Debug.LogError("PaintFluidSystem: Missing FluidSolverArchitectureConfig.");
+                return false;
+            }
+
             if (paintMaterialConfig == null)
             {
                 Debug.LogError("PaintFluidSystem: Missing PaintMaterialConfig.");
-                _initialized = false;
-                return;
+                return false;
             }
 
             if (paintFluidConfig == null)
             {
                 Debug.LogError("PaintFluidSystem: Missing PaintFluidConfig.");
-                _initialized = false;
-                return;
+                return false;
             }
 
             if (pbfSolverConfig == null)
             {
                 Debug.LogError("PaintFluidSystem: Missing PbfSolverConfig.");
-                _initialized = false;
-                return;
+                return false;
             }
 
             if (bucketSystem == null)
@@ -95,300 +230,96 @@ namespace PaintBucketSim.Systems.Fluid
             if (bucketSystem == null || !bucketSystem.IsInitialized)
             {
                 Debug.LogError("PaintFluidSystem: Missing initialized BucketSystem.");
-                _initialized = false;
-                return;
+                return false;
             }
 
-            if (_data == null)
-                _data = new FluidParticleData();
-
-            _data.Allocate(paintFluidConfig.maxParticleCapacity, Allocator.Persistent);
-
-            AllocateHashMaps();
-
-            GenerateParticlesInsideBucket();
-            UpdateWorldFromLocalPreview();
-            UpdateDiagnostics();
-
-            _initialized = true;
+            return true;
         }
 
-        public void ResetSystem(SimulationContext context)
+        private void BuildSolverContext()
         {
-            Initialize(context);
-        }
-
-        public void Dispose()
-        {
-            if (_fluidHashMap.IsCreated)
-                _fluidHashMap.Dispose();
-
-            if (_boundaryHashMap.IsCreated)
-                _boundaryHashMap.Dispose();
-
-            if (_data != null)
+            _solverContext = new FluidSolverContext
             {
-                _data.Dispose();
-                _data = null;
-            }
+                MaterialConfig = paintMaterialConfig,
+                FluidConfig = paintFluidConfig,
+                PbfConfig = pbfSolverConfig,
+                ArchitectureConfig = architectureConfig,
 
-            _initialized = false;
-        }
+                GpuMpmConfig = gpuMpmSolverConfig,
+                GpuBufferSet = gpuFluidBufferSet,
 
-        public void Step(SimulationContext context, float dt)
-        {
-            if (!IsInitialized)
-                return;
+                BucketSystem = bucketSystem,
+                BoundarySystem = boundarySystem,
 
-            if (!pbfSolverConfig.enablePbf)
-            {
-                if (paintFluidConfig.previewMode == FluidPreviewMode.FollowBucketKinematically)
-                    UpdateWorldFromLocalPreview();
-
-                UpdateDiagnostics();
-                return;
-            }
-
-            StepPbf(context, dt);
-            UpdateDiagnostics();
-        }
-
-        private void StepPbf(SimulationContext context, float dt)
-        {
-            float h = pbfSolverConfig.smoothingRadiusMeters;
-            float restDensity = paintMaterialConfig.densityKgPerM3;
-
-            var predictJob = new PbfPredictJob
-            {
-                dt = dt,
-                gravity = (float3)context.EnvironmentState.gravity * pbfSolverConfig.fluidGravityScale,
-
-                positions = _data.Positions,
-                previousPositions = _data.PreviousPositions,
-                velocities = _data.Velocities,
-                deltaPositions = _data.DeltaPositions
+                Particles = _data
             };
+        }
 
-            JobHandle handle = predictJob.Schedule(_data.Count, 64);
+        private void CreateAndInitializeSolver()
+        {
+            FluidSolverType requestedSolver = architectureConfig.activeSolver;
 
-            handle.Complete();
-
-            bool hasBoundary = (
-                pbfSolverConfig.useBoundaryParticleCollision &&
-                boundarySystem != null &&
-                boundarySystem.IsInitialized
-            );
-
-            if (hasBoundary)
+            if (requestedSolver == FluidSolverType.CpuPbf)
             {
-                BuildBoundaryHash(h);
+                _activeSolver = new CpuPbfFluidSolver();
             }
-
-            for (int iter = 0; iter < pbfSolverConfig.solverIterations; iter++)
+            else if (requestedSolver == FluidSolverType.GpuSparseMpmPrototype)
             {
-                BuildFluidHash(h);
+                bool gpuReady =
+                    gpuMpmSolverConfig != null &&
+                    gpuMpmSolverConfig.denseLocalMpmCompute != null &&
+                    gpuFluidBufferSet != null;
 
-                var densityJob = new PbfDensityLambdaJob
+                if (gpuReady)
                 {
-                    smoothingRadius = h,
-                    restDensity = restDensity,
-                    lambdaEpsilon = pbfSolverConfig.lambdaEpsilon,
-                    cellSize = h,
-
-                    positions = _data.Positions,
-                    masses = _data.Masses,
-                    fluidHashMap = _fluidHashMap,
-
-                    densities = _data.Densities,
-                    lambdas = _data.Lambdas
-                };
-
-                handle = densityJob.Schedule(_data.Count, 64);
-
-                var correctionJob = new PbfPositionCorrectionJob
+                    _activeSolver = new GpuMpmDenseLocalSolver();
+                }
+                else if (architectureConfig.fallbackToCpuPbfIfSelectedSolverUnavailable)
                 {
-                    smoothingRadius = h,
-                    restDensity = restDensity,
-                    cellSize = h,
+                    _activeSolver = new CpuPbfFluidSolver();
 
-                    enableArtificialPressure = pbfSolverConfig.enableArtificialPressure,
-                    artificialPressureK = pbfSolverConfig.artificialPressureK,
-                    artificialPressureN = pbfSolverConfig.artificialPressureN,
-                    artificialPressureDeltaQRatio = pbfSolverConfig.artificialPressureDeltaQRatio,
-
-                    maxPositionCorrection = pbfSolverConfig.maxPositionCorrectionPerIteration,
-
-                    positions = _data.Positions,
-                    masses = _data.Masses,
-                    lambdas = _data.Lambdas,
-                    fluidHashMap = _fluidHashMap,
-
-                    deltaPositions = _data.DeltaPositions
-                };
-
-                handle = correctionJob.Schedule(_data.Count, 64, handle);
-
-                var applyJob = new PbfApplyDeltaJob
-                {
-                    positions = _data.Positions,
-                    deltaPositions = _data.DeltaPositions
-                };
-
-                handle = applyJob.Schedule(_data.Count, 64, handle);
-                handle.Complete();
-
-                if (hasBoundary)
-                {
-                    //BuildBoundaryHash(h);
-
-                    var boundaryJob = new BoundaryParticleCollisionJob
+                    if (architectureConfig.logSolverLifecycle)
                     {
-                        cellSize = h,
-                        smoothingRadius = h,
-                        boundaryRadiusMultiplier = pbfSolverConfig.boundaryParticleRadiusMultiplier,
-                        strength = pbfSolverConfig.boundaryCollisionStrength,
-
-                        boundaryPositions = boundarySystem.WorldPositionsNative,
-                        boundaryNormals = boundarySystem.WorldNormalsNative,
-                        boundaryVelocities = boundarySystem.WorldVelocitiesNative,
-                        boundaryHashMap = _boundaryHashMap,
-
-                        positions = _data.Positions,
-                        velocities = _data.Velocities,
-                        radii = _data.Radii
-                    };
-
-                    handle = boundaryJob.Schedule(_data.Count, 64);
-                    handle.Complete();
+                        Debug.LogWarning(
+                            "PaintFluidSystem: GPU MPM selected, but GPU config/buffers/compute are missing. " +
+                            "Falling back to CpuPbfSolver."
+                        );
+                    }
                 }
-
-                if (pbfSolverConfig.useAnalyticBucketProjection)
+                else
                 {
-                    ScheduleAnalyticProjection(h).Complete();
+                    _activeSolver = new GpuMpmDenseLocalSolver();
                 }
             }
-
-            var velocityJob = new PbfVelocityUpdateJob
+            else
             {
-                dt = dt,
-                dampingPerSecond = pbfSolverConfig.velocityDampingPerSecond,
-                maxSpeed = pbfSolverConfig.maxParticleSpeed,
-
-                positions = _data.Positions,
-                previousPositions = _data.PreviousPositions,
-                velocities = _data.Velocities
-            };
-
-            handle = velocityJob.Schedule(_data.Count, 64);
-            handle.Complete();
-        }
-
-        private void AllocateHashMaps()
-        {
-            if (_fluidHashMap.IsCreated)
-                _fluidHashMap.Dispose();
-
-            if (_boundaryHashMap.IsCreated)
-                _boundaryHashMap.Dispose();
-
-            int fluidCapacity = Mathf.CeilToInt(
-                paintFluidConfig.maxParticleCapacity *
-                pbfSolverConfig.hashCapacityMultiplier
-            );
-
-            _fluidHashMap = new NativeParallelMultiHashMap<int, int>(
-                Mathf.Max(1, fluidCapacity),
-                Allocator.Persistent
-            );
-
-            int boundaryCapacity = 8192;
-
-            if (boundarySystem != null && boundarySystem.IsInitialized)
-                boundaryCapacity = Mathf.Max(1, boundarySystem.Count * 2);
-
-            _boundaryHashMap = new NativeParallelMultiHashMap<int, int>(
-                boundaryCapacity,
-                Allocator.Persistent
-            );
-        }
-
-        private void BuildFluidHash(float cellSize)
-        {
-            _fluidHashMap.Clear();
-
-            var job = new BuildFluidHashJob
-            {
-                cellSize = cellSize,
-                positions = _data.Positions,
-                hashMap = _fluidHashMap.AsParallelWriter()
-            };
-
-            JobHandle handle = job.Schedule(_data.Count, 64);
-            handle.Complete();
-        }
-
-        private void BuildBoundaryHash(float cellSize)
-        {
-            if (!boundarySystem.IsInitialized)
-                return;
-
-            if (_boundaryHashMap.Capacity < boundarySystem.Count)
-            {
-                _boundaryHashMap.Dispose();
-                _boundaryHashMap = new NativeParallelMultiHashMap<int, int>(
-                    Mathf.Max(1, boundarySystem.Count * 2),
-                    Allocator.Persistent
-                );
+                _activeSolver = new CpuPbfFluidSolver();
             }
 
-            _boundaryHashMap.Clear();
-
-            var job = new BuildBoundaryHashJob
+            if (architectureConfig.logSolverLifecycle)
             {
-                cellSize = cellSize,
-                boundaryPositions = boundarySystem.WorldPositionsNative,
-                hashMap = _boundaryHashMap.AsParallelWriter()
-            };
+                Debug.Log($"PaintFluidSystem: Created solver {_activeSolver.SolverType}");
+            }
 
-            JobHandle handle = job.Schedule(boundarySystem.Count, 64);
-            handle.Complete();
+            _activeSolver.Initialize(_solverContext);
         }
 
-        private JobHandle ScheduleAnalyticProjection(float smoothingRadius)
+        private void RunWarmup(SimulationContext context)
         {
-            BucketConfig config = bucketSystem.Config;
-            BucketState state = bucketSystem.State;
+            int steps = Mathf.Max(0, pbfSolverConfig.warmupSteps);
+            float dt = 1.0f / 90.0f;
 
-            float holeRadius = 0.0f;
-
-            if (bucketSystem.Holes != null && bucketSystem.Holes.Length > 0)
-                holeRadius = bucketSystem.Holes[0].radius;
-
-            var job = new AnalyticBucketProjectionJob
+            for (int i = 0; i < steps; i++)
             {
-                bucketPosition = state.position,
-                bucketRotation = state.rotation,
-                inverseBucketRotation = math.inverse(state.rotation),
+                var input = new FluidSolverStepInput
+                {
+                    dt = dt,
+                    gravityScale = pbfSolverConfig.warmupGravityScale,
+                    isWarmup = true
+                };
 
-                height = config.heightMeters,
-                topRadius = config.topRadiusMeters,
-                bottomRadius = config.bottomRadiusMeters,
-                wallThickness = config.wallThicknessMeters,
-
-                shapeType = (int)config.shapeType,
-
-                projectionStrength = pbfSolverConfig.analyticProjectionStrength,
-
-                holeRadius = holeRadius,
-                nearHoleHeight = pbfSolverConfig.nearHoleHeightMeters,
-                nearHolePadding = pbfSolverConfig.nearHoleRadialPaddingMeters,
-
-                positions = _data.Positions,
-                radii = _data.Radii,
-                states = _data.States
-            };
-
-            return job.Schedule(_data.Count, 64);
+                _activeSolver.Step(_solverContext, context, input);
+            }
         }
 
         public Vector3 GetParticlePosition(int index)
@@ -429,11 +360,14 @@ namespace PaintBucketSim.Systems.Fluid
         {
             BucketConfig bucketConfig = bucketSystem.Config;
 
+            _data.ClearActive();
+
             float spacing = ComputeParticleSpacing(bucketConfig);
             float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
 
             float halfHeight = bucketConfig.heightMeters * 0.5f;
             float yMin = -halfHeight + paintFluidConfig.wallClearanceMeters + radius;
+
             float yMax = Mathf.Lerp(
                 -halfHeight,
                 halfHeight,
@@ -445,14 +379,20 @@ namespace PaintBucketSim.Systems.Fluid
             if (yMax <= yMin)
                 yMax = yMin + spacing;
 
-            var localPositions = new List<float3>(
-                Mathf.Min(paintFluidConfig.targetParticleCount * 2, paintFluidConfig.maxParticleCapacity)
-            );
+            float particleVolume = spacing * spacing * spacing;
+            float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
+
+            Color color = paintMaterialConfig.baseColor;
+            float4 color4 = new float4(color.r, color.g, color.b, color.a);
 
             for (float y = yMin; y <= yMax; y += spacing)
             {
                 float t = Mathf.InverseLerp(-halfHeight, halfHeight, y);
-                float innerRadius = GetInnerRadiusAtT(bucketConfig, t) - paintFluidConfig.wallClearanceMeters - radius;
+
+                float innerRadius =
+                    GetInnerRadiusAtT(bucketConfig, t) -
+                    paintFluidConfig.wallClearanceMeters -
+                    radius;
 
                 if (innerRadius <= 0.0f)
                     continue;
@@ -461,71 +401,49 @@ namespace PaintBucketSim.Systems.Fluid
                 {
                     for (float z = -innerRadius; z <= innerRadius; z += spacing)
                     {
+                        if (!_data.HasFreeSlot())
+                            break;
+
                         if (x * x + z * z > innerRadius * innerRadius)
                             continue;
 
-                        float3 candidate = new float3(x, y, z);
+                        float3 local = new float3(x, y, z);
 
-                        if (IsTooCloseToBottomHole(bucketConfig, candidate, radius))
+                        if (IsTooCloseToBottomHole(bucketConfig, local, radius))
                             continue;
 
-                        localPositions.Add(candidate);
+                        float3 world = bucketSystem.LocalToWorldPoint(local);
 
-                        if (localPositions.Count >= paintFluidConfig.maxParticleCapacity)
-                            break;
+                        _data.SpawnParticle(
+                            local,
+                            world,
+                            float3.zero,
+                            particleMass,
+                            radius,
+                            paintMaterialConfig.densityKgPerM3,
+                            color4,
+                            FluidParticleState.InsideFluid
+                        );
                     }
 
-                    if (localPositions.Count >= paintFluidConfig.maxParticleCapacity)
+                    if (!_data.HasFreeSlot())
                         break;
                 }
 
-                if (localPositions.Count >= paintFluidConfig.maxParticleCapacity)
+                if (!_data.HasFreeSlot())
                     break;
-            }
-
-            int count = localPositions.Count;
-            _data.SetCount(count);
-
-            //float particleVolume = (4.0f / 3.0f) * Mathf.PI * radius * radius * radius;
-            float particleVolume = spacing * spacing * spacing;
-            float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
-
-            Color color = paintMaterialConfig.baseColor;
-            float4 color4 = new float4(color.r, color.g, color.b, color.a);
-
-            for (int i = 0; i < count; i++)
-            {
-                float3 local = localPositions[i];
-
-                _data.LocalPositions[i] = local;
-
-                float3 world = bucketSystem.LocalToWorldPoint(local);
-
-                _data.Positions[i] = world;
-                _data.PreviousPositions[i] = world;
-                _data.Velocities[i] = float3.zero;
-                _data.DeltaPositions[i] = float3.zero;
-
-                _data.Masses[i] = particleMass;
-                _data.Radii[i] = radius;
-
-                _data.Densities[i] = paintMaterialConfig.densityKgPerM3;
-                _data.Lambdas[i] = 0.0f;
-
-                _data.Colors[i] = color4;
-                _data.States[i] = (int)FluidParticleState.InsideFluid;
             }
 
             float estimatedFillVolume = EstimateFillVolume(bucketConfig);
 
             _data.Diagnostics[0] = new FluidDiagnostics
             {
-                particleCount = count,
+                particleCount = _data.Count,
                 capacity = _data.Capacity,
                 particleRadius = radius,
                 particleSpacing = spacing,
-                totalMass = particleMass * count,
-                insideMass = particleMass * count,
+                totalMass = particleMass * _data.Count,
+                insideMass = particleMass * _data.Count,
                 fillFraction = paintFluidConfig.fillFraction01,
                 estimatedFillVolume = estimatedFillVolume,
                 centerOfMassWorld = float3.zero
@@ -567,20 +485,16 @@ namespace PaintBucketSim.Systems.Fluid
 
                 FluidParticleState state = (FluidParticleState)_data.States[i];
 
-                if (state == FluidParticleState.InsideFluid ||
-                    state == FluidParticleState.NearBoundary ||
-                    state == FluidParticleState.NearHole)
+                if (FluidParticleStateUtility.IsFluidSolverState(state))
                 {
                     insideMass += m;
                     weightedPositionSum += _data.Positions[i] * m;
                 }
-                else if (state == FluidParticleState.Airborne ||
-                         state == FluidParticleState.Emitted)
+                else if (FluidParticleStateUtility.IsAirState(state))
                 {
                     airborneMass += m;
                 }
-                else if (state == FluidParticleState.Deposited ||
-                         state == FluidParticleState.Absorbed)
+                else if (FluidParticleStateUtility.IsCanvasState(state))
                 {
                     depositedMass += m;
                 }
@@ -659,7 +573,10 @@ namespace PaintBucketSim.Systems.Fluid
             return Mathf.Max(0.001f, innerRadius);
         }
 
-        private bool IsTooCloseToBottomHole(BucketConfig bucketConfig, float3 localPoint, float particleRadius)
+        private bool IsTooCloseToBottomHole(
+            BucketConfig bucketConfig,
+            float3 localPoint,
+            float particleRadius)
         {
             if (bucketConfig.holes == null)
                 return false;
@@ -694,5 +611,287 @@ namespace PaintBucketSim.Systems.Fluid
 
             return false;
         }
+
+        private void StepParticlePool(float dt)
+        {
+            if (!IsInitialized)
+                return;
+
+            var ageJob = new ParticleAgeUpdateJob
+            {
+                dt = dt,
+                states = _data.States,
+                ages = _data.Ages,
+                stateAges = _data.StateAges
+            };
+
+            JobHandle handle = ageJob.Schedule(_data.Count, 64);
+            handle.Complete();
+        }
+
+        private void UpdatePoolStats()
+        {
+            if (!IsInitialized)
+            {
+                _poolStats = default;
+                return;
+            }
+
+            int inside = 0;
+            int nearBoundary = 0;
+            int nearHole = 0;
+
+            int jet = 0;
+            int emitted = 0;
+            int airborne = 0;
+            int spilled = 0;
+
+            int deposited = 0;
+            int absorbed = 0;
+            int lost = 0;
+
+            for (int i = 0; i < _data.Count; i++)
+            {
+                FluidParticleState state = (FluidParticleState)_data.States[i];
+
+                switch (state)
+                {
+                    case FluidParticleState.InsideFluid:
+                        inside++;
+                        break;
+
+                    case FluidParticleState.NearBoundary:
+                        nearBoundary++;
+                        break;
+
+                    case FluidParticleState.NearHole:
+                        nearHole++;
+                        break;
+
+                    case FluidParticleState.Jet:
+                        jet++;
+                        break;
+
+                    case FluidParticleState.Emitted:
+                        emitted++;
+                        break;
+
+                    case FluidParticleState.Airborne:
+                        airborne++;
+                        break;
+
+                    case FluidParticleState.Spilled:
+                        spilled++;
+                        break;
+
+                    case FluidParticleState.Deposited:
+                        deposited++;
+                        break;
+
+                    case FluidParticleState.Absorbed:
+                        absorbed++;
+                        break;
+
+                    case FluidParticleState.Lost:
+                        lost++;
+                        break;
+                }
+            }
+
+            _poolStats = new FluidParticlePoolStats
+            {
+                activeCount = _data.Count,
+                capacity = _data.Capacity,
+                inactiveCount = _data.Capacity - _data.Count,
+
+                insideFluidCount = inside,
+                nearBoundaryCount = nearBoundary,
+                nearHoleCount = nearHole,
+
+                jetCount = jet,
+                emittedCount = emitted,
+                airborneCount = airborne,
+                spilledCount = spilled,
+
+                depositedCount = deposited,
+                absorbedCount = absorbed,
+                lostCount = lost,
+
+                poolUsage01 = _data.Capacity > 0
+                    ? (float)_data.Count / _data.Capacity
+                    : 0.0f,
+
+                nextParticleId = _data.NextParticleId
+            };
+        }
+
+        public int CopyParticleRenderData(Vector4[] positionRadiusOutput, Vector4[] colorOutput, int maxCount, int stride)
+        {
+            if (!IsInitialized ||
+                positionRadiusOutput == null ||
+                colorOutput == null ||
+                maxCount <= 0)
+            {
+                return 0;
+            }
+
+            stride = Mathf.Max(1, stride);
+
+            int writableCount = Mathf.Min(
+                maxCount,
+                Mathf.Min(positionRadiusOutput.Length, colorOutput.Length)
+            );
+
+            int written = 0;
+
+            for (int i = 0; i < _data.Count && written < writableCount; i += stride)
+            {
+                FluidParticleState state = (FluidParticleState)_data.States[i];
+
+                if (state == FluidParticleState.Inactive ||
+                    state == FluidParticleState.Lost ||
+                    state == FluidParticleState.Absorbed)
+                {
+                    continue;
+                }
+
+                float3 p = _data.Positions[i];
+                float4 c = _data.Colors[i];
+
+                positionRadiusOutput[written] = new Vector4(
+                    p.x,
+                    p.y,
+                    p.z,
+                    _data.Radii[i]
+                );
+
+                colorOutput[written] = new Vector4(
+                    c.x,
+                    c.y,
+                    c.z,
+                    c.w
+                );
+
+                written++;
+            }
+
+            return written;
+        }
+
+        ////////////////    G6.A Changes   //////////////////
+
+        public int CopyParticleGpuData(
+            Vector4[] positionRadiusOutput,
+            Vector4[] velocityMassOutput,
+            Vector4[] colorOutput,
+            Vector4[] stateAgeIdOutput,
+            Vector4[] volumeJOutput,
+            Vector4[] deformationF0Output,
+            Vector4[] deformationF1Output,
+            Vector4[] deformationF2Output,
+            int maxCount,
+            int stride)
+        {
+            if (!IsInitialized ||
+                positionRadiusOutput == null ||
+                velocityMassOutput == null ||
+                colorOutput == null ||
+                stateAgeIdOutput == null ||
+                volumeJOutput == null ||
+                deformationF0Output == null ||
+                deformationF1Output == null ||
+                deformationF2Output == null ||
+                maxCount <= 0)
+            {
+                return 0;
+            }
+
+            stride = Mathf.Max(1, stride);
+
+            int writableCount = Mathf.Min(
+                maxCount,
+                Mathf.Min(
+                    Mathf.Min(positionRadiusOutput.Length, velocityMassOutput.Length),
+                    Mathf.Min(colorOutput.Length, stateAgeIdOutput.Length)
+                )
+            );
+
+            writableCount = Mathf.Min(
+                writableCount,
+                Mathf.Min(
+                    Mathf.Min(volumeJOutput.Length, deformationF0Output.Length),
+                    Mathf.Min(deformationF1Output.Length, deformationF2Output.Length)
+                )
+            );
+
+            int written = 0;
+
+            for (int i = 0; i < _data.Count && written < writableCount; i += stride)
+            {
+                FluidParticleState state = (FluidParticleState)_data.States[i];
+
+                if (state == FluidParticleState.Inactive ||
+                    state == FluidParticleState.Lost ||
+                    state == FluidParticleState.Absorbed)
+                {
+                    continue;
+                }
+
+                float3 p = _data.Positions[i];
+                float3 v = _data.Velocities[i];
+                float4 c = _data.Colors[i];
+
+                float mass = _data.Masses[i];
+                float restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
+                float restVolume = mass / restDensity;
+
+                positionRadiusOutput[written] = new Vector4(
+                    p.x,
+                    p.y,
+                    p.z,
+                    _data.Radii[i]
+                );
+
+                velocityMassOutput[written] = new Vector4(
+                    v.x,
+                    v.y,
+                    v.z,
+                    mass
+                );
+
+                colorOutput[written] = new Vector4(
+                    c.x,
+                    c.y,
+                    c.z,
+                    c.w
+                );
+
+                stateAgeIdOutput[written] = new Vector4(
+                    _data.States[i],
+                    _data.Ages[i],
+                    _data.StateAges[i],
+                    _data.ParticleIds[i]
+                );
+
+                // x = rest volume, y = current J, z = rest density, w = reserved
+                volumeJOutput[written] = new Vector4(
+                    restVolume,
+                    1.0f,
+                    restDensity,
+                    0.0f
+                );
+
+                // Initial deformation gradient F = Identity.
+                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
+                deformationF1Output[written] = new Vector4(0, 1, 0, 0);
+                deformationF2Output[written] = new Vector4(0, 0, 1, 0);
+
+                written++;
+            }
+
+            return written;
+        }
+
+        ////////////////    End G6.A Changes   //////////////////
     }
 }

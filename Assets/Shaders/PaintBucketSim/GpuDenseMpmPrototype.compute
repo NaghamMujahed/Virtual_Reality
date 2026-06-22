@@ -1,0 +1,1197 @@
+﻿#pragma kernel KClearGrid
+#pragma kernel KP2G
+#pragma kernel KGridUpdate
+// Changes after G6.A 
+#pragma kernel KG2PVelocityApic
+#pragma kernel KUpdateDeformation
+// End Changes after G6.A 
+
+// Changes after G8.A 
+#pragma kernel KBucketCollision
+// End Changes after G8.A 
+
+RWStructuredBuffer<float4> _ParticlePositionRadius;
+RWStructuredBuffer<float4> _ParticleVelocityMass;
+RWStructuredBuffer<float4> _ParticleColor;
+
+// Changes after G8.A 
+RWStructuredBuffer<float4> _ParticleStateAgeId;
+// End Changes after G8.A 
+StructuredBuffer<float4> _ParticleStateAgeIdRead;
+
+RWStructuredBuffer<float4> _ParticleAffineC0;
+RWStructuredBuffer<float4> _ParticleAffineC1;
+RWStructuredBuffer<float4> _ParticleAffineC2;
+
+StructuredBuffer<float4> _ParticleAffineC0Read;
+StructuredBuffer<float4> _ParticleAffineC1Read;
+StructuredBuffer<float4> _ParticleAffineC2Read;
+
+// x = rest volume, y = current J, z = rest density, w = reserved
+StructuredBuffer<float4> _ParticleVolumeJRead;
+RWStructuredBuffer<float4> _ParticleVolumeJ;
+
+// deformation gradient F rows
+RWStructuredBuffer<float4> _ParticleF0;
+RWStructuredBuffer<float4> _ParticleF1;
+RWStructuredBuffer<float4> _ParticleF2;
+
+RWStructuredBuffer<int4> _GridAccumInt;
+RWStructuredBuffer<float4> _GridVelocityMass;
+StructuredBuffer<float4> _GridVelocityMassRead;
+
+int _ParticleCount;
+int _GridNodeCount;
+
+int3 _GridResolution;
+float3 _GridOrigin;
+float _CellSize;
+float _InvCellSize;
+
+float _Dt;
+float3 _Gravity;
+float _VelocityDampingPerSecond;
+float _MaxParticleSpeed;
+float _PicBlend;
+
+int _MassFixedScale;
+int _MomentumFixedScale;
+
+int _EnableBoxBoundary;
+float _BoundaryDamping;
+
+int _EnableApicTransfer;
+float _ApicP2GStrength;
+float _ApicG2PStrength;
+float _AffineDamping;
+float _MaxAffineMagnitude;
+float _ApicDInverse;
+
+// Material prototype
+int _EnableMaterialStress;
+float _BulkModulus;
+float _MpmViscosity;
+float _MaterialStressStrength;
+float _MaxStressMagnitude;
+float _MinJ;
+float _MaxJ;
+float _MaxDeformationGradientValue;
+
+//      Changes G7       //
+// Paint rheology / non-Newtonian prototype
+int _EnablePaintRheology;
+
+float _LowShearViscosity;
+float _HighShearViscosity;
+float _ShearThinningRelaxationTime;
+float _ShearThinningPowerN;
+
+float _YieldStress;
+float _MaxYieldViscosityContribution;
+float _MaxEffectiveViscosity;
+float _RheologyStrength;
+//      End Changes G7      //
+
+//      Changes G8.A      //
+// Real bucket collision
+int _EnableGpuBucketCollision;
+int _UseRealBucketCollision;
+
+float4x4 _BucketWorldToLocal;
+float4x4 _BucketLocalToWorld;
+
+int _BucketShapeType;
+
+float _BucketHeight;
+float _BucketTopRadius;
+float _BucketBottomRadius;
+float _BucketWallThickness;
+
+float _BucketCollisionPadding;
+float _BucketRestitution;
+float _BucketFriction;
+
+int _BucketTopMode;
+float _BucketTopPadding;
+
+// Bottom hole prototype
+int _ClassifyBottomHoleRegion;
+int _EnableBottomHoleOpening;
+
+float3 _HoleLocalCenter;
+float3 _HoleLocalNormal;
+float _HoleRadius;
+float _HoleNearHeight;
+float _HoleRadialPadding;
+//      End Changes G8.A      //
+
+/// /// /// ///       Changes G8.B      /// /// /// /// /// /// 
+
+// Moving bucket wall velocity
+int _EnableMovingBucketBoundaryVelocity;
+float _BucketBoundaryVelocityStrength;
+float _MaxBucketBoundaryVelocity;
+
+float3 _BucketLinearVelocityWorld;
+float3 _BucketAngularVelocityWorld;
+/// /// /// ///      End Changes G8.B      /// /// /// /// /// /// 
+
+int FlattenGridIndex(int3 c)
+{
+    return c.x +
+           c.y * _GridResolution.x +
+           c.z * _GridResolution.x * _GridResolution.y;
+}
+
+bool IsValidCell(int3 c)
+{
+    return c.x >= 0 && c.y >= 0 && c.z >= 0 &&
+           c.x < _GridResolution.x &&
+           c.y < _GridResolution.y &&
+           c.z < _GridResolution.z;
+}
+
+bool IsMpmActiveState(int state)
+{
+    return state == 1 || state == 2 || state == 3;
+}
+
+float3 ClampSpeed(float3 v)
+{
+    float len = length(v);
+
+    if (len > _MaxParticleSpeed && len > 1e-6)
+        v = v / len * _MaxParticleSpeed;
+
+    return v;
+}
+
+float ClampScalar(float x, float limit)
+{
+    return clamp(x, -limit, limit);
+}
+
+float3 ClampVector3(float3 v, float limit)
+{
+    v.x = ClampScalar(v.x, limit);
+    v.y = ClampScalar(v.y, limit);
+    v.z = ClampScalar(v.z, limit);
+    return v;
+}
+
+float3 WorldToGrid(float3 p)
+{
+    return (p - _GridOrigin) * _InvCellSize;
+}
+
+float3 GridToWorld(float3 g)
+{
+    return _GridOrigin + g * _CellSize;
+}
+
+void QuadraticBSplineWeights(float f, out float3 w, out float3 dw)
+{
+    // For base = floor(gridPos - 0.5)
+    // fx = gridPos - base
+    // offsets 0,1,2
+
+    float f0 = 1.5 - f;
+    float f1 = f - 1.0;
+    float f2 = f - 0.5;
+
+    w.x = 0.5 * f0 * f0;
+    w.y = 0.75 - f1 * f1;
+    w.z = 0.5 * f2 * f2;
+
+    // Derivatives with respect to f
+    dw.x = f - 1.5;
+    dw.y = -2.0 * (f - 1.0);
+    dw.z = f - 0.5;
+}
+
+float GetV3(float3 v, int i)
+{
+    if (i == 0) return v.x;
+    if (i == 1) return v.y;
+    return v.z;
+}
+
+float3 QuadraticWeightGradientWorld(
+    float3 wx,
+    float3 wy,
+    float3 wz,
+    float3 dwx,
+    float3 dwy,
+    float3 dwz,
+    int ox,
+    int oy,
+    int oz)
+{
+    float wxi = GetV3(wx, ox);
+    float wyi = GetV3(wy, oy);
+    float wzi = GetV3(wz, oz);
+
+    float dwxi = GetV3(dwx, ox);
+    float dwyi = GetV3(dwy, oy);
+    float dwzi = GetV3(dwz, oz);
+
+    return float3(
+        dwxi * wyi * wzi,
+        wxi * dwyi * wzi,
+        wxi * wyi * dwzi
+    ) * _InvCellSize;
+}
+
+float3 ApplyAffineRows(float3 c0, float3 c1, float3 c2, float3 dpos)
+{
+    return float3(
+        dot(c0, dpos),
+        dot(c1, dpos),
+        dot(c2, dpos)
+    );
+}
+
+float DeterminantRows(float3 r0, float3 r1, float3 r2)
+{
+    return dot(r0, cross(r1, r2));
+}
+
+float3 GetColumn0(float3 r0, float3 r1, float3 r2)
+{
+    return float3(r0.x, r1.x, r2.x);
+}
+
+float3 GetColumn1(float3 r0, float3 r1, float3 r2)
+{
+    return float3(r0.y, r1.y, r2.y);
+}
+
+float3 GetColumn2(float3 r0, float3 r1, float3 r2)
+{
+    return float3(r0.z, r1.z, r2.z);
+}
+
+float3 RowTimesMatrix(float3 row, float3 f0, float3 f1, float3 f2)
+{
+    float3 c0 = GetColumn0(f0, f1, f2);
+    float3 c1 = GetColumn1(f0, f1, f2);
+    float3 c2 = GetColumn2(f0, f1, f2);
+
+    return float3(
+        dot(row, c0),
+        dot(row, c1),
+        dot(row, c2)
+    );
+}
+
+float3 MatVecRows(float3 r0, float3 r1, float3 r2, float3 v)
+{
+    return float3(
+        dot(r0, v),
+        dot(r1, v),
+        dot(r2, v)
+    );
+}
+
+float DotRows3(float3 r0, float3 r1, float3 r2)
+{
+    return dot(r0, r0) + dot(r1, r1) + dot(r2, r2);
+}
+
+void BuildStrainRateRows(
+    float3 c0,
+    float3 c1,
+    float3 c2,
+    out float3 d0,
+    out float3 d1,
+    out float3 d2)
+{
+    // D = 0.5 * (C + C^T)
+    float3 ct0 = float3(c0.x, c1.x, c2.x);
+    float3 ct1 = float3(c0.y, c1.y, c2.y);
+    float3 ct2 = float3(c0.z, c1.z, c2.z);
+
+    d0 = 0.5 * (c0 + ct0);
+    d1 = 0.5 * (c1 + ct1);
+    d2 = 0.5 * (c2 + ct2);
+}
+
+float ComputeShearRateFromD(float3 d0, float3 d1, float3 d2)
+{
+    float dd = DotRows3(d0, d1, d2);
+
+    // gammaDot = sqrt(2 D:D)
+    return sqrt(max(2.0 * dd, 0.0));
+}
+
+float EvaluateEffectivePaintViscosity(float shearRate)
+{
+    float baseViscosity = max(_MpmViscosity, 0.0);
+
+    if (_EnablePaintRheology == 0)
+        return baseViscosity;
+
+    float gamma = max(shearRate, 1e-5);
+
+    float mu0 = max(_LowShearViscosity, 0.0);
+    float muInf = max(_HighShearViscosity, 0.0);
+
+    // Safety: high-shear viscosity should not exceed low-shear viscosity.
+    muInf = min(muInf, mu0);
+
+    float lambdaGamma = _ShearThinningRelaxationTime * gamma;
+
+    float n = clamp(_ShearThinningPowerN, 0.05, 1.0);
+
+    // Carreau-like shear-thinning prototype:
+    // mu = muInf + (mu0 - muInf) * (1 + (lambda*gamma)^2)^((n-1)/2)
+    float exponent = 0.5 * (n - 1.0);
+
+    float shearFactor = pow(
+        1.0 + lambdaGamma * lambdaGamma,
+        exponent
+    );
+
+    float shearViscosity = muInf + (mu0 - muInf) * shearFactor;
+
+    float yieldViscosity = 0.0;
+
+    if (_YieldStress > 0.0)
+    {
+        yieldViscosity = _YieldStress / gamma;
+        yieldViscosity = min(yieldViscosity, _MaxYieldViscosityContribution);
+    }
+
+    float rheologyViscosity = shearViscosity + yieldViscosity;
+
+    rheologyViscosity = clamp(
+        rheologyViscosity,
+        0.0,
+        max(_MaxEffectiveViscosity, 0.001)
+    );
+
+    return lerp(
+        baseViscosity,
+        rheologyViscosity,
+        saturate(_RheologyStrength)
+    );
+}
+
+void BuildStressRows(
+    float3 c0,
+    float3 c1,
+    float3 c2,
+    float J,
+    out float3 s0,
+    out float3 s1,
+    out float3 s2)
+{
+    // Weakly-compressible pressure prototype.
+    // If J < 1 => compressed => positive pressure.
+    float pressure = _BulkModulus * (1.0 - J);
+
+    pressure = clamp(
+        pressure,
+        -_MaxStressMagnitude,
+        _MaxStressMagnitude
+    );
+
+    // Stress = -p I
+    s0 = float3(-pressure, 0, 0);
+    s1 = float3(0, -pressure, 0);
+    s2 = float3(0, 0, -pressure);
+
+    float3 d0, d1, d2;
+    BuildStrainRateRows(c0, c1, c2, d0, d1, d2);
+
+    float shearRate = ComputeShearRateFromD(d0, d1, d2);
+
+    float effectiveViscosity = EvaluateEffectivePaintViscosity(shearRate);
+
+    if (effectiveViscosity > 0.0)
+    {
+        s0 += 2.0 * effectiveViscosity * d0;
+        s1 += 2.0 * effectiveViscosity * d1;
+        s2 += 2.0 * effectiveViscosity * d2;
+    }
+
+    s0 = ClampVector3(s0, _MaxStressMagnitude);
+    s1 = ClampVector3(s1, _MaxStressMagnitude);
+    s2 = ClampVector3(s2, _MaxStressMagnitude);
+}
+
+float3 WeightGradientWorld(float3 f, int dx, int dy, int dz)
+{
+    float wx = dx == 0 ? (1.0 - f.x) : f.x;
+    float wy = dy == 0 ? (1.0 - f.y) : f.y;
+    float wz = dz == 0 ? (1.0 - f.z) : f.z;
+
+    float dwx = dx == 0 ? -1.0 : 1.0;
+    float dwy = dy == 0 ? -1.0 : 1.0;
+    float dwz = dz == 0 ? -1.0 : 1.0;
+
+    float invDx = _InvCellSize;
+
+    return float3(
+        dwx * wy * wz * invDx,
+        wx * dwy * wz * invDx,
+        wx * wy * dwz * invDx
+    );
+}
+
+[numthreads(256, 1, 1)]
+void KClearGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_GridNodeCount)
+        return;
+
+    _GridAccumInt[index] = int4(0, 0, 0, 0);
+    _GridVelocityMass[index] = float4(0, 0, 0, 0);
+}
+
+[numthreads(256, 1, 1)]
+void KP2G(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 pr = _ParticlePositionRadius[particleIndex];
+    float4 vm = _ParticleVelocityMass[particleIndex];
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 p = pr.xyz;
+    float3 v = vm.xyz;
+    float mass = max(vm.w, 0.0);
+
+    if (mass <= 0.0)
+        return;
+
+    float3 c0 = _ParticleAffineC0[particleIndex].xyz;
+    float3 c1 = _ParticleAffineC1[particleIndex].xyz;
+    float3 c2 = _ParticleAffineC2[particleIndex].xyz;
+
+    float4 volumeJ = _ParticleVolumeJRead[particleIndex];
+    float restVolume = max(volumeJ.x, 0.0);
+    float J = clamp(volumeJ.y, _MinJ, _MaxJ);
+
+    float3 stress0 = float3(0, 0, 0);
+    float3 stress1 = float3(0, 0, 0);
+    float3 stress2 = float3(0, 0, 0);
+
+    if (_EnableMaterialStress != 0)
+    {
+        BuildStressRows(c0, c1, c2, J, stress0, stress1, stress2);
+    }
+
+    //float3 gridPos = WorldToGrid(p);
+
+    //int3 baseCell = (int3)floor(gridPos);
+    //float3 f = frac(gridPos);
+
+    float3 gridPos = WorldToGrid(p);
+
+    ////////   G6.B Changes   ////////
+    // Quadratic B-Spline uses 3 nodes per axis.
+    // We shift by 0.5 so the particle is centered over a 3-node stencil.
+    int3 baseCell = (int3)floor(gridPos - 0.5);
+    float3 f = gridPos - (float3)baseCell;
+
+    float3 wx, wy, wz;
+    float3 dwx, dwy, dwz;
+
+    QuadraticBSplineWeights(f.x, wx, dwx);
+    QuadraticBSplineWeights(f.y, wy, dwy);
+    QuadraticBSplineWeights(f.z, wz, dwz);
+    ////////  End G6.B Changes   ////////
+
+    for (int dz = 0; dz <= 2; dz++)
+    {
+        for (int dy = 0; dy <= 2; dy++)
+        {
+            for (int dx = 0; dx <= 2; dx++)
+            {
+                int3 node = baseCell + int3(dx, dy, dz);
+
+                if (!IsValidCell(node))
+                    continue;
+
+//                float wx = dx == 0 ? (1.0 - f.x) : f.x;
+//                float wy = dy == 0 ? (1.0 - f.y) : f.y;
+//                float wz = dz == 0 ? (1.0 - f.z) : f.z;
+
+//                float w = wx * wy * wz;
+
+                ////////  G6.B Changes   ////////
+                float wxi = GetV3(wx, dx);
+                float wyi = GetV3(wy, dy);
+                float wzi = GetV3(wz, dz);
+
+                float w = wxi * wyi * wzi;
+                ////////  End G6.B Changes   ////////
+
+                int nodeIndex = FlattenGridIndex(node);
+
+                float3 nodeWorld = GridToWorld((float3)node);
+                float3 dpos = nodeWorld - p;
+
+                float3 affineVelocity = float3(0, 0, 0);
+
+                if (_EnableApicTransfer != 0)
+                    affineVelocity = ApplyAffineRows(c0, c1, c2, dpos) * _ApicP2GStrength;
+
+                float3 nodeContributionVelocity = v + affineVelocity;
+
+                float3 momentum = w * mass * nodeContributionVelocity;
+
+                if (_EnableMaterialStress != 0 && restVolume > 0.0)
+                {
+                    //float3 gradW = WeightGradientWorld(f, dx, dy, dz);
+  
+                    ////////  G6.B Changes   ////////
+                    float3 gradW = QuadraticWeightGradientWorld(
+                        wx, wy, wz,
+                        dwx, dwy, dwz,
+                        dx, dy, dz
+                    );
+                    ////////  End G6.B Changes   ////////
+
+                    // Momentum contribution from stress force over dt:
+                    // p += -dt * V0 * stress * gradW
+                    float3 stressForce = -_Dt * restVolume * MatVecRows(stress0, stress1, stress2, gradW) * _MaterialStressStrength;
+
+                    momentum += stressForce;
+                }
+
+                int mFixed = (int)round(w * mass * _MassFixedScale);
+
+                int pxFixed = (int)round(momentum.x * _MomentumFixedScale);
+                int pyFixed = (int)round(momentum.y * _MomentumFixedScale);
+                int pzFixed = (int)round(momentum.z * _MomentumFixedScale);
+
+                InterlockedAdd(_GridAccumInt[nodeIndex].x, mFixed);
+                InterlockedAdd(_GridAccumInt[nodeIndex].y, pxFixed);
+                InterlockedAdd(_GridAccumInt[nodeIndex].z, pyFixed);
+                InterlockedAdd(_GridAccumInt[nodeIndex].w, pzFixed);
+            }
+        }
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KGridUpdate(uint3 id : SV_DispatchThreadID)
+{
+    uint nodeIndex = id.x;
+
+    if (nodeIndex >= (uint)_GridNodeCount)
+        return;
+
+    int4 accum = _GridAccumInt[nodeIndex];
+
+    float mass = (float)accum.x / max((float)_MassFixedScale, 1.0);
+
+    if (mass <= 1e-8)
+    {
+        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    float3 momentum = float3(
+        (float)accum.y / max((float)_MomentumFixedScale, 1.0),
+        (float)accum.z / max((float)_MomentumFixedScale, 1.0),
+        (float)accum.w / max((float)_MomentumFixedScale, 1.0)
+    );
+
+    float3 v = momentum / mass;
+
+    v += _Gravity * _Dt;
+
+    if (_VelocityDampingPerSecond > 0.0)
+    {
+        float damping = exp(-_VelocityDampingPerSecond * _Dt);
+        v *= damping;
+    }
+
+    uint gx = (uint)_GridResolution.x;
+    uint gy = (uint)_GridResolution.y;
+    uint xy = gx * gy;
+
+    uint z = nodeIndex / xy;
+    uint rem = nodeIndex - z * xy;
+    uint y = rem / gx;
+    uint x = rem - y * gx;
+
+    if (_EnableBoxBoundary != 0)
+    {
+        if (x <= 1u && v.x < 0) v.x = -v.x * _BoundaryDamping;
+        if (x >= gx - 2u && v.x > 0) v.x = -v.x * _BoundaryDamping;
+
+        if (y <= 1u && v.y < 0) v.y = -v.y * _BoundaryDamping;
+        if (y >= gy - 2u && v.y > 0) v.y = -v.y * _BoundaryDamping;
+
+        uint gz = (uint)_GridResolution.z;
+
+        if (z <= 1u && v.z < 0) v.z = -v.z * _BoundaryDamping;
+        if (z >= gz - 2u && v.z > 0) v.z = -v.z * _BoundaryDamping;
+    }
+
+    v = ClampSpeed(v);
+
+    _GridVelocityMass[nodeIndex] = float4(v, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 pr = _ParticlePositionRadius[particleIndex];
+    float4 vm = _ParticleVelocityMass[particleIndex];
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 p = pr.xyz;
+    float radius = pr.w;
+
+    float3 oldV = vm.xyz;
+    float mass = vm.w;
+
+    //float3 gridPos = WorldToGrid(p);
+    //int3 baseCell = (int3)floor(gridPos);
+    //float3 f = frac(gridPos);
+
+    //      G6.B        //
+    float3 gridPos = WorldToGrid(p);
+
+    int3 baseCell = (int3)floor(gridPos - 0.5);
+    float3 f = gridPos - (float3)baseCell;
+
+    float3 wx, wy, wz;
+    float3 dwx, dwy, dwz;
+
+    QuadraticBSplineWeights(f.x, wx, dwx);
+    QuadraticBSplineWeights(f.y, wy, dwy);
+    QuadraticBSplineWeights(f.z, wz, dwz);
+    //      End G6.B        //
+
+    float3 gridVelocity = float3(0, 0, 0);
+    float weightSum = 0.0;
+
+    float3 b0 = float3(0, 0, 0);
+    float3 b1 = float3(0, 0, 0);
+    float3 b2 = float3(0, 0, 0);
+
+    for (int dz = 0; dz <= 2; dz++)
+    {
+        for (int dy = 0; dy <= 2; dy++)
+        {
+            for (int dx = 0; dx <= 2; dx++)
+            {
+                int3 node = baseCell + int3(dx, dy, dz);
+
+                if (!IsValidCell(node))
+                    continue;
+
+                //float wx = dx == 0 ? (1.0 - f.x) : f.x;
+                //float wy = dy == 0 ? (1.0 - f.y) : f.y;
+                //float wz = dz == 0 ? (1.0 - f.z) : f.z;
+
+                //float w = wx * wy * wz;
+                
+                //      G6.B        //
+                float wxi = GetV3(wx, dx);
+                float wyi = GetV3(wy, dy);
+                float wzi = GetV3(wz, dz);
+
+                float w = wxi * wyi * wzi;
+                //      End G6.B        //
+
+                int nodeIndex = FlattenGridIndex(node);
+
+                float4 gv = _GridVelocityMassRead[nodeIndex];
+
+                if (gv.w <= 1e-8)
+                    continue;
+
+                float3 nodeVelocity = gv.xyz;
+
+                gridVelocity += w * nodeVelocity;
+                weightSum += w;
+
+                if (_EnableApicTransfer != 0)
+                {
+                    float3 nodeWorld = GridToWorld((float3)node);
+                    float3 dpos = nodeWorld - p;
+
+                    b0 += w * nodeVelocity.x * dpos;
+                    b1 += w * nodeVelocity.y * dpos;
+                    b2 += w * nodeVelocity.z * dpos;
+                }
+            }
+        }
+    }
+
+    float3 newV = oldV;
+
+    if (weightSum > 1e-6)
+    {
+        gridVelocity /= weightSum;
+        newV = lerp(oldV, gridVelocity, _PicBlend);
+    }
+
+    newV = ClampSpeed(newV);
+
+    float3 c0Old = _ParticleAffineC0[particleIndex].xyz;
+    float3 c1Old = _ParticleAffineC1[particleIndex].xyz;
+    float3 c2Old = _ParticleAffineC2[particleIndex].xyz;
+
+    float3 c0New = c0Old;
+    float3 c1New = c1Old;
+    float3 c2New = c2Old;
+
+    if (_EnableApicTransfer != 0 && weightSum > 1e-6)
+    {
+        c0New = b0 * _ApicDInverse;
+        c1New = b1 * _ApicDInverse;
+        c2New = b2 * _ApicDInverse;
+
+        c0New = lerp(c0Old, c0New, _ApicG2PStrength);
+        c1New = lerp(c1Old, c1New, _ApicG2PStrength);
+        c2New = lerp(c2Old, c2New, _ApicG2PStrength);
+
+        float affineKeep = saturate(1.0 - _AffineDamping);
+
+        c0New *= affineKeep;
+        c1New *= affineKeep;
+        c2New *= affineKeep;
+
+        c0New = ClampVector3(c0New, _MaxAffineMagnitude);
+        c1New = ClampVector3(c1New, _MaxAffineMagnitude);
+        c2New = ClampVector3(c2New, _MaxAffineMagnitude);
+    }
+
+    // Update deformation gradient: F_new = (I + dt * C) F_old
+    //float3 f0Old = _ParticleF0[particleIndex].xyz;
+    //float3 f1Old = _ParticleF1[particleIndex].xyz;
+    //float3 f2Old = _ParticleF2[particleIndex].xyz;
+
+    //float3 a0 = float3(1, 0, 0) + _Dt * c0New;
+    //float3 a1 = float3(0, 1, 0) + _Dt * c1New;
+    //float3 a2 = float3(0, 0, 1) + _Dt * c2New;
+
+    //float3 f0New = RowTimesMatrix(a0, f0Old, f1Old, f2Old);
+    //float3 f1New = RowTimesMatrix(a1, f0Old, f1Old, f2Old);
+    //float3 f2New = RowTimesMatrix(a2, f0Old, f1Old, f2Old);
+
+    //f0New = ClampVector3(f0New, _MaxDeformationGradientValue);
+    //f1New = ClampVector3(f1New, _MaxDeformationGradientValue);
+    //f2New = ClampVector3(f2New, _MaxDeformationGradientValue);
+
+    //float J = DeterminantRows(f0New, f1New, f2New);
+    //J = clamp(J, _MinJ, _MaxJ);
+
+    //float4 volumeJ = _ParticleVolumeJ[particleIndex];
+    //volumeJ.y = J;
+
+    p += newV * _Dt;
+
+    if (_EnableBoxBoundary != 0)
+    {
+        float3 minP = _GridOrigin + float3(radius, radius, radius);
+        float3 maxP = _GridOrigin +
+                      float3(_GridResolution) * _CellSize -
+                      float3(radius, radius, radius);
+
+        if (p.x < minP.x) { p.x = minP.x; newV.x = abs(newV.x) * _BoundaryDamping; }
+        if (p.x > maxP.x) { p.x = maxP.x; newV.x = -abs(newV.x) * _BoundaryDamping; }
+
+        if (p.y < minP.y) { p.y = minP.y; newV.y = abs(newV.y) * _BoundaryDamping; }
+        if (p.y > maxP.y) { p.y = maxP.y; newV.y = -abs(newV.y) * _BoundaryDamping; }
+
+        if (p.z < minP.z) { p.z = minP.z; newV.z = abs(newV.z) * _BoundaryDamping; }
+        if (p.z > maxP.z) { p.z = maxP.z; newV.z = -abs(newV.z) * _BoundaryDamping; }
+    }
+
+    _ParticlePositionRadius[particleIndex] = float4(p, radius);
+    _ParticleVelocityMass[particleIndex] = float4(newV, mass);
+
+    _ParticleAffineC0[particleIndex] = float4(c0New, 0);
+    _ParticleAffineC1[particleIndex] = float4(c1New, 0);
+    _ParticleAffineC2[particleIndex] = float4(c2New, 0);
+
+    //_ParticleF0[particleIndex] = float4(f0New, 0);
+    //_ParticleF1[particleIndex] = float4(f1New, 0);
+    //_ParticleF2[particleIndex] = float4(f2New, 0);
+
+    //_ParticleVolumeJ[particleIndex] = volumeJ;
+}
+
+
+/// /// /// /// /// /// /// /// G8.A Changes  /// /// /// /// /// /// /// /// /// ///
+
+float3 TransformPoint(float4x4 m, float3 p)
+{
+    return mul(m, float4(p, 1.0)).xyz;
+}
+
+float3 TransformVector(float4x4 m, float3 v)
+{
+    return mul(m, float4(v, 0.0)).xyz;
+}
+
+float BucketOuterRadiusAtY(float y)
+{
+    float halfH = 0.5 * _BucketHeight;
+
+    float t = saturate((y + halfH) / max(_BucketHeight, 1e-6));
+
+    // shapeType:
+    // 0 = Cylinder
+    // 1 = TaperedCylinder
+    if (_BucketShapeType == 0)
+        return _BucketTopRadius;
+
+    return lerp(_BucketBottomRadius, _BucketTopRadius, t);
+}
+
+float BucketInnerRadiusAtY(float y)
+{
+    return max(
+        BucketOuterRadiusAtY(y) - _BucketWallThickness,
+        0.001
+    );
+}
+
+float2 SafeNormalize2(float2 v)
+{
+    float len = length(v);
+    if (len < 1e-6)
+        return float2(1, 0);
+
+    return v / len;
+}
+
+float3 RemoveNormalComponent(float3 v, float3 n)
+{
+    return v - dot(v, n) * n;
+}
+
+float3 ApplyCollisionVelocity(float3 vLocal, float3 normalLocal)
+{
+    normalLocal = normalize(normalLocal);
+
+    float vn = dot(vLocal, normalLocal);
+    float3 vt = vLocal - vn * normalLocal;
+
+    // If velocity goes into the wall, reflect/dampen normal part.
+    if (vn < 0.0)
+    {
+        vn = -vn * _BucketRestitution;
+    }
+
+    vt *= saturate(1.0 - _BucketFriction);
+
+    return vt + vn * normalLocal;
+}
+
+bool IsInsideBottomHoleRegion(float3 localP, float radius)
+{
+    float2 p = localP.xz;
+    float2 c = _HoleLocalCenter.xz;
+
+    float r =
+        _HoleRadius +
+        _HoleRadialPadding +
+        radius;
+
+    float radialOk = length(p - c) <= r;
+
+    float bottomY = -0.5 * _BucketHeight;
+
+    float heightOk = abs(localP.y - bottomY) <= max(_HoleNearHeight, radius * 2.0);
+
+    return radialOk && heightOk;
+}
+
+/// /// /// /// /// /// /// ///     G8.B Changes  /// /// /// /// /// /// /// /// /// ///
+
+float3 ClampVectorLength(float3 v, float maxLen)
+{
+    float len = length(v);
+
+    if (len > maxLen && len > 1e-6)
+        return v / len * maxLen;
+
+    return v;
+}
+
+float3 ComputeBucketWallVelocityWorld(float3 pWorld)
+{
+    if (_EnableMovingBucketBoundaryVelocity == 0)
+        return float3(0, 0, 0);
+
+    // Bucket center/origin in world.
+    float3 bucketCenterWorld = TransformPoint(_BucketLocalToWorld, float3(0, 0, 0));
+
+    float3 r = pWorld - bucketCenterWorld;
+
+    float3 wallVelocity =
+        _BucketLinearVelocityWorld +
+        cross(_BucketAngularVelocityWorld, r);
+
+    wallVelocity *= saturate(_BucketBoundaryVelocityStrength);
+
+    wallVelocity = ClampVectorLength(
+        wallVelocity,
+        _MaxBucketBoundaryVelocity
+    );
+
+    return wallVelocity;
+}
+
+float3 ComputeBucketWallVelocityLocal(float3 pLocal)
+{
+    float3 pWorld = TransformPoint(_BucketLocalToWorld, pLocal);
+    float3 wallVelocityWorld = ComputeBucketWallVelocityWorld(pWorld);
+
+    return TransformVector(_BucketWorldToLocal, wallVelocityWorld);
+}
+
+float3 ApplyCollisionVelocityAgainstMovingWall(
+    float3 particleVelocityLocal,
+    float3 normalLocal,
+    float3 wallVelocityLocal)
+{
+    float3 relativeVelocity =
+        particleVelocityLocal -
+        wallVelocityLocal;
+
+    relativeVelocity =
+        ApplyCollisionVelocity(relativeVelocity, normalLocal);
+
+    return relativeVelocity + wallVelocityLocal;
+}
+/// /// /// /// /// /// /// ///   End G8.B Changes  /// /// /// /// /// /// /// /// /// ///
+
+
+[numthreads(256, 1, 1)]
+void KBucketCollision(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableGpuBucketCollision == 0 || _UseRealBucketCollision == 0)
+        return;
+
+    float4 pr = _ParticlePositionRadius[particleIndex];
+    float4 vm = _ParticleVelocityMass[particleIndex];
+    float4 stateAgeId = _ParticleStateAgeId[particleIndex];
+
+    int state = (int)round(stateAgeId.x);
+
+    // Only collide fluid-domain particles for now.
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 pWorld = pr.xyz;
+    float radius = pr.w;
+    float3 vWorld = vm.xyz;
+
+    float3 pLocal = TransformPoint(_BucketWorldToLocal, pWorld);
+    float3 vLocal = TransformVector(_BucketWorldToLocal, vWorld);
+
+    float halfH = 0.5 * _BucketHeight;
+    float bottomY = -halfH;
+    float topY = halfH;
+
+    bool collided = false;
+
+    // 1) Bottom hole region classification
+    bool nearBottomHole = false;
+
+    if (_ClassifyBottomHoleRegion != 0)
+    {
+        nearBottomHole = IsInsideBottomHoleRegion(pLocal, radius);
+
+        if (nearBottomHole)
+        {
+            // FluidParticleState.NearHole = 3
+            stateAgeId.x = 3.0;
+        }
+    }
+
+    // 2) Side wall collision
+    float innerRadius =
+        BucketInnerRadiusAtY(pLocal.y) -
+        _BucketCollisionPadding -
+        radius;
+
+    innerRadius = max(innerRadius, radius);
+
+    float2 radial = pLocal.xz;
+    float radialLen = length(radial);
+
+    if (radialLen > innerRadius)
+    {
+        float2 n2 = SafeNormalize2(radial);
+
+        pLocal.xz = n2 * innerRadius;
+
+        // Normal points from wall toward inside.
+        float3 normalLocal = float3(-n2.x, 0.0, -n2.y);
+
+        float3 wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+
+        vLocal = ApplyCollisionVelocityAgainstMovingWall(
+            vLocal,
+            normalLocal,
+            wallVelocityLocal
+        );
+
+        collided = true;
+
+        // FluidParticleState.NearBoundary = 2, but do not overwrite NearHole.
+        if (!nearBottomHole)
+            stateAgeId.x = 2.0;
+    }
+
+    // 3) Bottom collision
+    float minY = bottomY + _BucketCollisionPadding + radius;
+
+    bool canPassThroughHole =
+        _EnableBottomHoleOpening != 0 &&
+        nearBottomHole;
+
+    if (!canPassThroughHole && pLocal.y < minY)
+    {
+        pLocal.y = minY;
+
+        float3 normalLocal = float3(0, 1, 0);
+
+        float3 wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+
+        vLocal = ApplyCollisionVelocityAgainstMovingWall(
+            vLocal,
+            normalLocal,
+            wallVelocityLocal
+        );
+
+        collided = true;
+
+        if (!nearBottomHole)
+            stateAgeId.x = 2.0;
+    }
+
+    // 4) Top handling
+    float maxY = topY - _BucketTopPadding - radius;
+
+    if (_BucketTopMode == 1)
+    {
+        // Temporary lid for stability/testing.
+        if (pLocal.y > maxY)
+        {
+            pLocal.y = maxY;
+
+            float3 normalLocal = float3(0, -1, 0);
+
+            float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
+
+            vLocal = ApplyCollisionVelocityAgainstMovingWall(vLocal, normalLocal, wallVelocityLocal);
+
+            collided = true;
+
+            if (!nearBottomHole)
+                stateAgeId.x = 2.0;
+        }
+    }
+    else if (_BucketTopMode == 2)
+    {
+        // Mark as spilled if it exits above the top.
+        if (pLocal.y > topY + radius)
+        {
+            // FluidParticleState.Spilled = 7
+            stateAgeId.x = 7.0;
+        }
+    }
+
+    // 5) If no special state, keep inside
+    if (!collided && !nearBottomHole && state == 2)
+    {
+        // Return NearBoundary to InsideFluid when no longer colliding.
+        stateAgeId.x = 1.0;
+    }
+
+    float3 correctedWorld = TransformPoint(_BucketLocalToWorld, pLocal);
+    float3 correctedVelocityWorld = TransformVector(_BucketLocalToWorld, vLocal);
+
+    _ParticlePositionRadius[particleIndex] = float4(correctedWorld, radius);
+    _ParticleVelocityMass[particleIndex] = float4(correctedVelocityWorld, vm.w);
+    _ParticleStateAgeId[particleIndex] = stateAgeId;
+}
+
+/// /// /// /// /// /// /// /// End G8.A Changes  /// /// /// /// /// /// /// /// /// ///
+
+[numthreads(256, 1, 1)]
+void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 c0New = _ParticleAffineC0Read[particleIndex].xyz;
+    float3 c1New = _ParticleAffineC1Read[particleIndex].xyz;
+    float3 c2New = _ParticleAffineC2Read[particleIndex].xyz;
+
+    float3 f0Old = _ParticleF0[particleIndex].xyz;
+    float3 f1Old = _ParticleF1[particleIndex].xyz;
+    float3 f2Old = _ParticleF2[particleIndex].xyz;
+
+    float3 a0 = float3(1, 0, 0) + _Dt * c0New;
+    float3 a1 = float3(0, 1, 0) + _Dt * c1New;
+    float3 a2 = float3(0, 0, 1) + _Dt * c2New;
+
+    float3 f0New = RowTimesMatrix(a0, f0Old, f1Old, f2Old);
+    float3 f1New = RowTimesMatrix(a1, f0Old, f1Old, f2Old);
+    float3 f2New = RowTimesMatrix(a2, f0Old, f1Old, f2Old);
+
+    f0New = ClampVector3(f0New, _MaxDeformationGradientValue);
+    f1New = ClampVector3(f1New, _MaxDeformationGradientValue);
+    f2New = ClampVector3(f2New, _MaxDeformationGradientValue);
+
+    float J = DeterminantRows(f0New, f1New, f2New);
+    J = clamp(J, _MinJ, _MaxJ);
+
+    float4 volumeJ = _ParticleVolumeJ[particleIndex];
+    volumeJ.y = J;
+
+    _ParticleF0[particleIndex] = float4(f0New, 0);
+    _ParticleF1[particleIndex] = float4(f1New, 0);
+    _ParticleF2[particleIndex] = float4(f2New, 0);
+    _ParticleVolumeJ[particleIndex] = volumeJ;
+}

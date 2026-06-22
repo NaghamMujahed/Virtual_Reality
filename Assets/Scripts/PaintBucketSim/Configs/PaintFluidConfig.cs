@@ -65,6 +65,17 @@ namespace PaintBucketSim.Configs
         [Min(1000)]
         public int highParticleWarningThreshold = 50000;
 
+        [Header("Render LOD")]
+        public bool enableRenderLod = true;
+
+        [Tooltip("Maximum number of particles drawn by the debug renderer.")]
+        [Min(100)]
+        public int maxRenderedParticles = 3000;
+
+        [Tooltip("Draw every Nth particle. 1 means draw all particles.")]
+        [Min(1)]
+        public int renderStride = 1;
+
         private void OnValidate()
         {
             if (targetParticleCount < 1)
@@ -80,6 +91,12 @@ namespace PaintBucketSim.Configs
 
             if (wallClearanceMeters < 0.0f)
                 wallClearanceMeters = 0.0f;
+
+            if (maxRenderedParticles < 100)
+                maxRenderedParticles = 100;
+
+            if (renderStride < 1)
+                renderStride = 1;
         }
     }
 }

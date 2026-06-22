@@ -22,7 +22,7 @@ MonoBehaviour:
   artificialPressureDeltaQRatio: 0.3
   velocityDampingPerSecond: 0.1
   maxParticleSpeed: 6
-  useBoundaryParticleCollision: 1
+  useBoundaryParticleCollision: 0
   boundaryCollisionStrength: 0.3
   boundaryParticleRadiusMultiplier: 0.22
   useAnalyticBucketProjection: 1
@@ -33,3 +33,14 @@ MonoBehaviour:
   hashCapacityMultiplier: 2
   maxPositionCorrectionPerIteration: 0.025
   fluidGravityScale: 1
+  rebuildFluidHashEveryIteration: 0
+  diagnosticsUpdateInterval: 8
+  enableWarmupOnInitialize: 1
+  warmupSteps: 20
+  warmupGravityScale: 0.1
+  enableXsphViscosity: 1
+  xsphStrength: 0.08
+  maxXsphVelocityChange: 1.5
+  topBoundaryMode: 1
+  topBoundaryPaddingMeters: 0.02
+  preventProjectionEnergyInjection: 1

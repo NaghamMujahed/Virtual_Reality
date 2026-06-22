@@ -1,0 +1,51 @@
+﻿#pragma kernel KDebugColorByState
+
+RWStructuredBuffer<float4> _ParticleColor;
+StructuredBuffer<float4> _ParticleStateAgeId;
+
+int _ParticleCount;
+
+float4 _InsideColor;
+float4 _NearHoleColor;
+float4 _AirborneColor;
+float4 _DepositedColor;
+float4 _FallbackColor;
+
+[numthreads(256, 1, 1)]
+void KDebugColorByState(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeId[index];
+
+    int state = (int)round(stateAgeId.x);
+
+    // Must match FluidParticleState enum:
+    // Inactive=0, InsideFluid=1, NearBoundary=2, NearHole=3,
+    // Jet=4, Emitted=5, Airborne=6, Spilled=7,
+    // Deposited=8, Absorbed=9, Lost=10
+
+    float4 color = _FallbackColor;
+
+    if (state == 1 || state == 2)
+    {
+        color = _InsideColor;
+    }
+    else if (state == 3)
+    {
+        color = _NearHoleColor;
+    }
+    else if (state == 4 || state == 5 || state == 6 || state == 7)
+    {
+        color = _AirborneColor;
+    }
+    else if (state == 8 || state == 9)
+    {
+        color = _DepositedColor;
+    }
+
+    _ParticleColor[index] = color;
+}

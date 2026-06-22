@@ -56,10 +56,36 @@ namespace PaintBucketSim.Systems.Fluid
 
         private void DrawParticles()
         {
+            int particleCount = paintFluidSystem.ParticleCount;
+
+            int stride = 1;
+            int maxRendered = particleCount;
+
+            if (paintFluidConfig != null && paintFluidConfig.enableRenderLod)
+            {
+                stride = Mathf.Max(1, paintFluidConfig.renderStride);
+                maxRendered = Mathf.Min(
+                    particleCount,
+                    Mathf.Max(1, paintFluidConfig.maxRenderedParticles)
+                );
+
+                if (particleCount > maxRendered)
+                {
+                    stride = Mathf.Max(
+                        stride,
+                        Mathf.CeilToInt((float)particleCount / maxRendered)
+                    );
+                }
+            }
+
+            int rendered = 0;
             int batchCount = 0;
 
-            for (int i = 0; i < paintFluidSystem.ParticleCount; i++)
+            for (int i = 0; i < particleCount; i += stride)
             {
+                if (rendered >= maxRendered)
+                    break;
+
                 Vector3 p = paintFluidSystem.GetParticlePosition(i);
                 float r = paintFluidSystem.GetParticleRadius(i);
 
@@ -77,6 +103,7 @@ namespace PaintBucketSim.Systems.Fluid
                 );
 
                 batchCount++;
+                rendered++;
 
                 if (batchCount == _batchMatrices.Length)
                 {

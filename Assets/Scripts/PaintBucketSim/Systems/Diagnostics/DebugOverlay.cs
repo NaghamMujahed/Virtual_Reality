@@ -7,6 +7,7 @@ using UnityEngine.InputSystem;
 using PaintBucketSim.Systems.Coupling;
 using PaintBucketSim.Systems.Boundary;
 using PaintBucketSim.Systems.Fluid;
+using PaintBucketSim.Systems.Fluid.GPU;
 
 namespace PaintBucketSim.Systems.Diagnostics
 {
@@ -23,6 +24,7 @@ namespace PaintBucketSim.Systems.Diagnostics
         [SerializeField] private RopeBucketCouplingSystem ropeBucketCouplingSystem;
         [SerializeField] private BoundarySystem boundarySystem;
         [SerializeField] private PaintFluidSystem paintFluidSystem;
+        [SerializeField] private GpuFluidBufferSet gpuFluidBufferSet;
 
         [SerializeField] private bool visible = true;
 
@@ -31,6 +33,8 @@ namespace PaintBucketSim.Systems.Diagnostics
         [SerializeField] private Color textColor = Color.white;
         [SerializeField] private Vector2 panelPosition = new Vector2(15, 15);
         [SerializeField] private Vector2 panelSize = new Vector2(430, 220);
+
+        [SerializeField] private GpuParticleIndirectRenderer gpuParticleRenderer;
 
         private GUIStyle _labelStyle;
         private GUIStyle _boxStyle;
@@ -56,6 +60,12 @@ namespace PaintBucketSim.Systems.Diagnostics
 
             if (paintFluidSystem == null)
                 paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
+
+            if (gpuParticleRenderer == null)
+                gpuParticleRenderer = FindFirstObjectByType<GpuParticleIndirectRenderer>();
+
+            if (gpuFluidBufferSet == null)
+                gpuFluidBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
         }
 
         private void Update()
@@ -181,21 +191,104 @@ namespace PaintBucketSim.Systems.Diagnostics
 
             if (paintFluidSystem != null && paintFluidSystem.IsInitialized)
             {
-                FluidDiagnostics fd = paintFluidSystem.Diagnostics;
+                FluidSolverStats ss = paintFluidSystem.SolverStats;
 
                 GUILayout.Space(8);
-                GUILayout.Label("Paint Fluid Diagnostics", _labelStyle);
-                GUILayout.Label($"Particles: {fd.particleCount} / {fd.capacity}", _labelStyle);
-                GUILayout.Label($"Particle Radius: {fd.particleRadius:F5} m", _labelStyle);
-                GUILayout.Label($"Particle Spacing: {fd.particleSpacing:F5} m", _labelStyle);
-                GUILayout.Label($"Total Mass: {fd.totalMass:F4} kg", _labelStyle);
-                GUILayout.Label($"Inside Mass: {fd.insideMass:F4} kg", _labelStyle);
-                GUILayout.Label($"Airborne Mass: {fd.airborneMass:F4} kg", _labelStyle);
-                GUILayout.Label($"Deposited Mass: {fd.depositedMass:F4} kg", _labelStyle);
-                GUILayout.Label($"Lost Mass: {fd.lostMass:F4} kg", _labelStyle);
-                GUILayout.Label($"Fill Fraction: {fd.fillFraction:F2}", _labelStyle);
-                GUILayout.Label($"Estimated Fill Volume: {fd.estimatedFillVolume:F5} m³", _labelStyle);
-                GUILayout.Label($"COM World: {fd.centerOfMassWorld}", _labelStyle);
+                GUILayout.Label("Fluid Solver Architecture", _labelStyle);
+                GUILayout.Label($"Solver: {ss.solverType}", _labelStyle);
+                GUILayout.Label($"Status: {ss.status}", _labelStyle);
+                GUILayout.Label($"Particles: {ss.particleCount}", _labelStyle);
+                GUILayout.Label($"Iterations: {ss.solverIterations}", _labelStyle);
+                GUILayout.Label($"Step Time: {ss.lastStepMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Density: {ss.lastDensitySolveMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Correction: {ss.lastCorrectionMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Boundary: {ss.lastBoundaryMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"XSPH: {ss.lastViscosityMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Fluid Hash Builds: {ss.fluidHashBuilds}", _labelStyle);
+                GUILayout.Label($"Boundary Hash Builds: {ss.boundaryHashBuilds}", _labelStyle);
+                GUILayout.Label($"Boundary Particles: {ss.usedBoundaryParticles}", _labelStyle);
+                GUILayout.Label($"Analytic Projection: {ss.usedAnalyticProjection}", _labelStyle);
+                GUILayout.Label($"XSPH Viscosity: {ss.usedXsphViscosity}", _labelStyle);
+
+                GUILayout.Label($"GPU Grid: {ss.gpuGridResolutionX} x {ss.gpuGridResolutionY} x {ss.gpuGridResolutionZ}", _labelStyle);
+                GUILayout.Label($"GPU Grid Nodes: {ss.gpuGridNodeCount}", _labelStyle);
+                GUILayout.Label($"GPU Cell Size: {ss.gpuCellSizeMeters:F4} m", _labelStyle);
+                GUILayout.Label($"GPU Dispatch Count: {ss.gpuDispatchCount}", _labelStyle);
+
+                FluidParticlePoolStats ps = paintFluidSystem.PoolStats;
+
+                GUILayout.Space(8);
+                GUILayout.Label("Particle Pool / States", _labelStyle);
+                GUILayout.Label($"Active: {ps.activeCount} / {ps.capacity}", _labelStyle);
+                GUILayout.Label($"Inactive: {ps.inactiveCount}", _labelStyle);
+                GUILayout.Label($"Usage: {(ps.poolUsage01 * 100.0f):F1} %", _labelStyle);
+                GUILayout.Label($"Next Particle ID: {ps.nextParticleId}", _labelStyle);
+
+                GUILayout.Label($"Inside: {ps.insideFluidCount}", _labelStyle);
+                GUILayout.Label($"Near Boundary: {ps.nearBoundaryCount}", _labelStyle);
+                GUILayout.Label($"Near Hole: {ps.nearHoleCount}", _labelStyle);
+
+                GUILayout.Label($"Jet: {ps.jetCount}", _labelStyle);
+                GUILayout.Label($"Emitted: {ps.emittedCount}", _labelStyle);
+                GUILayout.Label($"Airborne: {ps.airborneCount}", _labelStyle);
+                GUILayout.Label($"Spilled: {ps.spilledCount}", _labelStyle);
+
+                GUILayout.Label($"Deposited: {ps.depositedCount}", _labelStyle);
+                GUILayout.Label($"Absorbed: {ps.absorbedCount}", _labelStyle);
+                GUILayout.Label($"Lost: {ps.lostCount}", _labelStyle);
+            }
+
+            if (gpuFluidBufferSet != null)
+            {
+                GpuFluidBufferStats bs = gpuFluidBufferSet.Stats;
+
+                GUILayout.Space(8);
+                GUILayout.Label("GPU Fluid Buffers", _labelStyle);
+                GUILayout.Label($"Initialized: {bs.initialized}", _labelStyle);
+                GUILayout.Label($"Enabled: {bs.enabled}", _labelStyle);
+                GUILayout.Label($"Capacity: {bs.capacity}", _labelStyle);
+                GUILayout.Label($"Uploaded: {bs.uploadedParticles}", _labelStyle);
+                GUILayout.Label($"Upload Stride: {bs.uploadStride}", _labelStyle);
+                GUILayout.Label($"Upload Frame: {bs.uploadFrame}", _labelStyle);
+                GUILayout.Label($"CPU Upload: {bs.cpuUploadMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Compute Post: {bs.computePostProcessMilliseconds:F3} ms", _labelStyle);
+
+                GUILayout.Label($"PositionRadius Buffer: {bs.positionRadiusBufferReady}", _labelStyle);
+                GUILayout.Label($"VelocityMass Buffer: {bs.velocityMassBufferReady}", _labelStyle);
+                GUILayout.Label($"Color Buffer: {bs.colorBufferReady}", _labelStyle);
+                GUILayout.Label($"StateAgeId Buffer: {bs.stateAgeIdBufferReady}", _labelStyle);
+
+                GUILayout.Label($"Compute Post Enabled: {bs.computePostProcessEnabled}", _labelStyle);
+                GUILayout.Label($"State Debug Colors: {bs.debugColorByStateEnabled}", _labelStyle);
+
+                //////////////////      G5 Changes      //////////////////
+                GUILayout.Label($"Affine C0 Buffer: {bs.affineC0BufferReady}", _labelStyle);
+                GUILayout.Label($"Affine C1 Buffer: {bs.affineC1BufferReady}", _labelStyle);
+                GUILayout.Label($"Affine C2 Buffer: {bs.affineC2BufferReady}", _labelStyle);
+                //////////////////      End G5 Changes      //////////////////
+
+                //////////////////      G6.A Changes      //////////////////
+                GUILayout.Label($"Volume/J Buffer: {bs.volumeJBufferReady}", _labelStyle);
+                GUILayout.Label($"F0 Buffer: {bs.deformationF0BufferReady}", _labelStyle);
+                GUILayout.Label($"F1 Buffer: {bs.deformationF1BufferReady}", _labelStyle);
+                GUILayout.Label($"F2 Buffer: {bs.deformationF2BufferReady}", _labelStyle);
+                //////////////////      End G6.A Changes      //////////////////
+            }
+
+            if (gpuParticleRenderer != null)
+            {
+                GpuParticleRenderStats gs = gpuParticleRenderer.Stats;
+
+                GUILayout.Space(8);
+                GUILayout.Label("GPU Particle Rendering", _labelStyle);
+                GUILayout.Label($"Initialized: {gs.initialized}", _labelStyle);
+                GUILayout.Label($"Enabled: {gs.enabled}", _labelStyle);
+                GUILayout.Label($"Uploaded: {gs.uploadedParticles} / {gs.maxRenderedParticles}", _labelStyle);
+                GUILayout.Label($"Render Stride: {gs.renderStride}", _labelStyle);
+                GUILayout.Label($"Upload Frame: {gs.uploadFrame}", _labelStyle);
+                GUILayout.Label($"CPU Upload: {gs.cpuUploadMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"CPU Submit: {gs.cpuRenderSubmitMilliseconds:F3} ms", _labelStyle);
+                GUILayout.Label($"Per Particle Color: {gs.usingPerParticleColor}", _labelStyle);
             }
 
             GUILayout.Space(5);

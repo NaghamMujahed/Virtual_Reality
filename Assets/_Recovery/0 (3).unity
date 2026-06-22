@@ -2671,8 +2671,6 @@ GameObject:
   - component: {fileID: 303841550}
   - component: {fileID: 303841553}
   - component: {fileID: 303841552}
-  - component: {fileID: 303841555}
-  - component: {fileID: 303841554}
   m_Layer: 0
   m_Name: SimulationRoot
   m_TagString: Untagged
@@ -2871,13 +2869,11 @@ MonoBehaviour:
   ropeBucketCouplingSystem: {fileID: 303841546}
   boundarySystem: {fileID: 303841551}
   paintFluidSystem: {fileID: 303841553}
-  gpuFluidBufferSet: {fileID: 0}
   visible: 1
   fontSize: 13
   textColor: {r: 1, g: 1, b: 1, a: 1}
   panelPosition: {x: 10, y: 10}
   panelSize: {x: 250, y: 630}
-  gpuParticleRenderer: {fileID: 0}
 --- !u!114 &303841549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2934,7 +2930,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 303841542}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 215053f295d435945aeef695c7a3a438, type: 3}
   m_Name: 
@@ -2959,43 +2955,8 @@ MonoBehaviour:
   paintMaterialConfig: {fileID: 11400000, guid: c5701e834e650f54ca196e6c7b34ae02, type: 2}
   paintFluidConfig: {fileID: 11400000, guid: c4ed9a5c010f8a54fb178df0630c4acc, type: 2}
   pbfSolverConfig: {fileID: 11400000, guid: 37d9a74df1f56a14ebff6b3d8d5c29be, type: 2}
-  gpuMpmSolverConfig: {fileID: 11400000, guid: 1962c0c1366127a41808a042cf33b435, type: 2}
-  gpuFluidBufferSet: {fileID: 303841555}
   bucketSystem: {fileID: 1657576619}
   boundarySystem: {fileID: 303841551}
---- !u!114 &303841554
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 303841542}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 70f3f87a629a04e4b9b2a20c6ff7fe91, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Fluid.GpuParticleIndirectRenderer
-  gpuBufferSet: {fileID: 303841555}
-  renderConfig: {fileID: 11400000, guid: 81255d109c025f74986d6c5ca990e399, type: 2}
-  particleMesh: {fileID: 0}
-  particleMaterial: {fileID: 2100000, guid: 2ba226fc00a7bdd45aae4169d0680c5f, type: 2}
-  shadowCastingMode: 0
-  receiveShadows: 0
---- !u!114 &303841555
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 303841542}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: da9d4a30974c77647a6f4a2f4ad8825a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Fluid.GPU.GpuFluidBufferSet
-  paintFluidSystem: {fileID: 303841553}
-  bufferConfig: {fileID: 11400000, guid: a43ef09a2df66784d98d24e3a4346501, type: 2}
-  utilityCompute: {fileID: 7200000, guid: 075982d082ce28e4bb033c16d3b385f7, type: 3}
 --- !u!1 &308206944
 GameObject:
   m_ObjectHideFlags: 0

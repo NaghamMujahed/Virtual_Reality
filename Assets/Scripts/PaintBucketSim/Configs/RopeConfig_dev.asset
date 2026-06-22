@@ -34,7 +34,7 @@ MonoBehaviour:
   exponentialDampingPerSecond: 0.08
   segmentDampingRatio: 0.08
   enableBreakByTension: 0
-  breakTensionNewton: 240
+  breakTensionNewton: 340
   enableBreakByStrain: 1
   breakStrain: 0.35
   pivotMotionMode: 0
