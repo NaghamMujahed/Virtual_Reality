@@ -1,0 +1,340 @@
+// Cosserat Rod simulation – Enhanced XPBD
+// Improvements applied:
+// 1. Modified Darboux Vector (prevent kinking)
+// 2. Parallel Transport initialization
+// 3. Bilateral Interleaving solver order
+// 4. Anisotropic Bending Stiffness
+// 5. Self-Collision constraints
+// 6. LRA (Long Range Attachments) constraints
+
+#pragma kernel ApplyForces
+#pragma kernel Predict
+#pragma kernel SolveStretch
+#pragma kernel SolveBendTwist
+#pragma kernel SolveSelfCollision
+#pragma kernel SolveLRA
+#pragma kernel NormalizeQuats
+#pragma kernel UpdateVelocities
+#pragma kernel ApplyDamping
+#pragma kernel ClearLambdas
+
+// ─── SoA Buffers ─────────────────────────────────────────────────────────────
+RWStructuredBuffer<float3> _Positions;      // [N+1]
+RWStructuredBuffer<float3> _Predictions;    // [N+1]
+RWStructuredBuffer<float3> _Velocities;     // [N+1]
+RWStructuredBuffer<float>  _InvMasses;      // [N+1]
+
+RWStructuredBuffer<float4> _Quats;          // [N]
+RWStructuredBuffer<float4> _QuatPreds;      // [N]
+RWStructuredBuffer<float3> _AngVelocities;  // [N]
+RWStructuredBuffer<float4> _RestQuats;      // [N]
+RWStructuredBuffer<float>  _QuatInvW;       // [N]
+
+RWStructuredBuffer<float3> _LambdaS;        // [N]  stretch lambdas
+RWStructuredBuffer<float3> _LambdaB;        // [N]  bend   lambdas
+RWStructuredBuffer<float3> _LambdaSC;       // [N]  self-collision lambdas
+RWStructuredBuffer<float>  _LRAWeights;     // [N+1] LRA constraint weights
+
+// ─── Parameters ────────────────────────────────────────────────────────────
+float  _Dt;
+float  _SegLen;
+int    _NumParticles;       // N+1
+int    _NumQuats;           // N
+float3 _Gravity;
+float  _StretchK;
+float  _BendTwistK;
+float  _Damping;
+float  _StretchCompliance;
+float  _BendCompliance;
+float  _SelfCollisionRadius;    // نصف قطر التصادم الذاتي
+float  _LRASoftness;            // مرونة قيود LRA
+float3 _BendStiffness;          // (bend1, bend2, twist) - anisotropic
+int    _Offset;                 // 0 = even pass, 1 = odd pass
+
+// ─── Quaternion helpers ────────────────────────────────────────────────────
+float4 QMul(float4 a, float4 b)
+{
+    return float4(
+        a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    );
+}
+
+float4 QConj(float4 q) { return float4(-q.xyz, q.w); }
+
+float QDot(float4 a, float4 b)
+{
+    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+}
+
+// ─── Kernel: ClearLambdas ─────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void ClearLambdas(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i < (uint)_NumQuats)
+    {
+        _LambdaS[i] = float3(0.0f, 0.0f, 0.0f);
+        _LambdaB[i] = float3(0.0f, 0.0f, 0.0f);
+        _LambdaSC[i] = float3(0.0f, 0.0f, 0.0f);
+    }
+    if (i < (uint)_NumParticles)
+        _LRAWeights[i] = 0.0f;
+}
+
+// ─── Kernel: ApplyForces ──────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void ApplyForces(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i < (uint)_NumParticles && _InvMasses[i] > 0.0f)
+        _Velocities[i] += _Dt * _Gravity;
+}
+
+// ─── Kernel: Predict ──────────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void Predict(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i < (uint)_NumParticles && _InvMasses[i] > 0.0f)
+        _Predictions[i] = _Positions[i] + _Dt * _Velocities[i];
+
+    if (i < (uint)_NumQuats && _QuatInvW[i] > 0.0f)
+    {
+        float4 q  = _Quats[i];
+        float3 w  = _AngVelocities[i];
+        float halfAngle = length(w) * _Dt * 0.5f;
+        if (halfAngle > 1e-10f)
+        {
+            float4 dq = float4(normalize(w) * sin(halfAngle), cos(halfAngle));
+            _QuatPreds[i] = normalize(QMul(q, dq));
+        }
+        else
+        {
+            _QuatPreds[i] = q;
+        }
+    }
+}
+
+// ─── Kernel: SolveStretch ─────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void SolveStretch(uint3 id : SV_DispatchThreadID)
+{
+    int e = (int)id.x * 2 + _Offset;
+    if (e >= _NumQuats) return;
+
+    int   p1 = e, p2 = e + 1;
+    float w1 = _InvMasses[p1], w2 = _InvMasses[p2];
+    if (w1 == 0.0f && w2 == 0.0f) return;
+
+    float3 diff = _Predictions[p2] - _Predictions[p1];
+    float  dist = length(diff);
+    float  C    = dist - _SegLen;
+    if (abs(C) < 1e-10f) return;
+
+    float3 grad = diff / dist;
+    float  denom = w1 + w2;
+    if (denom < 1e-10f) return;
+
+    float alpha = _StretchCompliance / (_Dt * _Dt);
+    float lambda = _LambdaS[e].x;
+    float deltaLambda = (_StretchK * C - alpha * lambda) / (denom + alpha);
+    _LambdaS[e].x += deltaLambda;
+
+    _Predictions[p1] += w1 * deltaLambda * grad;
+    _Predictions[p2] -= w2 * deltaLambda * grad;
+}
+
+// ─── Kernel: SolveBendTwist ───────────────────────────────────────────────
+// IMPROVEMENT 1: Modified Darboux Vector (prevent kinking)
+// IMPROVEMENT 2: Anisotropic Bending Stiffness
+[numthreads(64, 1, 1)]
+void SolveBendTwist(uint3 id : SV_DispatchThreadID)
+{
+    int j = (int)id.x * 2 + 1 + _Offset;
+    if (j >= _NumQuats || j == 0) return;
+
+    int   ai = j - 1, bi = j;
+    float wa = _QuatInvW[ai], wb = _QuatInvW[bi];
+    if (wa == 0.0f && wb == 0.0f) return;
+
+    float4 qa  = _QuatPreds[ai], qb  = _QuatPreds[bi];
+    float4 qa0 = _RestQuats[ai], qb0 = _RestQuats[bi];
+
+    // Relative rotation between adjacent frames
+    float4 rel  = QMul(QConj(qa),  qb);
+    float4 rel0 = QMul(QConj(qa0), qb0);
+
+    // IMPROVEMENT 1: Modified Darboux Vector
+    // Uses tan(θ/2) scaling instead of sin(θ/2) to prevent kinking
+    float sinHalf = length(rel.xyz);
+    float cosHalf = rel.w;
+    float sinHalf0 = length(rel0.xyz);
+    float cosHalf0 = rel0.w;
+    
+    // Avoid division by zero
+    float scale = (abs(cosHalf) > 1e-8f) ? (sinHalf / cosHalf) : sinHalf;
+    float scale0 = (abs(cosHalf0) > 1e-8f) ? (sinHalf0 / cosHalf0) : sinHalf0;
+    
+    float3 Psi = (abs(sinHalf) > 1e-8f) ? normalize(rel.xyz) * scale : float3(0, 0, 0);
+    float3 Psi0 = (abs(sinHalf0) > 1e-8f) ? normalize(rel0.xyz) * scale0 : float3(0, 0, 0);
+
+    // Choose nearest rest pose
+    float s = dot(Psi, Psi0) >= 0.0f ? 1.0f : -1.0f;
+    float3 Cb = Psi - s * Psi0;
+
+    // IMPROVEMENT 2: Anisotropic Bending Stiffness
+    // Apply different stiffness for bend1, bend2, and twist
+    Cb.x *= _BendStiffness.x;  // bend around d1
+    Cb.y *= _BendStiffness.y;  // bend around d2
+    Cb.z *= _BendStiffness.z;  // twist around d3
+
+    float denom = wa + wb;
+    if (denom < 1e-10f) return;
+
+    float alpha = _BendCompliance / (_Dt * _Dt);
+    float3 lambda = _LambdaB[ai];
+    float3 deltaLambda = (_BendTwistK * Cb - alpha * lambda) / (denom + alpha);
+    _LambdaB[ai] += deltaLambda;
+
+    float4 dq = float4(deltaLambda, 0.0f);
+    _QuatPreds[ai] += wa * QMul(qb, dq);
+    _QuatPreds[bi] -= wb * QMul(qa, dq);
+}
+
+// ─── Kernel: SolveSelfCollision ───────────────────────────────────────────
+// IMPROVEMENT 3: Self-Collision constraints
+[numthreads(64, 1, 1)]
+void SolveSelfCollision(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int)id.x;
+    if (i >= _NumParticles - 3) return;
+
+    float3 pi = _Predictions[i];
+    float wi = _InvMasses[i];
+    if (wi == 0.0f) return;
+
+    // Check distance with non-adjacent particles (skip 2 neighbors)
+    for (int j = i + 3; j < _NumParticles; j++)
+    {
+        float3 pj = _Predictions[j];
+        float wj = _InvMasses[j];
+        if (wj == 0.0f) continue;
+
+        float3 diff = pj - pi;
+        float dist = length(diff);
+        float minDist = _SelfCollisionRadius;
+
+        if (dist < minDist && dist > 1e-6f)
+        {
+            float3 grad = diff / dist;
+            float C = dist - minDist;
+            
+            float denom = wi + wj;
+            if (denom < 1e-10f) continue;
+
+            float alpha = 0.001f / (_Dt * _Dt);  // Small compliance for stability
+            float lambda = _LambdaSC[i].x;
+            float deltaLambda = (C - alpha * lambda) / (denom + alpha);
+            _LambdaSC[i].x += deltaLambda;
+
+            float correctionFactor = deltaLambda / denom;
+            _Predictions[i] -= wi * correctionFactor * grad;
+            _Predictions[j] += wj * correctionFactor * grad;
+        }
+    }
+}
+
+// ─── Kernel: SolveLRA ─────────────────────────────────────────────────────
+// IMPROVEMENT 4: Long Range Attachments (prevent excessive stretching)
+[numthreads(64, 1, 1)]
+void SolveLRA(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int)id.x;
+    if (i < 2 || i >= _NumParticles - 1) return;  // Skip first and last particles
+
+    float wi = _InvMasses[i];
+    if (wi == 0.0f) return;
+
+    // Connect to particle 0 (top anchor) with soft constraint
+    float3 p0 = _Predictions[0];
+    float3 pi = _Predictions[i];
+    float w0 = _InvMasses[0];
+
+    float3 diff = pi - p0;
+    float dist = length(diff);
+    float maxDist = i * _SegLen * (1.0f + _LRASoftness);  // Allow some stretch
+
+    if (dist > maxDist)
+    {
+        float3 grad = diff / dist;
+        float C = dist - maxDist;
+        
+        float denom = w0 + wi;
+        if (denom < 1e-10f) return;
+
+        float alpha = 0.01f / (_Dt * _Dt);  // Soft compliance
+        float lambda = _LRAWeights[i];
+        float deltaLambda = (C - alpha * lambda) / (denom + alpha);
+        _LRAWeights[i] += deltaLambda;
+
+        _Predictions[i] -= wi * deltaLambda * grad / denom;
+    }
+}
+
+// ─── Kernel: NormalizeQuats ───────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void NormalizeQuats(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < (uint)_NumQuats)
+        _QuatPreds[id.x] = normalize(_QuatPreds[id.x]);
+}
+
+// ─── Kernel: UpdateVelocities ─────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void UpdateVelocities(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i < (uint)_NumParticles)
+    {
+        if (_InvMasses[i] > 0.0f)
+            _Velocities[i] = (_Predictions[i] - _Positions[i]) / _Dt;
+        else
+            _Velocities[i] = float3(0, 0, 0);
+        _Positions[i] = _Predictions[i];
+    }
+
+    if (i < (uint)_NumQuats)
+    {
+        if (_QuatInvW[i] > 0.0f)
+        {
+            float4 prod = QMul(QConj(_Quats[i]), _QuatPreds[i]);
+            float  cosHalf = clamp(prod.w, -1.0f, 1.0f);
+            float  angle   = 2.0f * acos(cosHalf);
+            float  sinHalf = length(prod.xyz);
+            if (sinHalf > 1e-8f)
+                _AngVelocities[i] = (angle / sinHalf) * prod.xyz / _Dt;
+            else
+                _AngVelocities[i] = float3(0, 0, 0);
+        }
+        _Quats[i] = _QuatPreds[i];
+    }
+}
+
+// ─── Kernel: ApplyDamping ─────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void ApplyDamping(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    float decay = exp(-_Damping * _Dt);
+
+    if (i < (uint)_NumParticles && _InvMasses[i] > 0.0f)
+        _Velocities[i] *= decay;
+
+    if (i < (uint)_NumQuats && _QuatInvW[i] > 0.0f)
+        _AngVelocities[i] *= decay;
+}
