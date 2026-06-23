@@ -50,5 +50,33 @@
         public int gpuGridNodeCount;
         public float gpuCellSizeMeters;
         public int gpuDispatchCount;
+
+        public bool projectionGridEnabled;
+        public bool projectionBuffersReady;
+        public int projectionGridNodeCount;
+        public int projectionDispatchCount;
+        public float projectionMinFluidCellMass;
+
+        public bool projectionDivergenceEnabled;
+        public bool projectionDivergenceBufferReady;
+        public float projectionDivergenceScale;
+        public float maxAbsProjectionDivergence;
+
+        public bool pressureSolveEnabled;
+        public int pressureJacobiIterations;
+        public float pressureRhsScale;
+        public float pressureJacobiRelaxation;
+        public float maxProjectionPressure;
+
+        public bool pressureGradientSubtractionEnabled;
+        public float pressureGradientScale;
+        public float maxPressureVelocityCorrection;
+        public bool invertPressureGradientSign;
+
+        public bool movingBucketProjectionCouplingEnabled;
+        public bool movingBucketDivergenceBoundaryEnabled;
+        public bool movingBucketGridBoundaryVelocityEnabled;
+        public float projectionMovingBoundaryVelocityStrength;
+        public float maxProjectionBoundaryVelocityCorrection;
     }
 }

@@ -34,6 +34,9 @@ namespace PaintBucketSim.Data
         public NativeArray<float> Ages;
         public NativeArray<float> StateAges;
 
+        public NativeArray<float> RestVolumes;
+        public NativeArray<float> RestDensities;
+
         public NativeArray<FluidDiagnostics> Diagnostics;
 
         public bool IsCreated =>
@@ -79,6 +82,9 @@ namespace PaintBucketSim.Data
             StateAges = new NativeArray<float>(Capacity, allocator);
 
             Diagnostics = new NativeArray<FluidDiagnostics>(1, allocator);
+
+            RestVolumes = new NativeArray<float>(capacity, allocator);
+            RestDensities = new NativeArray<float>(capacity, allocator);
 
             ClearAllSlots();
         }
@@ -128,35 +134,32 @@ namespace PaintBucketSim.Data
             return Count < Capacity;
         }
 
-        public int SpawnParticle(
-            float3 localPosition,
-            float3 worldPosition,
+        public bool SpawnParticle(
+            float3 position,
             float3 velocity,
             float mass,
             float radius,
+            float restVolume,
             float restDensity,
             float4 color,
             FluidParticleState state)
         {
             if (Count >= Capacity)
-                return -1;
+                return false;
 
             int index = Count;
-            Count++;
 
-            ParticleIds[index] = NextParticleId;
-            NextParticleId++;
-
-            LocalPositions[index] = localPosition;
-
-            Positions[index] = worldPosition;
-            PreviousPositions[index] = worldPosition;
+            ParticleIds[index] = NextParticleId++;
+            Positions[index] = position;
+            PreviousPositions[index] = position;
             Velocities[index] = velocity;
-            TempVelocities[index] = float3.zero;
-            DeltaPositions[index] = float3.zero;
+            TempVelocities[index] = velocity;
 
             Masses[index] = mass;
             Radii[index] = radius;
+
+            RestVolumes[index] = restVolume;
+            RestDensities[index] = restDensity;
 
             Densities[index] = restDensity;
             Lambdas[index] = 0.0f;
@@ -167,7 +170,8 @@ namespace PaintBucketSim.Data
             Ages[index] = 0.0f;
             StateAges[index] = 0.0f;
 
-            return index;
+            Count++;
+            return true;
         }
 
         public void SetState(int index, FluidParticleState newState)
@@ -224,6 +228,9 @@ namespace PaintBucketSim.Data
 
             Swap(ref Ages, a, b);
             Swap(ref StateAges, a, b);
+
+            (RestVolumes[a], RestVolumes[b]) = (RestVolumes[b], RestVolumes[a]);
+            (RestDensities[a], RestDensities[b]) = (RestDensities[b], RestDensities[a]);
         }
 
         private void ClearSlot(int index)
@@ -249,6 +256,9 @@ namespace PaintBucketSim.Data
 
             Ages[index] = 0.0f;
             StateAges[index] = 0.0f;
+
+            RestVolumes[index] = 0.0f;
+            RestDensities[index] = 0.0f;
         }
 
         private static void Swap<T>(ref NativeArray<T> array, int a, int b)
@@ -284,6 +294,9 @@ namespace PaintBucketSim.Data
             if (StateAges.IsCreated) StateAges.Dispose();
 
             if (Diagnostics.IsCreated) Diagnostics.Dispose();
+
+            if (RestVolumes.IsCreated) RestVolumes.Dispose();
+            if (RestDensities.IsCreated) RestDensities.Dispose();
 
             Count = 0;
             Capacity = 0;

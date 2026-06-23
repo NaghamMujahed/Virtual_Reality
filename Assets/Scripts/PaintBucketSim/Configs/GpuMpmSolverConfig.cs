@@ -44,9 +44,9 @@ namespace PaintBucketSim.Configs
         public float maxParticleSpeed = 10.0f;
 
         [Header("PIC/MPM Transfer")]
-        [Tooltip("0 = keep particle velocity more, 1 = pure PIC grid velocity. For first prototype use 1.")]
-        [Range(0.0f, 1.0f)]
-        public float picBlend = 1.0f;
+        //[Tooltip("0 = keep particle velocity more, 1 = pure PIC grid velocity. For first prototype use 1.")]
+        //[Range(0.0f, 1.0f)]
+        //public float picBlend = 1.0f;
 
         [Tooltip("Fixed point scale for mass atomic adds.")]
         [Min(1000)]
@@ -56,26 +56,26 @@ namespace PaintBucketSim.Configs
         [Min(1000)]
         public int momentumFixedScale = 1000000;
 
-        [Header("Box Boundary Prototype")]
-        public bool enableBoxBoundary = true;
+        //[Header("Box Boundary Prototype")]
+        //public bool enableBoxBoundary = true;
 
-        [Range(0.0f, 1.0f)]
-        public float boundaryDamping = 0.2f;
+        //[Range(0.0f, 1.0f)]
+        //public float boundaryDamping = 0.2f;
 
         [Header("Debug")]
         public bool logLifecycle = true;
 
         // G5 Changes //
-        [Header("APIC Transfer")]
-        public bool enableApicTransfer = true;
+        [Header("MLS-MPM Affine Transfer")]
+        //public bool enableApicTransfer = true;
 
-        [Tooltip("How strongly APIC affine velocity contributes during P2G. 0 = PIC only, 1 = full APIC contribution.")]
-        [Range(0.0f, 1.0f)]
-        public float apicP2GStrength = 1.0f;
+        //[Tooltip("How strongly APIC affine velocity contributes during P2G. 0 = PIC only, 1 = full APIC contribution.")]
+        //[Range(0.0f, 1.0f)]
+        //public float apicP2GStrength = 1.0f;
 
-        [Tooltip("How strongly the reconstructed affine C matrix is written back in G2P.")]
-        [Range(0.0f, 1.0f)]
-        public float apicG2PStrength = 1.0f;
+        //[Tooltip("How strongly the reconstructed affine C matrix is written back in G2P.")]
+        //[Range(0.0f, 1.0f)]
+        //public float apicG2PStrength = 1.0f;
 
         [Tooltip("Damping applied to affine C each step to prevent early prototype instability.")]
         [Range(0.0f, 1.0f)]
@@ -91,6 +91,26 @@ namespace PaintBucketSim.Configs
         [Min(0.0001f)]
         public float manualApicDInverse = 625.0f;
         // End G5 Changes //
+
+        [Header("MLS-MPM Projection Grid Infrastructure")]
+        public bool enableProjectionGridInfrastructure = true;
+
+        [Tooltip("Use the same dense grid as the MPM solver for the pressure projection prototype.")]
+        public bool useMpmGridForProjection = true;
+
+        [Tooltip("Fixed point scale for atomically accumulating cell mass on GPU.")]
+        [Min(1)]
+        public int projectionMassFixedScale = 1000000;
+
+        [Tooltip("A grid cell is considered fluid if its accumulated mass is above this value.")]
+        [Min(0.0f)]
+        public float minFluidCellMass = 1e-7f;
+
+        [Tooltip("Mark bucket walls and outside-bucket regions as solid cells for projection.")]
+        public bool enableBucketProjectionSolidCells = true;
+
+        [Tooltip("If true, cells above the bucket top are treated as air. If false, top can behave like a temporary lid.")]
+        public bool projectionTopOpen = true;
 
         ////////////////    G6.A Changes   //////////////////
 
@@ -215,6 +235,79 @@ namespace PaintBucketSim.Configs
         [Min(0.1f)]
         public float maxBucketBoundaryVelocity = 8.0f;
         /// /// /// /// /// /// /// <End G8.B Changes> /// /// /// /// /// /// 
+
+        [Header("MLS-MPM Projection Divergence")]
+        public bool enableProjectionDivergenceComputation = true;
+
+        [Tooltip("Multiplies computed divergence. Keep 1 for physical meaning, lower for debugging.")]
+        [Range(0.0f, 2.0f)]
+        public float projectionDivergenceScale = 1.0f;
+
+        [Tooltip("Clamp divergence to avoid unstable pressure solve in early stages.")]
+        [Min(0.01f)]
+        public float maxAbsProjectionDivergence = 50.0f;
+
+        [Tooltip("If true, solid neighbors are treated as no-flow boundaries during divergence computation.")]
+        public bool projectionSolidNoFlux = true;
+
+
+        [Header("MLS-MPM Projection Pressure Solver - Jacobi V1")]
+        public bool enableJacobiPressureSolve = true;
+
+        [Min(1)]
+        public int pressureJacobiIterations = 40;
+
+        [Tooltip("Scales the pressure equation right-hand side. Lower values are safer in early tests.")]
+        [Min(0.0f)]
+        public float pressureRhsScale = 1.0f;
+
+        [Tooltip("Relaxation factor for Jacobi. 1 = standard Jacobi, lower = more stable/damped.")]
+        [Range(0.05f, 1.0f)]
+        public float pressureJacobiRelaxation = 0.8f;
+
+        [Tooltip("Clamps pressure values to avoid early solver explosions.")]
+        [Min(1.0f)]
+        public float maxProjectionPressure = 1000.0f;
+
+        [Tooltip("If true, air neighbors use pressure = 0. This is the free-surface boundary condition.")]
+        public bool projectionAirPressureZero = true;
+
+        [Tooltip("If true, solid neighbors use Neumann zero-gradient behavior.")]
+        public bool projectionSolidPressureNeumann = true;
+
+
+        [Header("MLS-MPM Projection Pressure Gradient")]
+        public bool enablePressureGradientSubtraction = true;
+
+        [Tooltip("Scales the pressure-gradient velocity correction. Start low for stability.")]
+        [Min(0.0f)]
+        public float pressureGradientScale = 0.5f;
+
+        [Tooltip("Clamp the projection velocity correction per grid node.")]
+        [Min(0.01f)]
+        public float maxPressureVelocityCorrection = 2.0f;
+
+        [Tooltip("If true, flips the sign of the pressure gradient correction. Use only if projection visibly increases compression.")]
+        public bool invertPressureGradientSign = false;
+
+        [Tooltip("Apply pressure correction only to projection fluid cells.")]
+        public bool pressureCorrectionFluidCellsOnly = true;
+
+        [Header("MLS-MPM Projection / Moving Bucket Boundary Coupling")]
+        public bool enableMovingBucketProjectionCoupling = true;
+
+        [Tooltip("Use moving bucket wall velocity as a boundary velocity when computing projection divergence.")]
+        public bool useMovingBucketVelocityInDivergence = true;
+
+        [Tooltip("Apply a grid-level no-penetration correction near bucket solid cells before divergence.")]
+        public bool applyMovingBucketGridBoundaryVelocity = true;
+
+        [Range(0.0f, 1.0f)]
+        public float projectionMovingBoundaryVelocityStrength = 1.0f;
+
+        [Min(0.01f)]
+        public float maxProjectionBoundaryVelocityCorrection = 2.0f;
+
         public int GridNodeCount =>
             gridResolution.x * gridResolution.y * gridResolution.z;
 
@@ -318,6 +411,43 @@ namespace PaintBucketSim.Configs
             if (maxBucketBoundaryVelocity < 0.1f)
                 maxBucketBoundaryVelocity = 0.1f;
             /// /// /// /// /// /// /// <End G8.B Changes> /// /// /// /// /// /// 
+            
+            if (projectionMassFixedScale < 1)
+                projectionMassFixedScale = 1;
+
+            if (minFluidCellMass < 0.0f)
+                minFluidCellMass = 0.0f;
+
+            projectionDivergenceScale = Mathf.Clamp(projectionDivergenceScale, 0.0f, 2.0f);
+
+            if (maxAbsProjectionDivergence < 0.01f)
+                maxAbsProjectionDivergence = 0.01f;
+
+            if (pressureJacobiIterations < 1)
+                pressureJacobiIterations = 1;
+
+            if (pressureRhsScale < 0.0f)
+                pressureRhsScale = 0.0f;
+
+            pressureJacobiRelaxation = Mathf.Clamp(
+                pressureJacobiRelaxation,
+                0.05f,
+                1.0f
+            );
+
+            if (maxProjectionPressure < 1.0f)
+                maxProjectionPressure = 1.0f;
+
+            if (pressureGradientScale < 0.0f)
+                pressureGradientScale = 0.0f;
+
+            if (maxPressureVelocityCorrection < 0.01f)
+                maxPressureVelocityCorrection = 0.01f;
+
+            projectionMovingBoundaryVelocityStrength = Mathf.Clamp01(projectionMovingBoundaryVelocityStrength);
+
+            if (maxProjectionBoundaryVelocityCorrection < 0.01f)
+                maxProjectionBoundaryVelocityCorrection = 0.01f;
         }
     }
 }

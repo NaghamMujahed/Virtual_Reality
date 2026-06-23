@@ -56,6 +56,9 @@ namespace PaintBucketSim.Systems.Fluid
         private FluidParticlePoolStats _poolStats;
         public FluidParticlePoolStats PoolStats => _poolStats;
 
+        private FluidCalibrationStats _calibrationStats;
+        public FluidCalibrationStats CalibrationStats => _calibrationStats;
+
         public FluidDiagnostics Diagnostics
         {
             get
@@ -362,8 +365,21 @@ namespace PaintBucketSim.Systems.Fluid
 
             _data.ClearActive();
 
-            float spacing = ComputeParticleSpacing(bucketConfig);
-            float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
+            float bucketVolume = ComputeBucketInnerVolumeM3();
+            float fillFraction = Mathf.Clamp01(paintFluidConfig.fillFraction01);
+            float targetPaintVolume = bucketVolume * fillFraction;
+
+            int targetCount = Mathf.Max(1, paintFluidConfig.targetParticleCount);
+
+            float restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
+            float restVolume = targetPaintVolume / targetCount;
+            float mass = restDensity * restVolume;
+
+            float estimatedSpacing = EstimateSpacingFromVolume(restVolume);
+            float radius = estimatedSpacing * 0.45f;
+
+            //float spacing = ComputeParticleSpacing(bucketConfig);
+            //float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
 
             float halfHeight = bucketConfig.heightMeters * 0.5f;
             float yMin = -halfHeight + paintFluidConfig.wallClearanceMeters + radius;
@@ -377,15 +393,15 @@ namespace PaintBucketSim.Systems.Fluid
             yMax -= paintFluidConfig.wallClearanceMeters + radius;
 
             if (yMax <= yMin)
-                yMax = yMin + spacing;
+                yMax = yMin + estimatedSpacing;
 
-            float particleVolume = spacing * spacing * spacing;
-            float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
+            //float particleVolume = estimatedSpacing * estimatedSpacing * estimatedSpacing;
+            //float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
 
             Color color = paintMaterialConfig.baseColor;
             float4 color4 = new float4(color.r, color.g, color.b, color.a);
 
-            for (float y = yMin; y <= yMax; y += spacing)
+            for (float y = yMin; y <= yMax; y += estimatedSpacing)
             {
                 float t = Mathf.InverseLerp(-halfHeight, halfHeight, y);
 
@@ -397,9 +413,9 @@ namespace PaintBucketSim.Systems.Fluid
                 if (innerRadius <= 0.0f)
                     continue;
 
-                for (float x = -innerRadius; x <= innerRadius; x += spacing)
+                for (float x = -innerRadius; x <= innerRadius; x += estimatedSpacing)
                 {
-                    for (float z = -innerRadius; z <= innerRadius; z += spacing)
+                    for (float z = -innerRadius; z <= innerRadius; z += estimatedSpacing)
                     {
                         if (!_data.HasFreeSlot())
                             break;
@@ -415,12 +431,12 @@ namespace PaintBucketSim.Systems.Fluid
                         float3 world = bucketSystem.LocalToWorldPoint(local);
 
                         _data.SpawnParticle(
-                            local,
                             world,
                             float3.zero,
-                            particleMass,
+                            mass,
                             radius,
-                            paintMaterialConfig.densityKgPerM3,
+                            restVolume,
+                            restDensity,
                             color4,
                             FluidParticleState.InsideFluid
                         );
@@ -434,20 +450,24 @@ namespace PaintBucketSim.Systems.Fluid
                     break;
             }
 
-            float estimatedFillVolume = EstimateFillVolume(bucketConfig);
+            //float estimatedFillVolume = EstimateFillVolume(bucketConfig);
 
-            _data.Diagnostics[0] = new FluidDiagnostics
-            {
-                particleCount = _data.Count,
-                capacity = _data.Capacity,
-                particleRadius = radius,
-                particleSpacing = spacing,
-                totalMass = particleMass * _data.Count,
-                insideMass = particleMass * _data.Count,
-                fillFraction = paintFluidConfig.fillFraction01,
-                estimatedFillVolume = estimatedFillVolume,
-                centerOfMassWorld = float3.zero
-            };
+            //_data.Diagnostics[0] = new FluidDiagnostics
+            //{
+            //    particleCount = _data.Count,
+            //    capacity = _data.Capacity,
+            //    particleRadius = radius,
+            //    particleSpacing = spacing,
+            //    totalMass = particleMass * _data.Count,
+            //    insideMass = particleMass * _data.Count,
+            //    fillFraction = paintFluidConfig.fillFraction01,
+            //    estimatedFillVolume = estimatedFillVolume,
+            //    centerOfMassWorld = float3.zero
+            //};
+            
+            targetPaintVolume = bucketVolume * Mathf.Clamp01(paintFluidConfig.fillFraction01);
+
+            RecalibrateGeneratedParticles(targetPaintVolume, restDensity);
         }
 
         private void UpdateWorldFromLocalPreview()
@@ -842,8 +862,8 @@ namespace PaintBucketSim.Systems.Fluid
                 float4 c = _data.Colors[i];
 
                 float mass = _data.Masses[i];
-                float restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
-                float restVolume = mass / restDensity;
+                //float restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
+                //float restVolume = mass / restDensity;
 
                 positionRadiusOutput[written] = new Vector4(
                     p.x,
@@ -873,16 +893,31 @@ namespace PaintBucketSim.Systems.Fluid
                     _data.ParticleIds[i]
                 );
 
-                // x = rest volume, y = current J, z = rest density, w = reserved
+                //// x = rest volume, y = current J, z = rest density, w = reserved
+                //volumeJOutput[written] = new Vector4(
+                //    restVolume,
+                //    1.0f,
+                //    restDensity,
+                //    0.0f
+                //);
+
+                float restVolume = _data.RestVolumes[i];
+                float restDensity = _data.RestDensities[i];
+
+                if (restVolume <= 0.0f)
+                {
+                    restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
+                    restVolume = _data.Masses[i] / restDensity;
+                }
+
                 volumeJOutput[written] = new Vector4(
                     restVolume,
                     1.0f,
                     restDensity,
                     0.0f
                 );
-
                 // Initial deformation gradient F = Identity.
-                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
+                                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
                 deformationF1Output[written] = new Vector4(0, 1, 0, 0);
                 deformationF2Output[written] = new Vector4(0, 0, 1, 0);
 
@@ -893,5 +928,91 @@ namespace PaintBucketSim.Systems.Fluid
         }
 
         ////////////////    End G6.A Changes   //////////////////
+
+        private float ComputeBucketInnerVolumeM3()
+        {
+            if (bucketSystem == null || bucketSystem.Config == null)
+                return 0.0f;
+
+            var config = bucketSystem.Config;
+
+            float height = Mathf.Max(config.heightMeters, 0.0f);
+            float wall = Mathf.Max(config.wallThicknessMeters, 0.0f);
+
+            float topInnerRadius = Mathf.Max(config.topRadiusMeters - wall, 0.001f);
+            float bottomInnerRadius = Mathf.Max(config.bottomRadiusMeters - wall, 0.001f);
+
+            // Cylinder
+            if ((int)config.shapeType == 0)
+            {
+                float r = topInnerRadius;
+                return Mathf.PI * r * r * height;
+            }
+
+            // Tapered cylinder / frustum
+            return Mathf.PI * height / 3.0f *
+                   (
+                       bottomInnerRadius * bottomInnerRadius +
+                       bottomInnerRadius * topInnerRadius +
+                       topInnerRadius * topInnerRadius
+                   );
+        }
+
+        private static float EstimateSpacingFromVolume(float restVolume)
+        {
+            return Mathf.Pow(Mathf.Max(restVolume, 1e-12f), 1.0f / 3.0f);
+        }
+
+        private void RecalibrateGeneratedParticles(float targetPaintVolume, float restDensity)
+        {
+            int count = Mathf.Max(1, _data.Count);
+
+            float restVolume = targetPaintVolume / count;
+            float mass = restDensity * restVolume;
+
+            float spacing = EstimateSpacingFromVolume(restVolume);
+            float radius = spacing * 0.45f;
+
+            for (int i = 0; i < _data.Count; i++)
+            {
+                _data.RestVolumes[i] = restVolume;
+                _data.RestDensities[i] = restDensity;
+                _data.Masses[i] = mass;
+                _data.Radii[i] = radius;
+                _data.Densities[i] = restDensity;
+            }
+
+            float representedVolume = restVolume * count;
+
+            _calibrationStats = new FluidCalibrationStats
+            {
+                valid = true,
+
+                bucketInnerVolumeM3 = ComputeBucketInnerVolumeM3(),
+                targetPaintVolumeM3 = targetPaintVolume,
+                targetParticleCount = paintFluidConfig.targetParticleCount,
+                actualParticleCount = count,
+
+                restDensityKgPerM3 = restDensity,
+                restVolumePerParticleM3 = restVolume,
+                massPerParticleKg = mass,
+
+                estimatedParticleSpacingM = spacing,
+                particleRadiusM = radius,
+
+                totalMassKg = mass * count,
+                actualRepresentedVolumeM3 = representedVolume,
+                fillVolumeErrorPercent =
+                    targetPaintVolume > 1e-9f
+                        ? Mathf.Abs(representedVolume - targetPaintVolume) / targetPaintVolume * 100.0f
+                        : 0.0f,
+
+                gridCellSizeM = gpuMpmSolverConfig != null ? gpuMpmSolverConfig.cellSizeMeters : 0.0f,
+                particleSpacingToCellSizeRatio =
+                    gpuMpmSolverConfig != null && gpuMpmSolverConfig.cellSizeMeters > 1e-6f
+                        ? spacing / gpuMpmSolverConfig.cellSizeMeters
+                        : 0.0f
+            };
+        }
     }
 }

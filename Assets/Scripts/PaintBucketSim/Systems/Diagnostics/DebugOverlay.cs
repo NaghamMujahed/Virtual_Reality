@@ -26,6 +26,7 @@ namespace PaintBucketSim.Systems.Diagnostics
         [SerializeField] private PaintFluidSystem paintFluidSystem;
         [SerializeField] private GpuFluidBufferSet gpuFluidBufferSet;
 
+
         [SerializeField] private bool visible = true;
 
         [Header("Style")]
@@ -215,6 +216,28 @@ namespace PaintBucketSim.Systems.Diagnostics
                 GUILayout.Label($"GPU Cell Size: {ss.gpuCellSizeMeters:F4} m", _labelStyle);
                 GUILayout.Label($"GPU Dispatch Count: {ss.gpuDispatchCount}", _labelStyle);
 
+                GUILayout.Label($"Projection Grid: {ss.projectionGridEnabled}", _labelStyle);
+                GUILayout.Label($"Projection Buffers Ready: {ss.projectionBuffersReady}", _labelStyle);
+                GUILayout.Label($"Projection Nodes: {ss.projectionGridNodeCount}", _labelStyle);
+                GUILayout.Label($"Projection Dispatches: {ss.projectionDispatchCount}", _labelStyle);
+                GUILayout.Label($"Min Fluid Cell Mass: {ss.projectionMinFluidCellMass:E2}", _labelStyle);
+
+                GUILayout.Label($"Projection Divergence: {ss.projectionDivergenceEnabled}", _labelStyle);
+                GUILayout.Label($"Divergence Buffer Ready: {ss.projectionDivergenceBufferReady}", _labelStyle);
+                GUILayout.Label($"Divergence Scale: {ss.projectionDivergenceScale:F2}", _labelStyle);
+                GUILayout.Label($"Max Abs Divergence: {ss.maxAbsProjectionDivergence:F2}", _labelStyle);
+
+                GUILayout.Label($"Pressure Solve: {ss.pressureSolveEnabled}", _labelStyle);
+                GUILayout.Label($"Jacobi Iterations: {ss.pressureJacobiIterations}", _labelStyle);
+                GUILayout.Label($"Pressure RHS Scale: {ss.pressureRhsScale:F2}", _labelStyle);
+                GUILayout.Label($"Pressure Relaxation: {ss.pressureJacobiRelaxation:F2}", _labelStyle);
+                GUILayout.Label($"Max Projection Pressure: {ss.maxProjectionPressure:F1}", _labelStyle);
+
+                GUILayout.Label($"Pressure Gradient Subtraction: {ss.pressureGradientSubtractionEnabled}", _labelStyle);
+                GUILayout.Label($"Pressure Gradient Scale: {ss.pressureGradientScale:F2}", _labelStyle);
+                GUILayout.Label($"Max Pressure Velocity Correction: {ss.maxPressureVelocityCorrection:F2}", _labelStyle);
+                GUILayout.Label($"Invert Gradient Sign: {ss.invertPressureGradientSign}", _labelStyle);
+
                 FluidParticlePoolStats ps = paintFluidSystem.PoolStats;
 
                 GUILayout.Space(8);
@@ -291,6 +314,8 @@ namespace PaintBucketSim.Systems.Diagnostics
                 GUILayout.Label($"Per Particle Color: {gs.usingPerParticleColor}", _labelStyle);
             }
 
+            DrawFluidCalibration();
+
             GUILayout.Space(5);
             GUILayout.Label("Controls: P = Pause | O = Single Step | R = Reset | F1 = Toggle Overlay", _labelStyle);
 
@@ -316,6 +341,37 @@ namespace PaintBucketSim.Systems.Diagnostics
             };
 
             _stylesInitialized = true;
+        }
+
+        private void DrawFluidCalibration()
+        {
+            if (paintFluidSystem == null)
+                return;
+
+            var stats = paintFluidSystem.CalibrationStats;
+
+            if (!stats.valid)
+                return;
+
+            GUILayout.Space(8);
+            GUILayout.Label("MLS-MPM Calibration", _labelStyle);
+
+            GUILayout.Label($"Bucket Inner Volume: {stats.bucketInnerVolumeM3:F5} m³", _labelStyle);
+            GUILayout.Label($"Target Paint Volume: {stats.targetPaintVolumeM3:F5} m³", _labelStyle);
+            GUILayout.Label($"Actual Represented Volume: {stats.actualRepresentedVolumeM3:F5} m³", _labelStyle);
+
+            GUILayout.Label($"Target Particles: {stats.targetParticleCount}", _labelStyle);
+            GUILayout.Label($"Actual Particles: {stats.actualParticleCount}", _labelStyle);
+
+            GUILayout.Label($"Rest Density: {stats.restDensityKgPerM3:F1} kg/m³", _labelStyle);
+            GUILayout.Label($"Rest Volume / Particle: {stats.restVolumePerParticleM3:E3} m³", _labelStyle);
+            GUILayout.Label($"Mass / Particle: {stats.massPerParticleKg:E3} kg", _labelStyle);
+
+            GUILayout.Label($"Estimated Spacing: {stats.estimatedParticleSpacingM:F4} m", _labelStyle);
+            GUILayout.Label($"Particle Radius: {stats.particleRadiusM:F4} m", _labelStyle);
+
+            GUILayout.Label($"Fill Volume Error: {stats.fillVolumeErrorPercent:F2} %", _labelStyle);
+            GUILayout.Label($"Spacing / CellSize: {stats.particleSpacingToCellSizeRatio:F2}", _labelStyle);
         }
     }
 }
