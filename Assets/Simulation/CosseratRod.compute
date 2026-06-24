@@ -4,19 +4,26 @@
 // 2. Parallel Transport initialization
 // 3. Bilateral Interleaving solver order
 // 4. Anisotropic Bending Stiffness
-// 5. Self-Collision constraints
+// 5. Self-Collision constraints (Optimized with Spatial Hashing)
 // 6. LRA (Long Range Attachments) constraints
+// 7. Two-Way Coupling (Bucket Mass)
+// 8. Dynamic Grab Anchor
+// 9. Separate Twist Constraint
 
+#pragma kernel ClearLambdas
+#pragma kernel ClearSpatialHash
 #pragma kernel ApplyForces
 #pragma kernel Predict
 #pragma kernel SolveStretch
 #pragma kernel SolveBendTwist
+#pragma kernel SolveTwist
+#pragma kernel BuildSpatialHash
 #pragma kernel SolveSelfCollision
 #pragma kernel SolveLRA
+#pragma kernel SolveBucketCollision
 #pragma kernel NormalizeQuats
 #pragma kernel UpdateVelocities
 #pragma kernel ApplyDamping
-#pragma kernel ClearLambdas
 
 // ─── SoA Buffers ─────────────────────────────────────────────────────────────
 RWStructuredBuffer<float3> _Positions;      // [N+1]
@@ -35,6 +42,10 @@ RWStructuredBuffer<float3> _LambdaB;        // [N]  bend   lambdas
 RWStructuredBuffer<float3> _LambdaSC;       // [N]  self-collision lambdas
 RWStructuredBuffer<float>  _LRAWeights;     // [N+1] LRA constraint weights
 
+// ── Spatial Hashing Buffers ────────────────────────────────────────────────
+RWStructuredBuffer<int> _GridCellCounts;
+RWStructuredBuffer<int> _GridParticleIndices;
+
 // ─── Parameters ────────────────────────────────────────────────────────────
 float  _Dt;
 float  _SegLen;
@@ -46,10 +57,33 @@ float  _BendTwistK;
 float  _Damping;
 float  _StretchCompliance;
 float  _BendCompliance;
-float  _SelfCollisionRadius;    // نصف قطر التصادم الذاتي
-float  _LRASoftness;            // مرونة قيود LRA
-float3 _BendStiffness;          // (bend1, bend2, twist) - anisotropic
-int    _Offset;                 // 0 = even pass, 1 = odd pass
+float  _SelfCollisionRadius;
+float  _LRASoftness;
+float3 _BendStiffness;
+int    _Offset;
+
+// Dynamic Grab Anchor
+int    _GrabIndex;          // -1 means no grab
+
+// Two-Way Coupling Parameters
+float  _BucketMass;
+
+// Spatial Hashing Parameters
+float  _CellSize;
+int    _GridMaxParticles;
+int    _GridSize;           // Total number of cells in the hash grid
+
+// SDF Collision Parameters
+Texture3D<float> _BucketSDF;
+SamplerState sampler_LinearClamp;
+float3 _SDFGridMin;
+float  _SDFCellSize;
+float  _RopeRadius;
+int3   _GridResolution;
+
+// Twist Parameters
+float  _TwistStiffness;
+float  _TwistCompliance;
 
 // ─── Quaternion helpers ────────────────────────────────────────────────────
 float4 QMul(float4 a, float4 b)
@@ -64,9 +98,28 @@ float4 QMul(float4 a, float4 b)
 
 float4 QConj(float4 q) { return float4(-q.xyz, q.w); }
 
-float QDot(float4 a, float4 b)
+// ── Spatial Hashing helpers ───────────────────────────────────────────────
+int HashGrid(float3 p)
 {
-    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+    int3 grid = (int3)floor(p / _CellSize);
+    // Hash function from Teschner et al.
+    return (grid.x * 73856093) ^ (grid.y * 19349663) ^ (grid.z * 83492791);
+}
+
+// ─── SDF helpers ───────────────────────────────────────────────────────────
+float SampleSDF(float3 pos)
+{
+    float3 uvw = (pos - _SDFGridMin) / (_SDFCellSize * (float3)_GridResolution);
+    return _BucketSDF.SampleLevel(sampler_LinearClamp, uvw, 0).r;
+}
+
+float3 ComputeSDFGradient(float3 pos)
+{
+    float eps = _SDFCellSize * 0.5f;
+    float dx = SampleSDF(pos + float3(eps, 0, 0)) - SampleSDF(pos - float3(eps, 0, 0));
+    float dy = SampleSDF(pos + float3(0, eps, 0)) - SampleSDF(pos - float3(0, eps, 0));
+    float dz = SampleSDF(pos + float3(0, 0, eps)) - SampleSDF(pos - float3(0, 0, eps));
+    return normalize(float3(dx, dy, dz));
 }
 
 // ─── Kernel: ClearLambdas ─────────────────────────────────────────────────
@@ -84,16 +137,33 @@ void ClearLambdas(uint3 id : SV_DispatchThreadID)
         _LRAWeights[i] = 0.0f;
 }
 
-// ─── Kernel: ApplyForces ──────────────────────────────────────────────────
+// ─── Kernel: ClearSpatialHash ─────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void ClearSpatialHash(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i < (uint)_GridSize)
+        _GridCellCounts[i] = 0;
+}
+
+// ── Kernel: ApplyForces ──────────────────────────────────────────────────
 [numthreads(64, 1, 1)]
 void ApplyForces(uint3 id : SV_DispatchThreadID)
 {
     uint i = id.x;
-    if (i < (uint)_NumParticles && _InvMasses[i] > 0.0f)
-        _Velocities[i] += _Dt * _Gravity;
+    if (i >= (uint)_NumParticles || _InvMasses[i] <= 0.0f) return;
+
+    // الجاذبية العادية لكل الجسيمات
+    _Velocities[i] += _Gravity * _Dt;
+
+    // ✅ Two-Way Coupling: تطبيق وزن الدلو على الجسيم الأخير فقط
+    if (i == (uint)_NumParticles - 1 && _BucketMass > 0.0f)
+    {
+        _Velocities[i] += _Dt * _Gravity * _BucketMass * _InvMasses[i];
+    }
 }
 
-// ─── Kernel: Predict ──────────────────────────────────────────────────────
+// ── Kernel: Predict ──────────────────────────────────────────────────────
 [numthreads(64, 1, 1)]
 void Predict(uint3 id : SV_DispatchThreadID)
 {
@@ -149,8 +219,6 @@ void SolveStretch(uint3 id : SV_DispatchThreadID)
 }
 
 // ─── Kernel: SolveBendTwist ───────────────────────────────────────────────
-// IMPROVEMENT 1: Modified Darboux Vector (prevent kinking)
-// IMPROVEMENT 2: Anisotropic Bending Stiffness
 [numthreads(64, 1, 1)]
 void SolveBendTwist(uint3 id : SV_DispatchThreadID)
 {
@@ -164,37 +232,37 @@ void SolveBendTwist(uint3 id : SV_DispatchThreadID)
     float4 qa  = _QuatPreds[ai], qb  = _QuatPreds[bi];
     float4 qa0 = _RestQuats[ai], qb0 = _RestQuats[bi];
 
-    // Relative rotation between adjacent frames
+    // Relative rotation
     float4 rel  = QMul(QConj(qa),  qb);
     float4 rel0 = QMul(QConj(qa0), qb0);
 
-    // IMPROVEMENT 1: Modified Darboux Vector
-    // Uses tan(θ/2) scaling instead of sin(θ/2) to prevent kinking
+    // ✅ IMPROVEMENT: Modified Darboux Vector (من الورقة - Appendix A)
+    // يستخدم tan(θ/2) بدلاً من sin(θ/2) لمنع الكسرات الحادة
     float sinHalf = length(rel.xyz);
     float cosHalf = rel.w;
     float sinHalf0 = length(rel0.xyz);
     float cosHalf0 = rel0.w;
     
-    // Avoid division by zero
+    // ✅ تجنب القسمة على صفر
     float scale = (abs(cosHalf) > 1e-8f) ? (sinHalf / cosHalf) : sinHalf;
     float scale0 = (abs(cosHalf0) > 1e-8f) ? (sinHalf0 / cosHalf0) : sinHalf0;
     
     float3 Psi = (abs(sinHalf) > 1e-8f) ? normalize(rel.xyz) * scale : float3(0, 0, 0);
     float3 Psi0 = (abs(sinHalf0) > 1e-8f) ? normalize(rel0.xyz) * scale0 : float3(0, 0, 0);
 
-    // Choose nearest rest pose
+    // ✅ اختيار أقرب rest pose (من الورقة - Equation 33)
     float s = dot(Psi, Psi0) >= 0.0f ? 1.0f : -1.0f;
     float3 Cb = Psi - s * Psi0;
 
-    // IMPROVEMENT 2: Anisotropic Bending Stiffness
-    // Apply different stiffness for bend1, bend2, and twist
+    // ✅ Anisotropic Bending Stiffness (bend فقط، بدون twist)
     Cb.x *= _BendStiffness.x;  // bend around d1
     Cb.y *= _BendStiffness.y;  // bend around d2
-    Cb.z *= _BendStiffness.z;  // twist around d3
+    // Cb.z لا نضربه هنا لأن twist سيُعالج في kernel منفصل
 
     float denom = wa + wb;
     if (denom < 1e-10f) return;
 
+    // ✅ XPBD مع compliance منخفض جداً
     float alpha = _BendCompliance / (_Dt * _Dt);
     float3 lambda = _LambdaB[ai];
     float3 deltaLambda = (_BendTwistK * Cb - alpha * lambda) / (denom + alpha);
@@ -205,68 +273,158 @@ void SolveBendTwist(uint3 id : SV_DispatchThreadID)
     _QuatPreds[bi] -= wb * QMul(qa, dq);
 }
 
+// ─── Kernel: SolveTwist ─────────────────────────────────────────────────
+// ✅ Twist Constraint منفصل للتحكم الأفضل في الالتواء
+[numthreads(64, 1, 1)]
+void SolveTwist(uint3 id : SV_DispatchThreadID)
+{
+    int j = (int)id.x * 2 + 1 + _Offset;
+    if (j >= _NumQuats || j == 0) return;
+
+    int   ai = j - 1, bi = j;
+    float wa = _QuatInvW[ai], wb = _QuatInvW[bi];
+    if (wa == 0.0f && wb == 0.0f) return;
+
+    float4 qa  = _QuatPreds[ai], qb  = _QuatPreds[bi];
+    float4 qa0 = _RestQuats[ai], qb0 = _RestQuats[bi];
+
+    // Relative rotation
+    float4 rel  = QMul(QConj(qa),  qb);
+    float4 rel0 = QMul(QConj(qa0), qb0);
+
+    float sinHalf = length(rel.xyz);
+    float cosHalf = rel.w;
+    float scale = (abs(cosHalf) > 1e-8f) ? (sinHalf / cosHalf) : sinHalf;
+    
+    float3 Psi = (abs(sinHalf) > 1e-8f) ? normalize(rel.xyz) * scale : float3(0, 0, 0);
+    
+    float sinHalf0 = length(rel0.xyz);
+    float cosHalf0 = rel0.w;
+    float scale0 = (abs(cosHalf0) > 1e-8f) ? (sinHalf0 / cosHalf0) : sinHalf0;
+    
+    float3 Psi0 = (abs(sinHalf0) > 1e-8f) ? normalize(rel0.xyz) * scale0 : float3(0, 0, 0);
+    
+    float s = dot(Psi, Psi0) >= 0.0f ? 1.0f : -1.0f;
+    
+    // ✅ Twist فقط (المكون z)
+    float twistDiff = Psi.z - s * Psi0.z;
+    
+    float denom = wa + wb;
+    if (denom < 1e-10f) return;
+
+    float alpha = _TwistCompliance / (_Dt * _Dt);
+    float3 deltaLambda = float3(0, 0, _TwistStiffness * twistDiff);
+    
+    float4 dq = float4(deltaLambda, 0.0f);
+    _QuatPreds[ai] += wa * QMul(qb, dq);
+    _QuatPreds[bi] -= wb * QMul(qa, dq);
+}
+
+// ─── Kernel: BuildSpatialHash ─────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void BuildSpatialHash(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_NumParticles) return;
+
+    int hash = HashGrid(_Predictions[i]);
+    int count = 0;
+    InterlockedAdd(_GridCellCounts[hash], 1, count);
+    
+    if (count < _GridMaxParticles)
+    {
+        _GridParticleIndices[hash * _GridMaxParticles + count] = i;
+    }
+}
+
 // ─── Kernel: SolveSelfCollision ───────────────────────────────────────────
-// IMPROVEMENT 3: Self-Collision constraints
 [numthreads(64, 1, 1)]
 void SolveSelfCollision(uint3 id : SV_DispatchThreadID)
 {
     int i = (int)id.x;
-    if (i >= _NumParticles - 3) return;
+    if (i >= _NumParticles) return;
 
     float3 pi = _Predictions[i];
     float wi = _InvMasses[i];
     if (wi == 0.0f) return;
 
-    // Check distance with non-adjacent particles (skip 2 neighbors)
-    for (int j = i + 3; j < _NumParticles; j++)
+    int3 myGrid = (int3)floor(pi / _CellSize);
+
+    // Check 27 neighboring cells
+    for (int dx = -1; dx <= 1; dx++)
     {
-        float3 pj = _Predictions[j];
-        float wj = _InvMasses[j];
-        if (wj == 0.0f) continue;
-
-        float3 diff = pj - pi;
-        float dist = length(diff);
-        float minDist = _SelfCollisionRadius;
-
-        if (dist < minDist && dist > 1e-6f)
+        for (int dy = -1; dy <= 1; dy++)
         {
-            float3 grad = diff / dist;
-            float C = dist - minDist;
-            
-            float denom = wi + wj;
-            if (denom < 1e-10f) continue;
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                int3 neighborGrid = myGrid + int3(dx, dy, dz);
+                int neighborHash = (neighborGrid.x * 73856093) ^ (neighborGrid.y * 19349663) ^ (neighborGrid.z * 83492791);
+                
+                int count = _GridCellCounts[neighborHash];
+                for (int k = 0; k < count; k++)
+                {
+                    int j = _GridParticleIndices[neighborHash * _GridMaxParticles + k];
+                    if (j <= i + 2) continue; // Skip adjacent particles
 
-            float alpha = 0.001f / (_Dt * _Dt);  // Small compliance for stability
-            float lambda = _LambdaSC[i].x;
-            float deltaLambda = (C - alpha * lambda) / (denom + alpha);
-            _LambdaSC[i].x += deltaLambda;
+                    float3 pj = _Predictions[j];
+                    float wj = _InvMasses[j];
+                    if (wj == 0.0f) continue;
 
-            float correctionFactor = deltaLambda / denom;
-            _Predictions[i] -= wi * correctionFactor * grad;
-            _Predictions[j] += wj * correctionFactor * grad;
+                    float3 diff = pj - pi;
+                    float dist = length(diff);
+                    float minDist = _SelfCollisionRadius;
+
+                    if (dist < minDist && dist > 1e-6f)
+                    {
+                        float3 grad = diff / dist;
+                        float C = dist - minDist;
+                        
+                        float denom = wi + wj;
+                        if (denom < 1e-10f) continue;
+
+                        float alpha = 0.001f / (_Dt * _Dt);
+                        float lambda = _LambdaSC[i].x;
+                        float deltaLambda = (C - alpha * lambda) / (denom + alpha);
+                        _LambdaSC[i].x += deltaLambda;
+
+                        float correctionFactor = deltaLambda / denom;
+                        _Predictions[i] -= wi * correctionFactor * grad;
+                        _Predictions[j] += wj * correctionFactor * grad;
+                    }
+                }
+            }
         }
     }
 }
 
 // ─── Kernel: SolveLRA ─────────────────────────────────────────────────────
-// IMPROVEMENT 4: Long Range Attachments (prevent excessive stretching)
+// ✅ Dynamic Grab Anchor: استخدام grabIndex كمرساة ديناميكية
 [numthreads(64, 1, 1)]
 void SolveLRA(uint3 id : SV_DispatchThreadID)
 {
     int i = (int)id.x;
-    if (i < 2 || i >= _NumParticles - 1) return;  // Skip first and last particles
+    
+    // ✅ استخدام grabIndex كمرساة ديناميكية
+    int anchorIdx = (_GrabIndex >= 0) ? _GrabIndex : 0;
+    
+    // تخطي الجسيمات فوق نقطة الإمساك
+    if (i <= anchorIdx) return;
+    if (i >= _NumParticles - 1) return;
 
     float wi = _InvMasses[i];
     if (wi == 0.0f) return;
 
-    // Connect to particle 0 (top anchor) with soft constraint
-    float3 p0 = _Predictions[0];
+    // ✅ استخدام anchorIdx بدلاً من 0
+    float3 p0 = _Predictions[anchorIdx];
     float3 pi = _Predictions[i];
-    float w0 = _InvMasses[0];
+    float w0 = _InvMasses[anchorIdx];
 
     float3 diff = pi - p0;
     float dist = length(diff);
-    float maxDist = i * _SegLen * (1.0f + _LRASoftness);  // Allow some stretch
+    
+    // ✅ حساب المسافة من نقطة الإمساك
+    int distFromAnchor = i - anchorIdx;
+    float maxDist = distFromAnchor * _SegLen * (1.0f + _LRASoftness);
 
     if (dist > maxDist)
     {
@@ -276,12 +434,31 @@ void SolveLRA(uint3 id : SV_DispatchThreadID)
         float denom = w0 + wi;
         if (denom < 1e-10f) return;
 
-        float alpha = 0.01f / (_Dt * _Dt);  // Soft compliance
+        // ✅ compliance منخفض جداً لـ LRA
+        float alpha = 0.001f / (_Dt * _Dt);
         float lambda = _LRAWeights[i];
         float deltaLambda = (C - alpha * lambda) / (denom + alpha);
         _LRAWeights[i] += deltaLambda;
 
         _Predictions[i] -= wi * deltaLambda * grad / denom;
+    }
+}
+
+// ─── Kernel: SolveBucketCollision ─────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void SolveBucketCollision(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_NumParticles) return;
+
+    float3 pos = _Predictions[i];
+    float dist = SampleSDF(pos);
+    
+    if (dist < _RopeRadius)
+    {
+        float3 gradient = ComputeSDFGradient(pos);
+        float penetration = _RopeRadius - dist;
+        _Predictions[i] += gradient * penetration;
     }
 }
 
@@ -293,7 +470,7 @@ void NormalizeQuats(uint3 id : SV_DispatchThreadID)
         _QuatPreds[id.x] = normalize(_QuatPreds[id.x]);
 }
 
-// ─── Kernel: UpdateVelocities ─────────────────────────────────────────────
+// ── Kernel: UpdateVelocities ─────────────────────────────────────────────
 [numthreads(64, 1, 1)]
 void UpdateVelocities(uint3 id : SV_DispatchThreadID)
 {
@@ -325,7 +502,7 @@ void UpdateVelocities(uint3 id : SV_DispatchThreadID)
     }
 }
 
-// ─── Kernel: ApplyDamping ─────────────────────────────────────────────────
+// ─── Kernel: ApplyDamping ────────────────────────────────────────────────
 [numthreads(64, 1, 1)]
 void ApplyDamping(uint3 id : SV_DispatchThreadID)
 {

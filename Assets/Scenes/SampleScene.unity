@@ -653,6 +653,7 @@ GameObject:
   - component: {fileID: 1099199226}
   - component: {fileID: 1099199225}
   - component: {fileID: 1099199224}
+  - component: {fileID: 1099199228}
   m_Layer: 0
   m_Name: Bucket
   m_TagString: Untagged
@@ -742,13 +743,28 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1099199223}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.0056472183, y: 0.6030028, z: -0.0010920974, w: -0.7977184}
+  m_LocalRotation: {x: -0.003464683, y: 0.45118263, z: -0.0045912676, w: 0.89241314}
   m_LocalPosition: {x: 1.15, y: 0.96, z: -0.54}
   m_LocalScale: {x: -1.1288154, y: 1.395311, z: 1.2431895}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -0.441, y: 645.826, z: -359.51}
+  m_LocalEulerAnglesHint: {x: -0.117, y: 413.641, z: -360.649}
+--- !u!114 &1099199228
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1099199223}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6609fed7eaa342f43ae51761dd134c99, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Simulation.ShowVertices
+  _sphereSize: 0.01
+  _vertexColor: {r: 1, g: 0, b: 0, a: 1}
+  _showOnlyInEditMode: 1
 --- !u!21 &1304727482
 Material:
   serializedVersion: 8
@@ -869,6 +885,14 @@ MonoBehaviour:
   _selfCollisionRadius: 0.05
   _lraSoftness: 0.1
   _gravity: {x: 0, y: -9.81, z: 0}
+  _cellSize: 0.1
+  _gridMaxParticles: 8
+  _gridSize: 1000
+  _bucketSDF: {fileID: 0}
+  _sdfGridMin: {x: -2, y: -2, z: -2}
+  _sdfCellSize: 0.05
+  _ropeRadius: 0.02
+  _gridResolution: {x: 64, y: 64, z: 64}
   _logLevel: 1
 --- !u!114 &1601257682
 MonoBehaviour:

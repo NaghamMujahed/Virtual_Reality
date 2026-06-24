@@ -13,7 +13,7 @@ namespace Simulation
         
         // UI State
         bool   _visible    = true;
-        Rect   _windowRect = new Rect(20, 20, 820, 680); // حجم ثابت
+        Rect   _windowRect = new Rect(20, 20, 920, 850); // ✅ حجم أكبر للمزيد من العناصر
         const int WinId    = 9822;
         
         // Performance caching
@@ -139,22 +139,22 @@ namespace Simulation
             ValRow("VRAM", $"{vram / 1048576f:F1} MB  (graphics driver)");
             Divider();
 
-            // GPU ops
+            // GPU ops - ✅ محدث ليشمل kernels الجديدة
             int sub  = _sim.LastSubstepCount;
-            int dpS  = 2 + _sim.SolverIter * 5;
+            int dpS  = 2 + _sim.SolverIter * 7; // ✅ من 5 إلى 7 (أضفنا SolveTwist + BuildSpatialHash)
             int tD   = sub * dpS;
-            int sK   = sub * _sim.SolverIter * 4;
+            int sK   = sub * _sim.SolverIter * 6; // ✅ من 4 إلى 6 kernels
             BigRow("GPU Dispatches", $"{tD}", HC("ffcc44"),
                    $"{sub} substep  ×  {dpS}  kernel calls");
             BigRow("Solver Kernels", $"{sK}", HC("ffaa33"),
-                   $"{_sim.SolverIter} iter  ×  4 kernels  ×  {sub} substep");
+                   $"{_sim.SolverIter} iter  ×  6 kernels  ×  {sub} substep");
             
             int N = _sim.Segments;
             GUILayout.BeginHorizontal();
             GUILayout.Space(26);
             GUILayout.Label(
                 $"Predict×{sub}   Stretch×{sub*_sim.SolverIter*2} " +
-                $"   Bend×{sub*_sim.SolverIter*2} " +
+                $"   Bend×{sub*_sim.SolverIter*2}   Twist×{sub*_sim.SolverIter} " +
                 $"   NormQ×{sub*_sim.SolverIter}   UpdateVel×{sub}",
                 _sSmall);
             GUILayout.EndHorizontal();
@@ -170,10 +170,19 @@ namespace Simulation
 
             float sk = EditRow("sk", "Stretch K",    _sim.StretchK,   0.01f, 1f,   "F3");
             float bk = EditRow("bk", "Bend/Twist K", _sim.BendTwistK, 0f,    1f,   "F3");
-            float si = EditRow("si", "Solver Iter",  _sim.SolverIter, 1,     120,  "F0");
+            float si = EditRow("si", "Solver Iter",  _sim.SolverIter, 1,     300,  "F0"); // ✅ من 120 إلى 300
             _sim.StretchK   = sk;
             _sim.BendTwistK = bk;
             _sim.SolverIter = Mathf.RoundToInt(si);
+
+            GUILayout.Space(15);
+
+            // ✅ جديد: Compliance Sliders
+            SecTitle("COMPLIANCE  —  المرونة");
+            float sc = EditRow("sc", "Stretch Compliance", _sim.StretchCompliance, 0f, 1e-5f, "E2");
+            float bc = EditRow("bc", "Bend Compliance",    _sim.BendCompliance,    0f, 1e-5f, "E2");
+            _sim.StretchCompliance = sc;
+            _sim.BendCompliance    = bc;
 
             GUILayout.Space(22);
 
@@ -188,6 +197,46 @@ namespace Simulation
             if (!Mathf.Approximately(gy, _sim.Gravity.y))  _sim.Gravity = new Vector3(0f, gy, 0f);
             _sim.VelocityDamping = dm;
 
+            GUILayout.Space(15);
+
+            // ✅ محسّن: أزرار Presets مع setters كاملة
+            SecTitle("PRESETS  —  الإعدادات الجاهزة");
+            GUILayout.BeginHorizontal();
+            
+            if (GUILayout.Button("🎯 Realistic Rope", GUILayout.Height(40)))
+            {
+                _sim.StretchK = 1.0f;
+                _sim.BendTwistK = 0.95f;
+                _sim.SolverIter = 100;
+                _sim.VelocityDamping = 0.95f;
+                _sim.StretchCompliance = 1e-9f;
+                _sim.BendCompliance = 1e-9f;
+                Debug.Log("[RopeDebugUI] Applied Realistic Rope preset");
+            }
+
+            if (GUILayout.Button("🎪 Soft Rope", GUILayout.Height(40)))
+            {
+                _sim.StretchK = 0.8f;
+                _sim.BendTwistK = 0.6f;
+                _sim.SolverIter = 60;
+                _sim.VelocityDamping = 0.98f;
+                _sim.StretchCompliance = 1e-6f;
+                _sim.BendCompliance = 1e-6f;
+                Debug.Log("[RopeDebugUI] Applied Soft Rope preset");
+            }
+
+            if (GUILayout.Button("🔒 Stiff Rope", GUILayout.Height(40)))
+            {
+                _sim.StretchK = 1.0f;
+                _sim.BendTwistK = 1.0f;
+                _sim.SolverIter = 150;
+                _sim.VelocityDamping = 0.90f;
+                _sim.StretchCompliance = 1e-10f;
+                _sim.BendCompliance = 1e-10f;
+                Debug.Log("[RopeDebugUI] Applied Stiff Rope preset");
+            }
+            
+            GUILayout.EndHorizontal();
             GUILayout.Space(22);
 
             // ══════════════  ROPE INFO  ══════════════
@@ -201,6 +250,19 @@ namespace Simulation
             InfoChip($"Seg:  {_sim.SegLen * 100f:F1} cm");
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
+
+            // ✅ جديد: عرض Grab Index
+            if (_sim.GrabIndex >= 0)
+            {
+                GUILayout.Space(10);
+                BigRow("Grab Index", $"{_sim.GrabIndex}", HC("ffaa00"), 
+                       $"جسيم ممسوك حالياً — الجزء السفلي حر");
+            }
+            else
+            {
+                GUILayout.Space(10);
+                ValRow("Grab Index", "<color=#666666>لا يوجد إمساك</color>");
+            }
 
             // ══════════════  GRAB  ══════════════
             if (_grab != null)
