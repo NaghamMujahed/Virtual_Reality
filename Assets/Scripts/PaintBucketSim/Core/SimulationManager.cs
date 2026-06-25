@@ -8,6 +8,7 @@ using UnityEngine.InputSystem;
 using PaintBucketSim.Systems.Coupling;
 using PaintBucketSim.Systems.Boundary;
 using PaintBucketSim.Systems.Fluid;
+using PaintBucketSim.Systems.Bucket;
 
 namespace PaintBucketSim.Core
 {
@@ -26,6 +27,8 @@ namespace PaintBucketSim.Core
 
         [Header("Runtime")]
         [SerializeField] private bool initializeOnStart = true;
+
+        [SerializeField] private BucketDriveSystem bucketDriveSystem;
 
         public SimulationContext Context { get; private set; }
         public TimeStepController TimeController { get; private set; }
@@ -79,6 +82,9 @@ namespace PaintBucketSim.Core
             if (boundarySystem == null)
                 boundarySystem = FindFirstObjectByType<BoundarySystem>();
 
+            if (bucketDriveSystem == null)
+                bucketDriveSystem = FindFirstObjectByType<BucketDriveSystem>();
+
             if (paintFluidSystem == null)
                 paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
 
@@ -100,7 +106,10 @@ namespace PaintBucketSim.Core
             if (ropeBucketCouplingSystem != null)
                 ropeBucketCouplingSystem.Initialize(Context);
 
-            if(boundarySystem != null)
+            if (bucketDriveSystem != null)
+                bucketDriveSystem.Initialize(Context);
+
+            if (boundarySystem != null)
                 boundarySystem.Initialize(Context);
 
             if (paintFluidSystem != null)
@@ -149,10 +158,14 @@ namespace PaintBucketSim.Core
             if (ropeSystem != null)
                 ropeSystem.Step(Context, dt);
 
+            // External physical driving must be applied before bucket integration.
+            if (bucketDriveSystem != null)
+                bucketDriveSystem.Step(Context, dt);
+
             if (bucketSystem != null)
                 bucketSystem.Step(Context, dt);
 
-            if (ropeBucketCouplingSystem != null)
+            if (ropeBucketCouplingSystem != null && ropeBucketCouplingSystem.isActiveAndEnabled)
                 ropeBucketCouplingSystem.Step(Context, dt);
 
             // Boundary must be updated AFTER bucket and coupling,
@@ -204,6 +217,9 @@ namespace PaintBucketSim.Core
 
             if (ropeBucketCouplingSystem != null)
                 ropeBucketCouplingSystem.ResetSystem(Context);
+
+            if (bucketDriveSystem != null)
+                bucketDriveSystem.ResetSystem(Context);
 
             if (boundarySystem != null)
                 boundarySystem.ResetSystem(Context);

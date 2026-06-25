@@ -26,8 +26,9 @@ namespace PaintBucketSim.Systems.Fluid
         [SerializeField] private PbfSolverConfig pbfSolverConfig;
         
         [Header("GPU Solver")]
-        [SerializeField] private GpuMpmSolverConfig gpuMpmSolverConfig;
+        [SerializeField] private GpuDfsphSolverConfig gpuDfsphSolverConfig;
         [SerializeField] private GpuFluidBufferSet gpuFluidBufferSet;
+
 
         [Header("Systems")]
         [SerializeField] private BucketSystem bucketSystem;
@@ -103,6 +104,14 @@ namespace PaintBucketSim.Systems.Fluid
             _data.Allocate(paintFluidConfig.maxParticleCapacity, Allocator.Persistent);
 
             GenerateParticlesInsideBucket();
+
+            Debug.Log(
+                $"PaintFluidSystem Generated Particles: " +
+                $"count={_data.Count}, " +
+                $"capacity={_data.Capacity}, " +
+                $"target={paintFluidConfig.targetParticleCount}, " +
+                $"fill={paintFluidConfig.fillFraction01}"
+            );
 
             _initialized = true;
             _solverStepIndex = 0;
@@ -248,13 +257,13 @@ namespace PaintBucketSim.Systems.Fluid
                 PbfConfig = pbfSolverConfig,
                 ArchitectureConfig = architectureConfig,
 
-                GpuMpmConfig = gpuMpmSolverConfig,
                 GpuBufferSet = gpuFluidBufferSet,
 
                 BucketSystem = bucketSystem,
                 BoundarySystem = boundarySystem,
 
-                Particles = _data
+                Particles = _data,
+                GpuDfsphConfig = gpuDfsphSolverConfig
             };
         }
 
@@ -262,41 +271,22 @@ namespace PaintBucketSim.Systems.Fluid
         {
             FluidSolverType requestedSolver = architectureConfig.activeSolver;
 
-            if (requestedSolver == FluidSolverType.CpuPbf)
+            switch (requestedSolver)
             {
-                _activeSolver = new CpuPbfFluidSolver();
-            }
-            else if (requestedSolver == FluidSolverType.GpuSparseMpmPrototype)
-            {
-                bool gpuReady =
-                    gpuMpmSolverConfig != null &&
-                    gpuMpmSolverConfig.denseLocalMpmCompute != null &&
-                    gpuFluidBufferSet != null;
-
-                if (gpuReady)
-                {
-                    _activeSolver = new GpuMpmDenseLocalSolver();
-                }
-                else if (architectureConfig.fallbackToCpuPbfIfSelectedSolverUnavailable)
-                {
+                case FluidSolverType.CpuPbf:
                     _activeSolver = new CpuPbfFluidSolver();
+                    break;
 
-                    if (architectureConfig.logSolverLifecycle)
-                    {
-                        Debug.LogWarning(
-                            "PaintFluidSystem: GPU MPM selected, but GPU config/buffers/compute are missing. " +
-                            "Falling back to CpuPbfSolver."
-                        );
-                    }
-                }
-                else
-                {
-                    _activeSolver = new GpuMpmDenseLocalSolver();
-                }
-            }
-            else
-            {
-                _activeSolver = new CpuPbfFluidSolver();
+                case FluidSolverType.GpuDfsphPaint:
+                    _activeSolver = new GpuDfsphPaintSolver();
+                    break;
+
+                default:
+                    Debug.LogWarning(
+                        $"PaintFluidSystem: Unsupported solver {requestedSolver}. Falling back to GPU DFSPH."
+                    );
+                    _activeSolver = new GpuDfsphPaintSolver();
+                    break;
             }
 
             if (architectureConfig.logSolverLifecycle)
@@ -376,8 +366,20 @@ namespace PaintBucketSim.Systems.Fluid
             float mass = restDensity * restVolume;
 
             float estimatedSpacing = EstimateSpacingFromVolume(restVolume);
-            float radius = estimatedSpacing * 0.45f;
+            float radius =
+            estimatedSpacing *
+            Mathf.Clamp(
+                paintFluidConfig.particleRadiusToSpacing,
+                0.25f,
+                0.65f
+            );
 
+            Debug.Log(
+                $"Paint Generation Debug: " +
+                $"generated={_data.Count}, " +
+                $"spacing={estimatedSpacing}, " +
+                $"radius={radius}"
+            );
             //float spacing = ComputeParticleSpacing(bucketConfig);
             //float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
 
@@ -467,7 +469,7 @@ namespace PaintBucketSim.Systems.Fluid
             
             targetPaintVolume = bucketVolume * Mathf.Clamp01(paintFluidConfig.fillFraction01);
 
-            RecalibrateGeneratedParticles(targetPaintVolume, restDensity);
+            //RecalibrateGeneratedParticles(targetPaintVolume, restDensity);
         }
 
         private void UpdateWorldFromLocalPreview()
@@ -963,56 +965,56 @@ namespace PaintBucketSim.Systems.Fluid
             return Mathf.Pow(Mathf.Max(restVolume, 1e-12f), 1.0f / 3.0f);
         }
 
-        private void RecalibrateGeneratedParticles(float targetPaintVolume, float restDensity)
-        {
-            int count = Mathf.Max(1, _data.Count);
+        //private void RecalibrateGeneratedParticles(float targetPaintVolume, float restDensity)
+        //{
+        //    int count = Mathf.Max(1, _data.Count);
 
-            float restVolume = targetPaintVolume / count;
-            float mass = restDensity * restVolume;
+        //    float restVolume = targetPaintVolume / count;
+        //    float mass = restDensity * restVolume;
 
-            float spacing = EstimateSpacingFromVolume(restVolume);
-            float radius = spacing * 0.45f;
+        //    float spacing = EstimateSpacingFromVolume(restVolume);
+        //    float radius = spacing * 0.45f;
 
-            for (int i = 0; i < _data.Count; i++)
-            {
-                _data.RestVolumes[i] = restVolume;
-                _data.RestDensities[i] = restDensity;
-                _data.Masses[i] = mass;
-                _data.Radii[i] = radius;
-                _data.Densities[i] = restDensity;
-            }
+        //    for (int i = 0; i < _data.Count; i++)
+        //    {
+        //        _data.RestVolumes[i] = restVolume;
+        //        _data.RestDensities[i] = restDensity;
+        //        _data.Masses[i] = mass;
+        //        _data.Radii[i] = radius;
+        //        _data.Densities[i] = restDensity;
+        //    }
 
-            float representedVolume = restVolume * count;
+        //    float representedVolume = restVolume * count;
 
-            _calibrationStats = new FluidCalibrationStats
-            {
-                valid = true,
+        //    _calibrationStats = new FluidCalibrationStats
+        //    {
+        //        valid = true,
 
-                bucketInnerVolumeM3 = ComputeBucketInnerVolumeM3(),
-                targetPaintVolumeM3 = targetPaintVolume,
-                targetParticleCount = paintFluidConfig.targetParticleCount,
-                actualParticleCount = count,
+        //        bucketInnerVolumeM3 = ComputeBucketInnerVolumeM3(),
+        //        targetPaintVolumeM3 = targetPaintVolume,
+        //        targetParticleCount = paintFluidConfig.targetParticleCount,
+        //        actualParticleCount = count,
 
-                restDensityKgPerM3 = restDensity,
-                restVolumePerParticleM3 = restVolume,
-                massPerParticleKg = mass,
+        //        restDensityKgPerM3 = restDensity,
+        //        restVolumePerParticleM3 = restVolume,
+        //        massPerParticleKg = mass,
 
-                estimatedParticleSpacingM = spacing,
-                particleRadiusM = radius,
+        //        estimatedParticleSpacingM = spacing,
+        //        particleRadiusM = radius,
 
-                totalMassKg = mass * count,
-                actualRepresentedVolumeM3 = representedVolume,
-                fillVolumeErrorPercent =
-                    targetPaintVolume > 1e-9f
-                        ? Mathf.Abs(representedVolume - targetPaintVolume) / targetPaintVolume * 100.0f
-                        : 0.0f,
+        //        totalMassKg = mass * count,
+        //        actualRepresentedVolumeM3 = representedVolume,
+        //        fillVolumeErrorPercent =
+        //            targetPaintVolume > 1e-9f
+        //                ? Mathf.Abs(representedVolume - targetPaintVolume) / targetPaintVolume * 100.0f
+        //                : 0.0f,
 
-                gridCellSizeM = gpuMpmSolverConfig != null ? gpuMpmSolverConfig.cellSizeMeters : 0.0f,
-                particleSpacingToCellSizeRatio =
-                    gpuMpmSolverConfig != null && gpuMpmSolverConfig.cellSizeMeters > 1e-6f
-                        ? spacing / gpuMpmSolverConfig.cellSizeMeters
-                        : 0.0f
-            };
-        }
+        //        gridCellSizeM = gpuMpmSolverConfig != null ? gpuMpmSolverConfig.cellSizeMeters : 0.0f,
+        //        particleSpacingToCellSizeRatio =
+        //            gpuMpmSolverConfig != null && gpuMpmSolverConfig.cellSizeMeters > 1e-6f
+        //                ? spacing / gpuMpmSolverConfig.cellSizeMeters
+        //                : 0.0f
+        //    };
+        //}
     }
 }

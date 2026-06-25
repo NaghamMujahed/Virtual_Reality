@@ -427,5 +427,99 @@ namespace PaintBucketSim.Systems.Boundary
             tangentA = math.normalize(math.cross(helper, normal));
             tangentB = math.normalize(math.cross(normal, tangentA));
         }
+
+        public int ExportGpuBoundaryParticles(
+            Vector4[] positionRadius,
+            Vector4[] normalType,
+            Vector4[] velocityPsi,
+            float fallbackRadius,
+            float fallbackPsi,
+            float psiScale)
+        {
+            if (!IsInitialized)
+                return 0;
+
+            if (positionRadius == null ||
+                normalType == null ||
+                velocityPsi == null)
+            {
+                return 0;
+            }
+
+            int maxCount =
+                Mathf.Min(
+                    positionRadius.Length,
+                    Mathf.Min(normalType.Length, velocityPsi.Length)
+                );
+
+            // عدّل هذا حسب اسم count الحقيقي الموجود عندك.
+            int boundaryCount = _data.Count;
+
+            int count =
+                Mathf.Min(boundaryCount, maxCount);
+
+            for (int i = 0; i < count; i++)
+            {
+                // عدّل أسماء هذه الحقول حسب BoundaryData الموجود عندك.
+                Vector3 p = _data.WorldPositions[i];
+                Vector3 n = _data.WorldNormals[i];
+                Vector3 v = _data.WorldVelocities[i];
+
+                // مهم جدًا:
+                // يجب أن يكون النورمال باتجاه السائل، وليس خارج الدلو.
+                // إذا لاحظت أن التصادم لاحقًا يدفع الجزيئات إلى الجدار بدل بعيدًا عنه،
+                // اقلب الإشارة هنا:
+                //
+                // n = -n;
+
+                if (n.sqrMagnitude < 1e-10f)
+                    n = Vector3.up;
+                else
+                    n.Normalize();
+
+                float radius = fallbackRadius;
+
+                // إذا عندك Radius array في BoundaryData استخدمها:
+                // radius = _data.Radius[i];
+
+                float psi = fallbackPsi;
+
+                // إذا عندك Psi array في BoundaryData استخدمها:
+                // psi = _data.Psi[i];
+
+                psi *= psiScale;
+
+                int type = 0;
+
+                // إذا عندك Type array استخدمها:
+                // type = (int)_data.Types[i];
+
+                positionRadius[i] =
+                    new Vector4(
+                        p.x,
+                        p.y,
+                        p.z,
+                        radius
+                    );
+
+                normalType[i] =
+                    new Vector4(
+                        n.x,
+                        n.y,
+                        n.z,
+                        type
+                    );
+
+                velocityPsi[i] =
+                    new Vector4(
+                        v.x,
+                        v.y,
+                        v.z,
+                        psi
+                    );
+            }
+
+            return count;
+        }
     }
 }

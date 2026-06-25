@@ -50,6 +50,36 @@ namespace PaintBucketSim.Systems.Coupling
             if (bucketSystem == null)
                 bucketSystem = FindFirstObjectByType<BucketSystem>();
 
+            if (couplingConfig != null &&
+                couplingConfig.alignBucketAttachmentToRopeEndOnInitialize &&
+                ropeSystem != null &&
+                ropeSystem.IsInitialized &&
+                bucketSystem != null &&
+                bucketSystem.IsInitialized)
+            {
+                Vector3 ropeEnd =
+                    ropeSystem.GetRopeEndPosition();
+
+                Vector3 bucketAttachmentBefore =
+                    bucketSystem.GetAttachmentWorldPosition();
+
+                float initialError =
+                    Vector3.Distance(ropeEnd, bucketAttachmentBefore);
+
+                if (initialError > couplingConfig.initialAlignmentWarningDistance)
+                {
+                    Debug.LogWarning(
+                        $"RopeBucketCouplingSystem: Initial attachment mismatch = {initialError:F4} m. " +
+                        $"Aligning bucket attachment to rope end."
+                    );
+                }
+
+                bucketSystem.AlignAttachmentToWorldPosition(
+                    ropeEnd,
+                    couplingConfig.resetBucketVelocityAfterInitialAlignment
+                );
+            }
+
             _diagnostics = default;
         }
 

@@ -72,7 +72,7 @@ namespace PaintBucketSim.Systems.Bucket
 
             if (bucketConfig.motionMode == BucketMotionMode.KinematicFollowTransform)
             {
-                ReadStateFromReferenceTransform();
+                ReadStateFromReferenceTransform(dt);
                 UpdateAttachmentAndHoles();
                 UpdateDiagnostics();
                 return;
@@ -161,22 +161,61 @@ namespace PaintBucketSim.Systems.Bucket
             _data.State = state;
         }
 
-        private void ReadStateFromReferenceTransform()
+        private void ReadStateFromReferenceTransform(float dt)
         {
-            Vector3 p = poseReferenceTransform != null ? poseReferenceTransform.position : transform.position;
-            Quaternion r = poseReferenceTransform != null ? poseReferenceTransform.rotation : transform.rotation;
+            Vector3 p = poseReferenceTransform != null
+                ? poseReferenceTransform.position
+                : transform.position;
+
+            Quaternion r = poseReferenceTransform != null
+                ? poseReferenceTransform.rotation
+                : transform.rotation;
 
             BucketState state = _data.State;
 
-            float3 newPosition = new float3(p.x, p.y, p.z);
-            quaternion newRotation = new quaternion(r.x, r.y, r.z, r.w);
+            float3 oldPosition = state.position;
+            quaternion oldRotation = state.rotation;
 
-            // Kinematic mode is mainly for visual/transform-driven testing.
-            // Velocity is estimated weakly later when needed by coupling.
+            float3 newPosition = new float3(p.x, p.y, p.z);
+            quaternion newRotation = math.normalize(new quaternion(r.x, r.y, r.z, r.w));
+
+            if (dt > 1e-8f)
+            {
+                state.velocity =
+                    (newPosition - oldPosition) / dt;
+
+                quaternion delta =
+                    math.mul(newRotation, math.inverse(oldRotation));
+
+                Quaternion dq =
+                    new Quaternion(delta.value.x, delta.value.y, delta.value.z, delta.value.w);
+
+                dq.ToAngleAxis(out float angleDeg, out Vector3 axis);
+
+                if (angleDeg > 180.0f)
+                    angleDeg -= 360.0f;
+
+                if (axis.sqrMagnitude > 1e-8f)
+                {
+                    float angleRad = angleDeg * Mathf.Deg2Rad;
+                    Vector3 omega = axis.normalized * (angleRad / dt);
+
+                    state.angularVelocity =
+                        new float3(omega.x, omega.y, omega.z);
+                }
+                else
+                {
+                    state.angularVelocity = float3.zero;
+                }
+            }
+            else
+            {
+                state.velocity = float3.zero;
+                state.angularVelocity = float3.zero;
+            }
+
             state.position = newPosition;
-            state.rotation = math.normalize(newRotation);
-            state.velocity = float3.zero;
-            state.angularVelocity = float3.zero;
+            state.rotation = newRotation;
 
             _data.State = state;
         }
@@ -437,6 +476,152 @@ namespace PaintBucketSim.Systems.Bucket
             {
                 state.velocity += dp / dt;
                 state.angularVelocity += dTheta / dt;
+            }
+
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void AddImpulse(float3 impulse)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+
+            state.velocity += impulse * state.inverseMass;
+
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void AddAngularImpulse(float3 angularImpulseWorld)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+
+            quaternion invRot = math.inverse(state.rotation);
+
+            float3 localAngularImpulse =
+                math.rotate(invRot, angularImpulseWorld);
+
+            float3 localDeltaOmega =
+                localAngularImpulse * state.inverseInertiaTensorBody;
+
+            float3 worldDeltaOmega =
+                math.rotate(state.rotation, localDeltaOmega);
+
+            state.angularVelocity += worldDeltaOmega;
+
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void AddImpulseAtWorldPoint(float3 impulse, float3 worldPoint)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+
+            state.velocity += impulse * state.inverseMass;
+
+            float3 r =
+                worldPoint - state.position;
+
+            float3 angularImpulseWorld =
+                math.cross(r, impulse);
+
+            quaternion invRot =
+                math.inverse(state.rotation);
+
+            float3 localAngularImpulse =
+                math.rotate(invRot, angularImpulseWorld);
+
+            float3 localDeltaOmega =
+                localAngularImpulse * state.inverseInertiaTensorBody;
+
+            float3 worldDeltaOmega =
+                math.rotate(state.rotation, localDeltaOmega);
+
+            state.angularVelocity += worldDeltaOmega;
+
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void SetLinearVelocity(float3 velocity)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+            state.velocity = velocity;
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void SetAngularVelocity(float3 angularVelocity)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+            state.angularVelocity = angularVelocity;
+            _data.State = state;
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void AlignAttachmentToWorldPosition(
+    Vector3 targetAttachmentWorld,
+    bool resetVelocity)
+        {
+            if (!IsInitialized || bucketConfig == null)
+                return;
+
+            BucketState state = _data.State;
+
+            Vector3 localAttachmentVector =
+                bucketConfig.GetResolvedAttachmentLocalPoint();
+
+            float3 localAttachment =
+                new float3(
+                    localAttachmentVector.x,
+                    localAttachmentVector.y,
+                    localAttachmentVector.z
+                );
+
+            float3 rotatedAttachment =
+                math.rotate(state.rotation, localAttachment);
+
+            float3 target =
+                new float3(
+                    targetAttachmentWorld.x,
+                    targetAttachmentWorld.y,
+                    targetAttachmentWorld.z
+                );
+
+            state.position =
+                target - rotatedAttachment;
+
+            if (resetVelocity)
+            {
+                state.velocity = float3.zero;
+                state.angularVelocity = float3.zero;
             }
 
             _data.State = state;

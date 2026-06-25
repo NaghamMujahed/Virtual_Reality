@@ -17,7 +17,10 @@ MonoBehaviour:
   solverIterations: 6
   correctRopeEnd: 1
   correctBucket: 1
-  maxLinearCorrectionPerSubstep: 0.25
-  maxAngularCorrectionPerSubstep: 0.4
+  maxLinearCorrectionPerSubstep: 0.15
+  maxAngularCorrectionPerSubstep: 0.2
   updateVelocitiesFromCorrection: 1
   enableDiagnostics: 1
+  alignBucketAttachmentToRopeEndOnInitialize: 1
+  resetBucketVelocityAfterInitialAlignment: 1
+  initialAlignmentWarningDistance: 0.02

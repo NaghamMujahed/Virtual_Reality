@@ -2667,7 +2667,6 @@ GameObject:
   - component: {fileID: 303841545}
   - component: {fileID: 303841544}
   - component: {fileID: 303841546}
-  - component: {fileID: 303841556}
   - component: {fileID: 303841551}
   - component: {fileID: 303841550}
   - component: {fileID: 303841553}
@@ -2697,7 +2696,6 @@ Transform:
   - {fileID: 1435666627}
   - {fileID: 1657576615}
   - {fileID: 624829620}
-  - {fileID: 835465913}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &303841544
@@ -2901,7 +2899,6 @@ MonoBehaviour:
   boundarySystem: {fileID: 303841551}
   paintFluidSystem: {fileID: 303841553}
   initializeOnStart: 1
-  bucketDriveSystem: {fileID: 303841556}
 --- !u!114 &303841550
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3000,35 +2997,6 @@ MonoBehaviour:
   paintFluidSystem: {fileID: 303841553}
   bufferConfig: {fileID: 11400000, guid: a43ef09a2df66784d98d24e3a4346501, type: 2}
   utilityCompute: {fileID: 7200000, guid: 075982d082ce28e4bb033c16d3b385f7, type: 3}
---- !u!114 &303841556
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 303841542}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 65b0bb33f19b78a4c9c60ed0644c05b6, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Bucket.BucketDriveSystem
-  bucketSystem: {fileID: 1657576619}
-  applyInitialImpulseOnInitialize: 0
-  initialImpulseDirectionWorld: {x: 1, y: 0, z: 0}
-  initialImpulseNewtonSeconds: 0.4
-  applyInitialImpulseAtAttachment: 1
-  initialImpulseLocalPoint: {x: 0, y: 0, z: 0}
-  applyInitialAngularImpulseOnInitialize: 0
-  initialAngularImpulseWorld: {x: 0, y: 0, z: 0.05}
-  enableSpringDrive: 1
-  driveTargetTransform: {fileID: 835465913}
-  drivenLocalPoint: {x: 0, y: 0.35, z: 0}
-  springStiffness: 80
-  springDamping: 12
-  maxDriveForce: 150
-  enableConstantForce: 0
-  constantForceWorld: {x: 0, y: 0, z: 0}
-  applyConstantForceAtAttachment: 1
 --- !u!1 &308206944
 GameObject:
   m_ObjectHideFlags: 0
@@ -6561,37 +6529,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &835465912
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 835465913}
-  m_Layer: 0
-  m_Name: BucketDriveTarget
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &835465913
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 835465912}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 5, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 303841543}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &848349099
 GameObject:
@@ -13090,7 +13027,7 @@ Transform:
   m_GameObject: {fileID: 1657576614}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 5, z: 0}
+  m_LocalPosition: {x: 0, y: 4, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

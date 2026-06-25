@@ -16,10 +16,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         public BucketSystem BucketSystem;
         public BoundarySystem BoundarySystem;
 
-        public GpuMpmSolverConfig GpuMpmConfig;
         public GpuFluidBufferSet GpuBufferSet;
 
         public FluidParticleData Particles;
+
+        public GpuDfsphSolverConfig GpuDfsphConfig;
 
         public bool IsValid =>
             MaterialConfig != null &&

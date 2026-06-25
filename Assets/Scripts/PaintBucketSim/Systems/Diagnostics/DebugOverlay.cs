@@ -211,32 +211,18 @@ namespace PaintBucketSim.Systems.Diagnostics
                 GUILayout.Label($"Analytic Projection: {ss.usedAnalyticProjection}", _labelStyle);
                 GUILayout.Label($"XSPH Viscosity: {ss.usedXsphViscosity}", _labelStyle);
 
-                GUILayout.Label($"GPU Grid: {ss.gpuGridResolutionX} x {ss.gpuGridResolutionY} x {ss.gpuGridResolutionZ}", _labelStyle);
-                GUILayout.Label($"GPU Grid Nodes: {ss.gpuGridNodeCount}", _labelStyle);
-                GUILayout.Label($"GPU Cell Size: {ss.gpuCellSizeMeters:F4} m", _labelStyle);
-                GUILayout.Label($"GPU Dispatch Count: {ss.gpuDispatchCount}", _labelStyle);
+                GUILayout.Space(8);
+                GUILayout.Label("GPU DFSPH", _labelStyle);
 
-                GUILayout.Label($"Projection Grid: {ss.projectionGridEnabled}", _labelStyle);
-                GUILayout.Label($"Projection Buffers Ready: {ss.projectionBuffersReady}", _labelStyle);
-                GUILayout.Label($"Projection Nodes: {ss.projectionGridNodeCount}", _labelStyle);
-                GUILayout.Label($"Projection Dispatches: {ss.projectionDispatchCount}", _labelStyle);
-                GUILayout.Label($"Min Fluid Cell Mass: {ss.projectionMinFluidCellMass:E2}", _labelStyle);
+                GUILayout.Label($"DFSPH Buffers Ready: {ss.dfsphBuffersReady}", _labelStyle);
+                GUILayout.Label($"DFSPH Buffer Capacity: {ss.dfsphBufferCapacity}", _labelStyle);
 
-                GUILayout.Label($"Projection Divergence: {ss.projectionDivergenceEnabled}", _labelStyle);
-                GUILayout.Label($"Divergence Buffer Ready: {ss.projectionDivergenceBufferReady}", _labelStyle);
-                GUILayout.Label($"Divergence Scale: {ss.projectionDivergenceScale:F2}", _labelStyle);
-                GUILayout.Label($"Max Abs Divergence: {ss.maxAbsProjectionDivergence:F2}", _labelStyle);
+                GUILayout.Label($"Rest Density: {ss.dfsphRestDensity:F1}", _labelStyle);
+                GUILayout.Label($"Particle Radius: {ss.dfsphParticleRadius:F4}", _labelStyle);
+                GUILayout.Label($"Support Radius: {ss.dfsphSupportRadius:F4}", _labelStyle);
 
-                GUILayout.Label($"Pressure Solve: {ss.pressureSolveEnabled}", _labelStyle);
-                GUILayout.Label($"Jacobi Iterations: {ss.pressureJacobiIterations}", _labelStyle);
-                GUILayout.Label($"Pressure RHS Scale: {ss.pressureRhsScale:F2}", _labelStyle);
-                GUILayout.Label($"Pressure Relaxation: {ss.pressureJacobiRelaxation:F2}", _labelStyle);
-                GUILayout.Label($"Max Projection Pressure: {ss.maxProjectionPressure:F1}", _labelStyle);
-
-                GUILayout.Label($"Pressure Gradient Subtraction: {ss.pressureGradientSubtractionEnabled}", _labelStyle);
-                GUILayout.Label($"Pressure Gradient Scale: {ss.pressureGradientScale:F2}", _labelStyle);
-                GUILayout.Label($"Max Pressure Velocity Correction: {ss.maxPressureVelocityCorrection:F2}", _labelStyle);
-                GUILayout.Label($"Invert Gradient Sign: {ss.invertPressureGradientSign}", _labelStyle);
+                GUILayout.Label($"Density Iterations: {ss.dfsphDensityIterations}", _labelStyle);
+                GUILayout.Label($"Divergence Iterations: {ss.dfsphDivergenceIterations}", _labelStyle);
 
                 FluidParticlePoolStats ps = paintFluidSystem.PoolStats;
 

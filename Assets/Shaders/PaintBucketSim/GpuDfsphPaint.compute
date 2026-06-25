@@ -1,0 +1,3962 @@
+﻿#pragma kernel KApplyExternalForces
+#pragma kernel KAdvectParticles
+
+#pragma kernel KClearDfsphScalarData
+#pragma kernel KClearDfsphTempData
+#pragma kernel KClearSpatialGrid
+#pragma kernel KBuildSpatialGrid
+#pragma kernel KComputeNeighborCountDebug
+#pragma kernel KComputeDensity
+#pragma kernel KComputeAlpha
+
+#pragma kernel KComputeDivergencePressure
+#pragma kernel KApplyDivergenceVelocityCorrection
+#pragma kernel KCopyVelocityTempToMain
+
+#pragma kernel KComputeDensityPressure
+#pragma kernel KApplyDensityVelocityCorrection
+
+#pragma kernel KApplyBucketSdfBoundary
+#pragma kernel KApplyBucketVelocityPreSolve
+
+#pragma kernel KApplyPaintViscosityCohesion
+#pragma kernel KApplyWallAdhesionDamping
+
+#pragma kernel KApplyBucketFrameTransport
+
+#pragma kernel KComputeBoundaryFactor
+#pragma kernel KApplyBoundaryPressurePush
+
+#pragma kernel KResolveSdfBoundaryPreSolve
+
+#pragma kernel KClearBoundarySpatialGrid
+#pragma kernel KBuildBoundarySpatialGrid
+
+#pragma kernel KResolveBoundaryParticleCollisionPreSolve
+
+RWStructuredBuffer<float4> _ParticlePositionRadius;
+RWStructuredBuffer<float4> _ParticleVelocityMass;
+
+StructuredBuffer<float4> _ParticleStateAgeIdRead;
+
+RWStructuredBuffer<float> _Density;
+StructuredBuffer<float> _DensityRead;
+RWStructuredBuffer<float> _PredictedDensity;
+
+RWStructuredBuffer<float> _Alpha;
+
+RWStructuredBuffer<float> _DensityError;
+RWStructuredBuffer<float> _DivergenceError;
+
+RWStructuredBuffer<float> _DivergencePressure;
+StructuredBuffer<float> _DensityPressureRead;
+RWStructuredBuffer<float> _DensityPressure;
+
+RWStructuredBuffer<int> _NeighborCount;
+
+RWStructuredBuffer<float4> _DfsphTempVector;
+RWStructuredBuffer<float> _DfsphTempScalar;
+
+RWStructuredBuffer<int> _ParticleCellIndex;
+
+RWStructuredBuffer<int> _CellParticleCount;
+RWStructuredBuffer<int> _CellParticleIndices;
+
+RWStructuredBuffer<int> _SpatialGridStats;
+
+StructuredBuffer<float4> _ParticlePositionRadiusRead;
+StructuredBuffer<float4> _ParticleVelocityMassRead;
+
+StructuredBuffer<int> _ParticleCellIndexRead;
+StructuredBuffer<int> _CellParticleCountRead;
+StructuredBuffer<int> _CellParticleIndicesRead;
+
+StructuredBuffer<float> _AlphaRead;
+StructuredBuffer<float> _DivergencePressureRead;
+
+StructuredBuffer<float4> _DfsphTempVectorRead;
+
+RWStructuredBuffer<float> _BoundaryFactor;
+StructuredBuffer<float> _BoundaryFactorRead;
+
+StructuredBuffer<float> _DensityErrorRead;
+
+StructuredBuffer<float4> _BoundaryPositionRadiusRead;
+StructuredBuffer<float4> _BoundaryNormalTypeRead;
+StructuredBuffer<float4> _BoundaryVelocityPsiRead;
+
+RWStructuredBuffer<int> _BoundaryCellCount;
+RWStructuredBuffer<int> _BoundaryCellIndices;
+RWStructuredBuffer<int> _BoundaryGridStats;
+
+StructuredBuffer<int> _BoundaryCellCountRead;
+StructuredBuffer<int> _BoundaryCellIndicesRead;
+
+RWStructuredBuffer<int> _BoundaryNeighborCount;
+RWStructuredBuffer<float> _BoundaryDensityContributionDebug;
+
+int _ParticleCount;
+
+float _Dt;
+float3 _Gravity;
+float _VelocityDampingPerSecond;
+float _MaxParticleSpeed;
+
+int _DfsphBufferCapacity;
+float _RestDensity;
+
+int3 _GridResolution;
+int _GridCellCount;
+
+float3 _GridOrigin;
+float _GridCellSize;
+float _InvGridCellSize;
+
+float _SupportRadius;
+float _SupportRadius2;
+
+int _MaxParticlesPerCell;
+int _DiscardParticlesOutsideGrid;
+
+int _SpatialClearElementCount;
+
+float _MinDensityClamp;
+float _MaxDensityClamp;
+
+float _Poly6KernelCoefficient;
+
+int _DensityKernelWritesNeighborCount;
+
+float _SpikyGradientCoefficient;
+
+float _AlphaDenominatorEpsilon;
+float _MaxAlpha;
+
+int _MinNeighborsForFullAlpha;
+float _LowNeighborAlphaDamping;
+
+int _EnableDivergenceSolve;
+
+float _DivergenceErrorScale;
+float _DivergenceCorrectionStrength;
+
+float _MaxDivergencePressure;
+float _MaxDivergenceVelocityCorrection;
+
+int _ClampDivergenceToCompressionOnly;
+int _InvertDivergenceErrorSign;
+
+int _EnableParticleAdvection;
+
+int _EnableDensitySolve;
+
+float _DensityErrorScale;
+float _DensityCorrectionStrength;
+
+float _MaxDensityPressure;
+float _MaxDensityVelocityCorrection;
+
+int _ClampDensityToCompressionOnly;
+int _InvertDensityErrorSign;
+
+int _EnableBucketSdfBoundary;
+
+float4x4 _BucketWorldToLocal;
+float4x4 _BucketLocalToWorld;
+
+int _BucketShapeType;
+
+float _BucketHeight;
+float _BucketTopRadius;
+float _BucketBottomRadius;
+float _BucketWallThickness;
+
+int _BucketBoundaryTopOpen;
+int _BucketBoundaryEnableSideWalls;
+int _BucketBoundaryEnableBottom;
+
+float _BucketBoundaryPadding;
+float _BucketBoundaryPositionStrength;
+float _BucketBoundaryVelocityStrength;
+float _BucketBoundaryRestitution;
+float _BucketBoundaryFriction;
+
+int _EnableMovingBucketWallVelocity;
+int _UseMovingWallVelocityInBoundary;
+
+float3 _BucketPositionWorld;
+float3 _BucketLinearVelocityWorld;
+float3 _BucketAngularVelocityWorld;
+
+float _MovingWallVelocityStrength;
+float _MaxMovingWallVelocity;
+
+float _MaxPreSolveWallVelocityCorrection;
+float _PreSolveWallInfluenceDistance;
+float _PreSolveWallVelocityCorrectionStrength;
+
+int _EnablePaintMaterialModel;
+
+float _XsphViscosityStrength;
+float _MaxPaintMaterialVelocityCorrection;
+
+float _CohesionStrength;
+float _CohesionDistanceFactor;
+
+float _AntiSprayDamping;
+int _AntiSprayNeighborThreshold;
+
+int _EnableWallAdhesionDamping;
+float _WallAdhesionDistance;
+float _WallTangentialDamping;
+float _WallNormalDamping;
+float _WallAdhesionAttraction;
+
+int _EnableBucketFrameTransport;
+
+float4x4 _PreviousBucketWorldToLocal;
+float4x4 _CurrentBucketLocalToWorld;
+
+float _BucketFramePositionTransportStrength;
+float _BucketFrameVelocityTransportStrength;
+float _MaxBucketFrameTransportVelocity;
+float _BucketFrameTransportMinDelta;
+
+int _EnableBoundaryAwareDfsph;
+
+float _BoundaryInfluenceDistance;
+float _BoundaryDensityContribution;
+float _BoundaryAlphaScaleNearWall;
+
+int _EnableBoundaryPressurePush;
+float _BoundaryPressurePushStrength;
+float _MaxBoundaryPressureVelocityCorrection;
+int _UseMovingWallVelocityForBoundaryPush;
+float _BoundaryDensityErrorPushScale;
+
+int _EnableConservativeSdfBoundary;
+int _EnableSdfPreSolveCollision;
+
+float _SdfSkinDistance;
+float _SdfNormalVelocityRemoval;
+float _SdfTangentialFriction;
+
+float _MaxSdfPreSolveVelocityCorrection;
+float _MaxSdfPositionCorrectionPerStep;
+float _SdfProjectionStrength;
+
+int _SdfUseMovingWallVelocity;
+
+
+int _EnableGpuBoundaryParticles;
+int _BoundaryParticleCount;
+
+int _MaxBoundaryParticlesPerCell;
+int _DiscardBoundaryParticlesOutsideGrid;
+
+int _BoundarySpatialClearElementCount;
+
+
+int _EnableBoundaryParticleDensity;
+float _BoundaryDensityStrength;
+float _MaxBoundaryDensityContribution;
+int _EnableBoundaryParticleAlpha;
+float _BoundaryAlphaStrength;
+int _MinBoundaryNeighborsForFullSupport;
+float _LowBoundaryNeighborDamping;
+int _WriteBoundaryDensityDebug;
+
+int _EnableBoundaryDivergencePressure;
+float _BoundaryDivergencePressureStrength;
+int _EnableBoundaryDensityPressure;
+float _BoundaryDensityPressureStrength;
+float _MaxBoundaryDivergenceVelocityCorrection;
+float _MaxBoundaryDensityVelocityCorrection;
+int _UseBoundaryVelocityInPressure;
+int _EnableBoundaryNormalFiltering;
+float _BoundaryNormalMinDot;
+float _BoundaryPressureDebugScale;
+
+int _EnableBoundaryParticleCollisionPreSolve;
+float _BoundaryCollisionDistanceFactor;
+float _BoundaryCollisionNormalVelocityRemoval;
+float _BoundaryCollisionTangentialFriction;
+float _MaxBoundaryCollisionVelocityCorrection;
+float _MaxBoundaryCollisionPositionCorrection;
+int _UseBoundaryVelocityInCollision;
+int _EnableBoundaryCollisionNormalFilter;
+float _BoundaryCollisionNormalMinDot;
+
+bool IsActiveFluidState(int state)
+{
+    // 1 = InsideFluid
+    // 2 = NearBoundary
+    // 3 = NearHole
+    // لاحقًا: Jet / Droplet سيكون لهم kernels منفصلة.
+    return state == 1 || state == 2 || state == 3;
+}
+
+float3 ClampSpeed(float3 v)
+{
+    float len = length(v);
+
+    if (len > _MaxParticleSpeed && len > 1e-6)
+        return v / len * _MaxParticleSpeed;
+
+    return v;
+}
+
+bool IsValidParticleState(int state)
+{
+    return state == 1 || state == 2 || state == 3;
+}
+
+int FlattenGridCoord(int3 c)
+{
+    return c.x +
+           c.y * _GridResolution.x +
+           c.z * _GridResolution.x * _GridResolution.y;
+}
+
+int3 UnflattenGridCoord(int index)
+{
+    int xy = _GridResolution.x * _GridResolution.y;
+
+    int z = index / xy;
+    int rem = index - z * xy;
+
+    int y = rem / _GridResolution.x;
+    int x = rem - y * _GridResolution.x;
+
+    return int3(x, y, z);
+}
+
+bool IsValidGridCoord(int3 c)
+{
+    return
+        c.x >= 0 &&
+        c.y >= 0 &&
+        c.z >= 0 &&
+        c.x < _GridResolution.x &&
+        c.y < _GridResolution.y &&
+        c.z < _GridResolution.z;
+}
+
+int3 WorldToGridCoord(float3 p)
+{
+    float3 g = (p - _GridOrigin) * _InvGridCellSize;
+    return (int3)floor(g);
+}
+
+float Poly6Kernel(float dist2)
+{
+    float h2 = _SupportRadius2;
+
+    if (dist2 >= h2)
+        return 0.0;
+
+    float x = h2 - dist2;
+
+    return _Poly6KernelCoefficient * x * x * x;
+}
+
+float3 SpikyKernelGradient(float3 r)
+{
+    float dist2 = dot(r, r);
+
+    if (dist2 <= 1e-12 || dist2 >= _SupportRadius2)
+        return float3(0, 0, 0);
+
+    float dist = sqrt(dist2);
+
+    float x = _SupportRadius - dist;
+
+    float factor =
+        _SpikyGradientCoefficient *
+        x *
+        x /
+        max(dist, 1e-6);
+
+    return factor * r;
+}
+
+float3 ClampVectorLength(float3 v, float maxLen)
+{
+    float len = length(v);
+
+    if (len > maxLen && len > 1e-6)
+        return v / len * maxLen;
+
+    return v;
+}
+
+float3 TransformPoint(float4x4 m, float3 p)
+{
+    return mul(m, float4(p, 1.0)).xyz;
+}
+
+float3 TransformVector(float4x4 m, float3 v)
+{
+    return mul(m, float4(v, 0.0)).xyz;
+}
+
+float3 ComputeBucketWallVelocityWorld(float3 pWorld)
+{
+    if (_EnableMovingBucketWallVelocity == 0)
+        return float3(0, 0, 0);
+
+    float3 r =
+        pWorld - _BucketPositionWorld;
+
+    float3 angularVelocityContribution =
+        cross(_BucketAngularVelocityWorld, r);
+
+    float3 wallVelocity =
+        _BucketLinearVelocityWorld +
+        angularVelocityContribution;
+
+    wallVelocity *=
+        saturate(_MovingWallVelocityStrength);
+
+    wallVelocity =
+        ClampVectorLength(
+            wallVelocity,
+            _MaxMovingWallVelocity
+        );
+
+    return wallVelocity;
+}
+
+float3 ComputeBucketWallVelocityLocal(float3 pLocal)
+{
+    float3 pWorld =
+        TransformPoint(
+            _BucketLocalToWorld,
+            pLocal
+        );
+
+    float3 wallVelocityWorld =
+        ComputeBucketWallVelocityWorld(pWorld);
+
+    return TransformVector(
+        _BucketWorldToLocal,
+        wallVelocityWorld
+    );
+}
+
+float2 SafeNormalize2(float2 v)
+{
+    float len = length(v);
+
+    if (len < 1e-6)
+        return float2(1, 0);
+
+    return v / len;
+}
+
+float BucketOuterRadiusAtY(float y)
+{
+    float halfH = 0.5 * _BucketHeight;
+
+    float t = saturate(
+        (y + halfH) /
+        max(_BucketHeight, 1e-6)
+    );
+
+    // 0 = Cylinder
+    // 1 = TaperedCylinder
+    if (_BucketShapeType == 0)
+        return _BucketTopRadius;
+
+    return lerp(
+        _BucketBottomRadius,
+        _BucketTopRadius,
+        t
+    );
+}
+
+float BucketRadiusDerivativeAtY()
+{
+    if (_BucketShapeType == 0)
+        return 0.0;
+
+    return
+        (_BucketTopRadius - _BucketBottomRadius) /
+        max(_BucketHeight, 1e-6);
+}
+
+float BucketInnerRadiusAtY(float y)
+{
+    return max(
+        BucketOuterRadiusAtY(y) - _BucketWallThickness,
+        0.001
+    );
+}
+
+float3 ApplyMovingBoundaryVelocity(
+    float3 velocityLocal,
+    float3 wallVelocityLocal,
+    float3 normalIntoFluidLocal)
+{
+    normalIntoFluidLocal =
+        normalize(normalIntoFluidLocal);
+
+    float3 relativeVelocity =
+        velocityLocal - wallVelocityLocal;
+
+    float vn =
+        dot(relativeVelocity, normalIntoFluidLocal);
+
+    // vn >= 0 means relative motion is already away from wall.
+    if (vn >= 0.0)
+        return velocityLocal;
+
+    float3 normalVelocity =
+        vn * normalIntoFluidLocal;
+
+    float3 tangentialVelocity =
+        relativeVelocity - normalVelocity;
+
+    tangentialVelocity *=
+        saturate(1.0 - _BucketBoundaryFriction);
+
+    float3 correctedNormalVelocity =
+        (-vn * _BucketBoundaryRestitution) *
+        normalIntoFluidLocal;
+
+    float3 correctedRelativeVelocity =
+        tangentialVelocity +
+        correctedNormalVelocity;
+
+    float3 correctedVelocity =
+        wallVelocityLocal +
+        correctedRelativeVelocity;
+
+    return lerp(
+        velocityLocal,
+        correctedVelocity,
+        saturate(_BucketBoundaryVelocityStrength)
+    );
+}
+
+void ApplyBucketSideWallBoundary(
+    inout float3 pLocal,
+    inout float3 vLocal,
+    float particleRadius,
+    inout bool corrected)
+{
+    if (_BucketBoundaryEnableSideWalls == 0)
+        return;
+
+    float halfH = 0.5 * _BucketHeight;
+
+    float bottomY = -halfH;
+    float topY = halfH;
+
+    // If top is open and particle is above the bucket, do not side-clamp it.
+    if (_BucketBoundaryTopOpen != 0)
+    {
+        if (pLocal.y > topY)
+            return;
+    }
+
+    if (pLocal.y < bottomY || pLocal.y > topY)
+        return;
+
+    float yForRadius = clamp(pLocal.y, bottomY, topY);
+
+    float allowedRadius = BucketInnerRadiusAtY(yForRadius) - particleRadius - _BucketBoundaryPadding;
+
+    allowedRadius = max(allowedRadius, 0.001);
+
+    float2 radial = pLocal.xz;
+    float radialLen = length(radial);
+
+    if (radialLen <= allowedRadius)
+        return;
+
+    float penetration = radialLen - allowedRadius;
+
+    float2 radialDir = SafeNormalize2(radial);
+
+    float dRdy = BucketRadiusDerivativeAtY();
+
+    // F(x,y,z) = radial - R(y)
+    // outward normal ≈ grad(F)
+    float3 outwardNormal =
+        normalize(float3(radialDir.x, -dRdy, radialDir.y));
+
+    float3 normalIntoFluid = -outwardNormal;
+
+    float correctionAmount;
+
+    if (_EnableConservativeSdfBoundary != 0)
+    {
+        correctionAmount =
+            min(
+                penetration,
+                _MaxSdfPositionCorrectionPerStep
+            ) *
+            saturate(_SdfProjectionStrength);
+    }
+    else
+    {
+        correctionAmount = penetration * saturate(_BucketBoundaryPositionStrength);
+    }
+
+    pLocal += normalIntoFluid * correctionAmount;
+
+    float3 wallVelocityLocal = float3(0, 0, 0);
+
+    if (_UseMovingWallVelocityInBoundary != 0)
+    {
+        wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+    }
+
+    vLocal = ApplyMovingBoundaryVelocity(
+        vLocal,
+        wallVelocityLocal,
+        normalIntoFluid
+    );
+
+    corrected = true;
+}
+
+void ApplyBucketBottomBoundary(
+    inout float3 pLocal,
+    inout float3 vLocal,
+    float particleRadius,
+    inout bool corrected)
+{
+    if (_BucketBoundaryEnableBottom == 0)
+        return;
+
+    float bottomY =
+        -0.5 * _BucketHeight;
+
+    float minY =
+        bottomY +
+        particleRadius +
+        _BucketBoundaryPadding;
+
+    if (pLocal.y >= minY)
+        return;
+
+    float penetration =
+        minY - pLocal.y;
+
+    float3 normalIntoFluid =
+        float3(0, 1, 0);
+
+    float correctionAmount;
+
+    if (_EnableConservativeSdfBoundary != 0)
+    {
+        correctionAmount =
+            min(
+                penetration,
+                _MaxSdfPositionCorrectionPerStep
+            ) *
+            saturate(_SdfProjectionStrength);
+    }
+    else
+    {
+        correctionAmount =
+            penetration *
+            saturate(_BucketBoundaryPositionStrength);
+    }
+
+    pLocal +=
+        normalIntoFluid *
+        correctionAmount;
+
+    float3 wallVelocityLocal = float3(0, 0, 0);
+
+    if (_UseMovingWallVelocityInBoundary != 0)
+    {
+        wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+    }
+
+    vLocal = ApplyMovingBoundaryVelocity(
+        vLocal,
+        wallVelocityLocal,
+        normalIntoFluid
+    );
+
+    corrected = true;
+}
+
+void ApplyBucketTopBoundaryIfClosed(
+    inout float3 pLocal,
+    inout float3 vLocal,
+    float particleRadius,
+    inout bool corrected)
+{
+    if (_BucketBoundaryTopOpen != 0)
+        return;
+
+    float topY = 0.5 * _BucketHeight;
+
+    float maxY = topY - particleRadius - _BucketBoundaryPadding;
+
+    if (pLocal.y <= maxY)
+        return;
+
+    float penetration = pLocal.y - maxY;
+
+    float3 normalIntoFluid = float3(0, -1, 0);
+
+    float correctionAmount;
+
+    if (_EnableConservativeSdfBoundary != 0)
+    {
+        correctionAmount =
+            min(
+                penetration,
+                _MaxSdfPositionCorrectionPerStep
+            ) *
+            saturate(_SdfProjectionStrength);
+    }
+    else
+    {
+        correctionAmount =
+            penetration *
+            saturate(_BucketBoundaryPositionStrength);
+    }
+
+    pLocal += normalIntoFluid * correctionAmount;
+
+    float3 wallVelocityLocal = float3(0, 0, 0);
+
+    if (_UseMovingWallVelocityInBoundary != 0)
+    {
+        wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
+    }
+
+    vLocal = ApplyMovingBoundaryVelocity(vLocal, wallVelocityLocal, normalIntoFluid);
+
+    corrected = true;
+}
+
+bool PassBoundaryNormalFilter(
+    float3 positionI,
+    float3 positionB,
+    float3 normalIntoFluidB)
+{
+    if (_EnableBoundaryNormalFiltering == 0)
+        return true;
+
+    float3 r =
+        positionI - positionB;
+
+    float dist2 =
+        dot(r, r);
+
+    if (dist2 <= 1e-12)
+        return true;
+
+    float3 dirFromBoundaryToFluid =
+        r * rsqrt(dist2);
+
+    float3 n =
+        normalize(normalIntoFluidB);
+
+    float alignment =
+        dot(dirFromBoundaryToFluid, n);
+
+    return alignment >= _BoundaryNormalMinDot;
+}
+
+float AccumulateBoundaryDivergenceRateForParticle(
+    float3 positionI,
+    float3 velocityI,
+    int3 baseCell)
+{
+    if (_EnableGpuBoundaryParticles == 0 ||
+        _EnableBoundaryDivergencePressure == 0 ||
+        _BoundaryParticleCount <= 0)
+    {
+        return 0.0;
+    }
+
+    float densityRate = 0.0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    baseCell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _BoundaryCellCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxBoundaryParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxBoundaryParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int boundaryIndex =
+                        _BoundaryCellIndicesRead[baseIndex + slot];
+
+                    if (boundaryIndex < 0 ||
+                        boundaryIndex >= _BoundaryParticleCount)
+                    {
+                        continue;
+                    }
+
+                    float4 bPr =
+                        _BoundaryPositionRadiusRead[boundaryIndex];
+
+                    float4 bNormalType =
+                        _BoundaryNormalTypeRead[boundaryIndex];
+
+                    float4 bVelPsi =
+                        _BoundaryVelocityPsiRead[boundaryIndex];
+
+                    float3 positionB =
+                        bPr.xyz;
+
+                    float3 normalB =
+                        bNormalType.xyz;
+
+                    float psi =
+                        max(bVelPsi.w, 0.0);
+
+                    if (psi <= 0.0)
+                        continue;
+
+                    if (!PassBoundaryNormalFilter(positionI, positionB, normalB))
+                        continue;
+
+                    float3 r =
+                        positionI - positionB;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float3 velocityB =
+                        float3(0, 0, 0);
+
+                    if (_UseBoundaryVelocityInPressure != 0)
+                        velocityB = bVelPsi.xyz;
+
+                    float3 grad =
+                        SpikyKernelGradient(r);
+
+                    densityRate +=
+                        psi *
+                        dot(velocityI - velocityB, grad);
+                }
+            }
+        }
+    }
+
+    densityRate *=
+        _BoundaryDivergencePressureStrength *
+        _BoundaryPressureDebugScale;
+
+    return densityRate;
+}
+
+float3 AccumulateBoundaryPressureVelocityCorrection(
+    float3 positionI,
+    float pressureI,
+    int3 baseCell,
+    float strength,
+    float maxVelocityCorrection)
+{
+    if (_EnableGpuBoundaryParticles == 0 ||
+        _BoundaryParticleCount <= 0)
+    {
+        return float3(0, 0, 0);
+    }
+
+    if (pressureI <= 0.0)
+        return float3(0, 0, 0);
+
+    float3 velocityCorrection =
+        float3(0, 0, 0);
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    baseCell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _BoundaryCellCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxBoundaryParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxBoundaryParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int boundaryIndex =
+                        _BoundaryCellIndicesRead[baseIndex + slot];
+
+                    if (boundaryIndex < 0 ||
+                        boundaryIndex >= _BoundaryParticleCount)
+                    {
+                        continue;
+                    }
+
+                    float4 bPr =
+                        _BoundaryPositionRadiusRead[boundaryIndex];
+
+                    float4 bNormalType =
+                        _BoundaryNormalTypeRead[boundaryIndex];
+
+                    float4 bVelPsi =
+                        _BoundaryVelocityPsiRead[boundaryIndex];
+
+                    float3 positionB =
+                        bPr.xyz;
+
+                    float3 normalB =
+                        bNormalType.xyz;
+
+                    float psi =
+                        max(bVelPsi.w, 0.0);
+
+                    if (psi <= 0.0)
+                        continue;
+
+                    if (!PassBoundaryNormalFilter(positionI, positionB, normalB))
+                        continue;
+
+                    float3 r =
+                        positionI - positionB;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float3 grad =
+                        SpikyKernelGradient(r);
+
+                    velocityCorrection +=
+                        -_Dt *
+                        strength *
+                        _BoundaryPressureDebugScale *
+                        psi *
+                        pressureI *
+                        grad /
+                        max(_RestDensity * _RestDensity, 1e-6);
+                }
+            }
+        }
+    }
+
+    velocityCorrection =
+        ClampVectorLength(
+            velocityCorrection,
+            maxVelocityCorrection
+        );
+
+    return velocityCorrection;
+}
+
+bool FindNearestBucketWallNormalLocal(
+    float3 pLocal,
+    float particleRadius,
+    out float3 normalIntoFluidLocal,
+    out float signedDistanceToBoundary)
+{
+    normalIntoFluidLocal = float3(0, 1, 0);
+    signedDistanceToBoundary = 1e9;
+
+    float halfH = 0.5 * _BucketHeight;
+    float bottomY = -halfH;
+    float topY = halfH;
+
+    bool found = false;
+
+    // Bottom
+    if (_BucketBoundaryEnableBottom != 0)
+    {
+        float minY =
+            bottomY +
+            particleRadius +
+            _BucketBoundaryPadding;
+
+        float bottomDistance =
+            pLocal.y - minY;
+
+        if (bottomDistance < signedDistanceToBoundary)
+        {
+            signedDistanceToBoundary = bottomDistance;
+            normalIntoFluidLocal = float3(0, 1, 0);
+            found = true;
+        }
+    }
+
+    // Side wall only inside vertical bucket span.
+    if (_BucketBoundaryEnableSideWalls != 0 &&
+        pLocal.y >= bottomY &&
+        pLocal.y <= topY)
+    {
+        float allowedRadius =
+            BucketInnerRadiusAtY(pLocal.y) -
+            particleRadius -
+            _BucketBoundaryPadding;
+
+        allowedRadius =
+            max(allowedRadius, 0.001);
+
+        float2 radial =
+            pLocal.xz;
+
+        float radialLen =
+            length(radial);
+
+        float sideDistance =
+            allowedRadius - radialLen;
+
+        float2 radialDir =
+            SafeNormalize2(radial);
+
+        float dRdy =
+            BucketRadiusDerivativeAtY();
+
+        float3 outwardNormal =
+            normalize(
+                float3(
+                    radialDir.x,
+                    -dRdy,
+                    radialDir.y
+                )
+            );
+
+        float3 sideNormalIntoFluid =
+            -outwardNormal;
+
+        if (sideDistance < signedDistanceToBoundary)
+        {
+            signedDistanceToBoundary = sideDistance;
+            normalIntoFluidLocal = sideNormalIntoFluid;
+            found = true;
+        }
+    }
+
+    // Closed top only
+    if (_BucketBoundaryTopOpen == 0)
+    {
+        float maxY =
+            topY -
+            particleRadius -
+            _BucketBoundaryPadding;
+
+        float topDistance =
+            maxY - pLocal.y;
+
+        if (topDistance < signedDistanceToBoundary)
+        {
+            signedDistanceToBoundary = topDistance;
+            normalIntoFluidLocal = float3(0, -1, 0);
+            found = true;
+        }
+    }
+
+    return found;
+}
+
+float3 ApplyConservativeSdfVelocityConstraint(
+    float3 pLocal,
+    float3 vLocal,
+    float3 normalIntoFluidLocal,
+    float boundaryFactor)
+{
+    normalIntoFluidLocal =
+        normalize(normalIntoFluidLocal);
+
+    float3 wallVelocityLocal =
+        float3(0, 0, 0);
+
+    if (_SdfUseMovingWallVelocity != 0)
+    {
+        wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+    }
+
+    float3 relativeVelocity =
+        vLocal - wallVelocityLocal;
+
+    float vn =
+        dot(relativeVelocity, normalIntoFluidLocal);
+
+    float3 normalVelocity =
+        vn * normalIntoFluidLocal;
+
+    float3 tangentialVelocity =
+        relativeVelocity - normalVelocity;
+
+    // إذا particle يتحرك نحو الجدار، نزيل السرعة الداخلة فقط.
+    if (vn < 0.0)
+    {
+        float removal =
+            saturate(_SdfNormalVelocityRemoval) *
+            saturate(boundaryFactor);
+
+        normalVelocity *=
+            saturate(1.0 - removal);
+    }
+
+    float friction =
+        saturate(_SdfTangentialFriction) *
+        saturate(boundaryFactor);
+
+    tangentialVelocity *=
+        saturate(1.0 - friction);
+
+    float3 correctedRelativeVelocity =
+        normalVelocity + tangentialVelocity;
+
+    float3 correctedVelocity =
+        wallVelocityLocal + correctedRelativeVelocity;
+
+    float3 deltaVelocity =
+        correctedVelocity - vLocal;
+
+    deltaVelocity =
+        ClampVectorLength(
+            deltaVelocity,
+            _MaxSdfPreSolveVelocityCorrection
+        );
+
+    return vLocal + deltaVelocity;
+}
+
+bool IsValidParticleIndex(int particleIndex)
+{
+    return particleIndex >= 0 &&
+           particleIndex < _ParticleCount;
+}
+
+bool PassBoundaryCollisionNormalFilter(
+    float3 positionI,
+    float3 positionB,
+    float3 normalIntoFluidB)
+{
+    if (_EnableBoundaryCollisionNormalFilter == 0)
+        return true;
+
+    float3 r = positionI - positionB;
+    float dist2 = dot(r, r);
+
+    if (dist2 <= 1e-12)
+        return true;
+
+    float3 dirFromBoundaryToFluid =
+        r * rsqrt(dist2);
+
+    float3 n =
+        normalize(normalIntoFluidB);
+
+    float alignment =
+        dot(dirFromBoundaryToFluid, n);
+
+    return alignment >= _BoundaryCollisionNormalMinDot;
+}
+
+[numthreads(256, 1, 1)]
+void KClearDfsphScalarData(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_DfsphBufferCapacity)
+        return;
+
+    _Density[index] = _RestDensity;
+    _PredictedDensity[index] = _RestDensity;
+
+    _Alpha[index] = 0.0;
+
+    _DensityError[index] = 0.0;
+    _DivergenceError[index] = 0.0;
+
+    _DivergencePressure[index] = 0.0;
+    _DensityPressure[index] = 0.0;
+}
+
+[numthreads(256, 1, 1)]
+void KClearDfsphTempData(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_DfsphBufferCapacity)
+        return;
+
+    _NeighborCount[index] = 0;
+
+    _DfsphTempVector[index] = float4(0, 0, 0, 0);
+    _DfsphTempScalar[index] = 0.0;
+
+    _BoundaryFactor[index] = 0.0;
+
+    _BoundaryNeighborCount[index] = 0;
+    _BoundaryDensityContributionDebug[index] = 0.0;
+}
+
+[numthreads(256, 1, 1)]
+void KApplyExternalForces(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 velocity = vm.xyz;
+    float mass = vm.w;
+
+    velocity += _Gravity * _Dt;
+
+    if (_VelocityDampingPerSecond > 0.0)
+    {
+        float damping =
+            exp(-_VelocityDampingPerSecond * _Dt);
+
+        velocity *= damping;
+    }
+
+    velocity = ClampSpeed(velocity);
+
+    _ParticleVelocityMass[index] =
+        float4(velocity, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KApplyPaintViscosityCohesion(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnablePaintMaterialModel == 0)
+    {
+        _DfsphTempVector[particleIndex] =
+            _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _DfsphTempVector[particleIndex] =
+            _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    int ownCellIndex =
+        _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _DfsphTempVector[particleIndex] =
+            _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    float4 prI =
+        _ParticlePositionRadiusRead[particleIndex];
+
+    float4 vmI =
+        _ParticleVelocityMassRead[particleIndex];
+
+    float3 positionI = prI.xyz;
+    float3 velocityI = vmI.xyz;
+    float massI = max(vmI.w, 1e-8);
+
+    int3 cell =
+        WorldToGridCoord(positionI);
+
+    float3 viscosityDelta =
+        float3(0, 0, 0);
+
+    float3 cohesionDelta =
+        float3(0, 0, 0);
+
+    int neighborCount = 0;
+
+    float cohesionRange =
+        _SupportRadius *
+        saturate(_CohesionDistanceFactor);
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _CellParticleCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex =
+                        _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId =
+                        _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState =
+                        (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float4 prJ =
+                        _ParticlePositionRadiusRead[neighborParticleIndex];
+
+                    float4 vmJ =
+                        _ParticleVelocityMassRead[neighborParticleIndex];
+
+                    float3 positionJ = prJ.xyz;
+                    float3 velocityJ = vmJ.xyz;
+
+                    float3 r =
+                        positionI - positionJ;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float dist =
+                        sqrt(max(dist2, 1e-10));
+
+                    float w =
+                        Poly6Kernel(dist2);
+
+                    // XSPH viscosity:
+                    // pushes velocity toward neighbor averaged velocity.
+                    viscosityDelta +=
+                        (velocityJ - velocityI) *
+                        w;
+
+                    // Cohesion:
+                    // mild attraction toward close neighbors.
+                    if (dist < cohesionRange && dist > 1e-6)
+                    {
+                        float3 dirToNeighbor =
+                            -r / dist;
+
+                        float t =
+                            saturate(
+                                1.0 - dist / max(cohesionRange, 1e-6)
+                            );
+
+                        cohesionDelta +=
+                            dirToNeighbor *
+                            t *
+                            t;
+                    }
+
+                    neighborCount++;
+                }
+            }
+        }
+    }
+
+    float3 velocityDelta =
+        float3(0, 0, 0);
+
+    if (neighborCount > 0)
+    {
+        velocityDelta +=
+            _XsphViscosityStrength *
+            viscosityDelta /
+            max((float)neighborCount, 1.0);
+
+        velocityDelta +=
+            _CohesionStrength *
+            cohesionDelta /
+            max((float)neighborCount, 1.0) *
+            _Dt;
+    }
+
+    // Anti-spray damping for isolated particles.
+    if (neighborCount < _AntiSprayNeighborThreshold)
+    {
+        float missing =
+            (float)(_AntiSprayNeighborThreshold - neighborCount) /
+            max((float)_AntiSprayNeighborThreshold, 1.0);
+
+        float damping =
+            saturate(_AntiSprayDamping * missing);
+
+        velocityDelta +=
+            -velocityI * damping * _Dt;
+    }
+
+    velocityDelta =
+        ClampVectorLength(
+            velocityDelta,
+            _MaxPaintMaterialVelocityCorrection
+        );
+
+    float3 newVelocity =
+        velocityI + velocityDelta;
+
+    newVelocity =
+        ClampSpeed(newVelocity);
+
+    _NeighborCount[particleIndex] = neighborCount;
+
+    _DfsphTempVector[particleIndex] =
+        float4(newVelocity, massI);
+}
+
+[numthreads(256, 1, 1)]
+void KApplyWallAdhesionDamping(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableWallAdhesionDamping == 0 ||
+        _EnableBucketSdfBoundary == 0)
+    {
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadiusRead[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 vWorld = vm.xyz;
+    float mass = vm.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 vLocal =
+        TransformVector(
+            _BucketWorldToLocal,
+            vWorld
+        );
+
+    float3 normalIntoFluidLocal;
+    float distanceToBoundary;
+
+    bool found =
+        FindNearestBucketWallNormalLocal(
+            pLocal,
+            particleRadius,
+            normalIntoFluidLocal,
+            distanceToBoundary
+        );
+
+    if (!found)
+        return;
+
+    float adhesionDistance =
+        max(_WallAdhesionDistance, 1e-6);
+
+    if (distanceToBoundary > adhesionDistance)
+        return;
+
+    float proximity =
+        saturate(
+            1.0 -
+            max(distanceToBoundary, 0.0) /
+            adhesionDistance
+        );
+
+    normalIntoFluidLocal =
+        normalize(normalIntoFluidLocal);
+
+    float vn =
+        dot(vLocal, normalIntoFluidLocal);
+
+    float3 normalVelocity =
+        vn * normalIntoFluidLocal;
+
+    float3 tangentialVelocity =
+        vLocal - normalVelocity;
+
+    tangentialVelocity *=
+        saturate(
+            1.0 -
+            _WallTangentialDamping *
+            proximity
+        );
+
+    normalVelocity *=
+        saturate(
+            1.0 -
+            _WallNormalDamping *
+            proximity
+        );
+
+    // Very small attraction toward wall:
+    // wall direction is opposite of normalIntoFluid.
+    float3 attraction =
+        -normalIntoFluidLocal *
+        _WallAdhesionAttraction *
+        proximity *
+        _Dt;
+
+    vLocal =
+        tangentialVelocity +
+        normalVelocity +
+        attraction;
+
+    vWorld =
+        TransformVector(
+            _BucketLocalToWorld,
+            vLocal
+        );
+
+    vWorld =
+        ClampSpeed(vWorld);
+
+    _ParticleVelocityMass[index] =
+        float4(vWorld, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KAdvectParticles(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableParticleAdvection == 0)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadius[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 position = pr.xyz;
+    float radius = pr.w;
+
+    float3 velocity = ClampSpeed(vm.xyz);
+
+    position += velocity * _Dt;
+
+    _ParticlePositionRadius[index] =
+        float4(position, radius);
+
+    _ParticleVelocityMass[index] =
+        float4(velocity, vm.w);
+}
+
+[numthreads(256, 1, 1)]
+void KApplyBucketVelocityPreSolve(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBucketSdfBoundary == 0 ||
+        _EnableMovingBucketWallVelocity == 0)
+    {
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadiusRead[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 vWorld = vm.xyz;
+    float mass = vm.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 vLocal =
+        TransformVector(
+            _BucketWorldToLocal,
+            vWorld
+        );
+
+    float3 normalIntoFluidLocal;
+    float distanceToBoundary;
+
+    bool foundBoundary =
+        FindNearestBucketWallNormalLocal(
+            pLocal,
+            particleRadius,
+            normalIntoFluidLocal,
+            distanceToBoundary
+        );
+
+    if (!foundBoundary)
+        return;
+
+    float influenceDistance =
+        max(_PreSolveWallInfluenceDistance, 0.0);
+
+    // If far from the wall, do nothing.
+    if (distanceToBoundary > influenceDistance)
+        return;
+
+    float3 wallVelocityLocal =
+        ComputeBucketWallVelocityLocal(pLocal);
+
+    float3 relativeVelocity =
+        vLocal - wallVelocityLocal;
+
+    float vn =
+        dot(relativeVelocity, normalIntoFluidLocal);
+
+    // vn < 0 means the particle is moving into the wall relative to the wall.
+    if (vn >= 0.0)
+        return;
+
+    float3 correction =
+        -vn * normalIntoFluidLocal;
+
+    correction =
+        ClampVectorLength(
+            correction,
+            _MaxPreSolveWallVelocityCorrection
+        );
+
+    float proximity =
+        1.0;
+
+    if (influenceDistance > 1e-6)
+    {
+        proximity =
+            saturate(
+                1.0 -
+                max(distanceToBoundary, 0.0) /
+                influenceDistance
+            );
+    }
+
+    float strength =
+        saturate(
+            _PreSolveWallVelocityCorrectionStrength
+        ) * proximity;
+
+    vLocal +=
+        correction *
+        strength;
+
+    vWorld =
+        TransformVector(
+            _BucketLocalToWorld,
+            vLocal
+        );
+
+    vWorld =
+        ClampSpeed(vWorld);
+
+    _ParticleVelocityMass[index] =
+        float4(vWorld, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KApplyBucketSdfBoundary(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBucketSdfBoundary == 0)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadius[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 vWorld = vm.xyz;
+    float mass = vm.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 vLocal =
+        TransformVector(
+            _BucketWorldToLocal,
+            vWorld
+        );
+
+    bool corrected = false;
+
+    ApplyBucketBottomBoundary(
+        pLocal,
+        vLocal,
+        particleRadius,
+        corrected
+    );
+
+    ApplyBucketSideWallBoundary(
+        pLocal,
+        vLocal,
+        particleRadius,
+        corrected
+    );
+
+    ApplyBucketTopBoundaryIfClosed(
+        pLocal,
+        vLocal,
+        particleRadius,
+        corrected
+    );
+
+    if (!corrected)
+        return;
+
+    pWorld =
+        TransformPoint(
+            _BucketLocalToWorld,
+            pLocal
+        );
+
+    vWorld =
+        TransformVector(
+            _BucketLocalToWorld,
+            vLocal
+        );
+
+    vWorld = ClampSpeed(vWorld);
+
+    _ParticlePositionRadius[index] =
+        float4(pWorld, particleRadius);
+
+    _ParticleVelocityMass[index] =
+        float4(vWorld, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KComputeBoundaryFactor(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBoundaryAwareDfsph == 0 ||
+        _EnableBucketSdfBoundary == 0)
+    {
+        _BoundaryFactor[index] = 0.0;
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _BoundaryFactor[index] = 0.0;
+        return;
+    }
+
+    float4 pr =
+        _ParticlePositionRadiusRead[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 normalIntoFluidLocal;
+    float distanceToBoundary;
+
+    bool found =
+        FindNearestBucketWallNormalLocal(
+            pLocal,
+            particleRadius,
+            normalIntoFluidLocal,
+            distanceToBoundary
+        );
+
+    if (!found)
+    {
+        _BoundaryFactor[index] = 0.0;
+        return;
+    }
+
+    float influenceDistance =
+        max(_BoundaryInfluenceDistance, 1e-6);
+
+    float safeDistance =
+        max(distanceToBoundary, 0.0);
+
+    float factor =
+        saturate(
+            1.0 -
+            safeDistance / influenceDistance
+        );
+
+    // If particle penetrated the wall/bottom, force full factor.
+    if (distanceToBoundary < 0.0)
+        factor = 1.0;
+
+    _BoundaryFactor[index] = factor;
+}
+
+[numthreads(256, 1, 1)]
+void KClearSpatialGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_SpatialClearElementCount)
+        return;
+
+    if (index < (uint)_GridCellCount)
+    {
+        _CellParticleCount[index] = 0;
+    }
+
+    if (index < (uint)_ParticleCount)
+    {
+        _ParticleCellIndex[index] = -1;
+        _NeighborCount[index] = 0;
+    }
+
+    if (index < 4)
+    {
+        _SpatialGridStats[index] = 0;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KResolveSdfBoundaryPreSolve(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBucketSdfBoundary == 0 ||
+        _EnableConservativeSdfBoundary == 0 ||
+        _EnableSdfPreSolveCollision == 0)
+    {
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadius[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 vWorld = vm.xyz;
+    float mass = vm.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 vLocal =
+        TransformVector(
+            _BucketWorldToLocal,
+            vWorld
+        );
+
+    float3 normalIntoFluidLocal;
+    float distanceToBoundary;
+
+    bool found =
+        FindNearestBucketWallNormalLocal(
+            pLocal,
+            particleRadius,
+            normalIntoFluidLocal,
+            distanceToBoundary
+        );
+
+    if (!found)
+        return;
+
+    float skin =
+        max(_SdfSkinDistance, 1e-6);
+
+    // distanceToBoundary:
+    // موجب = داخل الدلو وبعيد عن الجدار
+    // صفر = على الحد
+    // سالب = داخل الجدار / اختراق
+    if (distanceToBoundary > skin)
+        return;
+
+    float boundaryFactor =
+        saturate(
+            1.0 -
+            max(distanceToBoundary, 0.0) / skin
+        );
+
+    if (distanceToBoundary < 0.0)
+        boundaryFactor = 1.0;
+
+    vLocal =
+        ApplyConservativeSdfVelocityConstraint(
+            pLocal,
+            vLocal,
+            normalIntoFluidLocal,
+            boundaryFactor
+        );
+
+    // تصحيح موضعي صغير فقط إذا يوجد penetration.
+    // لا نرجع كل الاختراق دفعة واحدة حتى لا نضغط السائل.
+    if (distanceToBoundary < 0.0)
+    {
+        float penetration =
+            -distanceToBoundary;
+
+        float correctionAmount =
+            min(
+                penetration,
+                _MaxSdfPositionCorrectionPerStep
+            ) *
+            saturate(_SdfProjectionStrength);
+
+        pLocal +=
+            normalize(normalIntoFluidLocal) *
+            correctionAmount;
+    }
+
+    pWorld =
+        TransformPoint(
+            _BucketLocalToWorld,
+            pLocal
+        );
+
+    vWorld =
+        TransformVector(
+            _BucketLocalToWorld,
+            vLocal
+        );
+
+    vWorld =
+        ClampSpeed(vWorld);
+
+    _ParticlePositionRadius[index] =
+        float4(pWorld, particleRadius);
+
+    _ParticleVelocityMass[index] =
+        float4(vWorld, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KBuildSpatialGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float3 position =
+        _ParticlePositionRadius[particleIndex].xyz;
+
+    int3 cell = WorldToGridCoord(position);
+
+    if (!IsValidGridCoord(cell))
+    {
+        _ParticleCellIndex[particleIndex] = -1;
+
+        InterlockedAdd(_SpatialGridStats[2], 1);
+
+        return;
+    }
+
+    int cellIndex = FlattenGridCoord(cell);
+
+    _ParticleCellIndex[particleIndex] = cellIndex;
+
+    int slot;
+    InterlockedAdd(
+        _CellParticleCount[cellIndex],
+        1,
+        slot
+    );
+
+    InterlockedMax(
+        _SpatialGridStats[3],
+        slot + 1
+    );
+
+    if (slot >= _MaxParticlesPerCell)
+    {
+        InterlockedAdd(_SpatialGridStats[1], 1);
+        return;
+    }
+
+    int writeIndex =
+        cellIndex * _MaxParticlesPerCell + slot;
+
+    _CellParticleIndices[writeIndex] = (int)particleIndex;
+
+    InterlockedAdd(_SpatialGridStats[0], 1);
+}
+
+void AccumulateBoundaryDensityForParticle(
+    float3 positionI,
+    int3 baseCell,
+    out float boundaryDensity,
+    out int boundaryNeighborCount)
+{
+    boundaryDensity = 0.0;
+    boundaryNeighborCount = 0;
+
+    if (_EnableGpuBoundaryParticles == 0 ||
+        _EnableBoundaryParticleDensity == 0 ||
+        _BoundaryParticleCount <= 0)
+    {
+        return;
+    }
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    baseCell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _BoundaryCellCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxBoundaryParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxBoundaryParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int boundaryIndex =
+                        _BoundaryCellIndicesRead[baseIndex + slot];
+
+                    if (boundaryIndex < 0 ||
+                        boundaryIndex >= _BoundaryParticleCount)
+                    {
+                        continue;
+                    }
+
+                    float4 bPr =
+                        _BoundaryPositionRadiusRead[boundaryIndex];
+
+                    float4 bVelPsi =
+                        _BoundaryVelocityPsiRead[boundaryIndex];
+
+                    float3 positionB =
+                        bPr.xyz;
+
+                    float psi =
+                        max(bVelPsi.w, 0.0);
+
+                    if (psi <= 0.0)
+                        continue;
+
+                    float3 r =
+                        positionI - positionB;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float w =
+                        Poly6Kernel(dist2);
+
+                    boundaryDensity +=
+                        psi * w;
+
+                    boundaryNeighborCount++;
+                }
+            }
+        }
+    }
+
+    boundaryDensity *=
+        _BoundaryDensityStrength;
+
+    boundaryDensity =
+        min(
+            boundaryDensity,
+            _MaxBoundaryDensityContribution
+        );
+}
+
+[numthreads(256, 1, 1)]
+void KComputeDensity(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _Density[particleIndex] = _RestDensity;
+        _PredictedDensity[particleIndex] = _RestDensity;
+        _DensityError[particleIndex] = 0.0;
+
+        if (_DensityKernelWritesNeighborCount != 0)
+            _NeighborCount[particleIndex] = 0;
+
+        return;
+    }
+
+    int ownCellIndex = _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _Density[particleIndex] = _RestDensity;
+        _PredictedDensity[particleIndex] = _RestDensity;
+        _DensityError[particleIndex] = 0.0;
+
+        if (_DensityKernelWritesNeighborCount != 0)
+            _NeighborCount[particleIndex] = 0;
+
+        return;
+    }
+
+    float4 prI = _ParticlePositionRadiusRead[particleIndex];
+
+    float3 positionI = prI.xyz;
+
+    int3 cell = WorldToGridCoord(positionI);
+
+    float density = 0.0;
+    int neighborCount = 0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell = cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex = FlattenGridCoord(neighborCell);
+
+                int cellCount = _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex = neighborCellIndex * _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex = _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    float4 neighborStateAgeId = _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState =
+                        (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float4 prJ = _ParticlePositionRadiusRead[neighborParticleIndex];
+
+                    float3 positionJ = prJ.xyz;
+
+                    float3 r = positionI - positionJ;
+                    float dist2 = dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float4 vmJ = _ParticleVelocityMassRead[neighborParticleIndex];
+
+                    float massJ = max(vmJ.w, 1e-8);
+
+                    float w = Poly6Kernel(dist2);
+
+                    density += massJ * w;
+
+                    if (neighborParticleIndex != (int)particleIndex)
+                        neighborCount++;
+                }
+            }
+        }
+    }
+
+    if (_EnableBoundaryAwareDfsph != 0)
+    {
+        float boundaryFactor =
+            _BoundaryFactorRead[particleIndex];
+
+        density +=
+            _RestDensity *
+            _BoundaryDensityContribution *
+            boundaryFactor;
+    }
+
+    float boundaryDensity = 0.0;
+    int boundaryNeighborCount = 0;
+    if (_EnableGpuBoundaryParticles != 0 &&
+        _EnableBoundaryParticleDensity != 0)
+    {
+        int3 cell =
+            WorldToGridCoord(positionI);
+
+        AccumulateBoundaryDensityForParticle(
+            positionI,
+            cell,
+            boundaryDensity,
+            boundaryNeighborCount
+        );
+
+        density +=
+            boundaryDensity;
+    }
+    if (_WriteBoundaryDensityDebug != 0)
+    {
+        _BoundaryNeighborCount[particleIndex] =
+            boundaryNeighborCount;
+
+        _BoundaryDensityContributionDebug[particleIndex] =
+            boundaryDensity;
+    }
+
+    density = clamp(density, _MinDensityClamp, _MaxDensityClamp);
+
+    _Density[particleIndex] = density;
+
+    // For now predicted density equals current density.
+    // Later D4/D5 will compute predicted density from velocity divergence.
+    _PredictedDensity[particleIndex] = density;
+
+    float densityError = (density - _RestDensity) / max(_RestDensity, 1e-6);
+
+    _DensityError[particleIndex] = densityError;
+
+    if (_DensityKernelWritesNeighborCount != 0)
+        _NeighborCount[particleIndex] = neighborCount;
+}
+
+void AccumulateBoundaryAlphaForParticle(
+    float3 positionI,
+    int3 baseCell,
+    inout float3 gradSum,
+    inout float gradSqSum,
+    out int boundaryNeighborCount)
+{
+    boundaryNeighborCount = 0;
+
+    if (_EnableGpuBoundaryParticles == 0 ||
+        _EnableBoundaryParticleAlpha == 0 ||
+        _BoundaryParticleCount <= 0)
+    {
+        return;
+    }
+
+    float3 boundaryGradSum =
+        float3(0, 0, 0);
+
+    float boundaryGradSqSum =
+        0.0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    baseCell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _BoundaryCellCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxBoundaryParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxBoundaryParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int boundaryIndex =
+                        _BoundaryCellIndicesRead[baseIndex + slot];
+
+                    if (boundaryIndex < 0 ||
+                        boundaryIndex >= _BoundaryParticleCount)
+                    {
+                        continue;
+                    }
+
+                    float4 bPr =
+                        _BoundaryPositionRadiusRead[boundaryIndex];
+
+                    float4 bVelPsi =
+                        _BoundaryVelocityPsiRead[boundaryIndex];
+
+                    float3 positionB =
+                        bPr.xyz;
+
+                    float psi =
+                        max(bVelPsi.w, 0.0);
+
+                    if (psi <= 0.0)
+                        continue;
+
+                    float3 r =
+                        positionI - positionB;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float3 grad =
+                        psi *
+                        SpikyKernelGradient(r);
+
+                    boundaryGradSum +=
+                        grad;
+
+                    boundaryGradSqSum +=
+                        dot(grad, grad);
+
+                    boundaryNeighborCount++;
+                }
+            }
+        }
+    }
+
+    float supportScale = 1.0;
+
+    if (_MinBoundaryNeighborsForFullSupport > 0 &&
+        boundaryNeighborCount < _MinBoundaryNeighborsForFullSupport)
+    {
+        float t =
+            (float)boundaryNeighborCount /
+            max((float)_MinBoundaryNeighborsForFullSupport, 1.0);
+
+        supportScale =
+            lerp(
+                _LowBoundaryNeighborDamping,
+                1.0,
+                saturate(t)
+            );
+    }
+
+    float scale =
+        _BoundaryAlphaStrength *
+        supportScale;
+
+    boundaryGradSum *=
+        scale;
+
+    boundaryGradSqSum *=
+        scale * scale;
+
+    gradSum +=
+        boundaryGradSum;
+
+    gradSqSum +=
+        boundaryGradSqSum;
+}
+
+[numthreads(256, 1, 1)]
+void KComputeAlpha(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _Alpha[particleIndex] = 0.0;
+        _DfsphTempScalar[particleIndex] = 0.0;
+        return;
+    }
+
+    int ownCellIndex = _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _Alpha[particleIndex] = 0.0;
+        _DfsphTempScalar[particleIndex] = 0.0;
+        return;
+    }
+
+    float3 positionI = _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    int3 cell = WorldToGridCoord(positionI);
+
+    float3 gradSum = float3(0, 0, 0);
+    float gradSqSum = 0.0;
+
+    int validNeighborCount = 0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell = cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex = FlattenGridCoord(neighborCell);
+
+                int cellCount = _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex = neighborCellIndex * _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex = _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId = _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState = (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ = _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r = positionI - positionJ;
+
+                    float dist2 = dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float massJ = max(_ParticleVelocityMassRead[neighborParticleIndex].w, 1e-8);
+
+                    float3 grad = massJ * SpikyKernelGradient(r);
+
+                    gradSum += grad;
+
+                    gradSqSum += dot(grad, grad);
+
+                    validNeighborCount++;
+                }
+            }
+        }
+    }
+
+    int boundaryAlphaNeighborCount = 0;
+
+    if (_EnableGpuBoundaryParticles != 0 &&
+        _EnableBoundaryParticleAlpha != 0)
+    {
+        int3 cell =
+            WorldToGridCoord(positionI);
+
+        AccumulateBoundaryAlphaForParticle(
+            positionI,
+            cell,
+            gradSum,
+            gradSqSum,
+            boundaryAlphaNeighborCount
+        );
+    }
+
+    // DFSPH denominator approximation:
+    // denom = |sum_j m_j gradW_ij|^2 + sum_j |m_j gradW_ij|^2
+    float denominator = dot(gradSum, gradSum) + gradSqSum;
+
+    _DfsphTempScalar[particleIndex] = denominator;
+
+    float alpha = 0.0;
+
+    if (denominator > _AlphaDenominatorEpsilon)
+    {
+        alpha = 1.0 / denominator;
+    }
+
+    alpha = clamp(alpha, 0.0, _MaxAlpha);
+
+    if (_EnableBoundaryAwareDfsph != 0)
+    {
+        float boundaryFactor =
+            _BoundaryFactorRead[particleIndex];
+
+        float alphaScale =
+            lerp(
+                1.0,
+                _BoundaryAlphaScaleNearWall,
+                saturate(boundaryFactor)
+            );
+
+        alpha *= alphaScale;
+    }
+
+    // Free-surface / low-neighbor safety damping.
+    // If the particle has too few neighbors, a huge alpha can cause explosions later.
+    if (_MinNeighborsForFullAlpha > 0 &&
+        validNeighborCount < _MinNeighborsForFullAlpha)
+    {
+        float t = (float)validNeighborCount / max((float)_MinNeighborsForFullAlpha, 1.0);
+
+        float damping =lerp(_LowNeighborAlphaDamping, 1.0, saturate(t));
+
+        alpha *= damping;
+    }
+
+    _Alpha[particleIndex] = alpha;
+}
+
+[numthreads(256, 1, 1)]
+void KComputeDivergencePressure(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableDivergenceSolve == 0)
+    {
+        _DivergenceError[particleIndex] = 0.0;
+        _DivergencePressure[particleIndex] = 0.0;
+        return;
+    }
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _DivergenceError[particleIndex] = 0.0;
+        _DivergencePressure[particleIndex] = 0.0;
+        return;
+    }
+
+    int ownCellIndex = _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _DivergenceError[particleIndex] = 0.0;
+        _DivergencePressure[particleIndex] = 0.0;
+        return;
+    }
+
+    float3 positionI = _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    float3 velocityI = _ParticleVelocityMassRead[particleIndex].xyz;
+
+    int3 cell = WorldToGridCoord(positionI);
+
+    float densityRate = 0.0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell = cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex = FlattenGridCoord(neighborCell);
+
+                int cellCount = _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex = neighborCellIndex * _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex = _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId = _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState = (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ = _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r = positionI - positionJ;
+
+                    float dist2 = dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float3 velocityJ = _ParticleVelocityMassRead[neighborParticleIndex].xyz;
+
+                    float massJ = max(_ParticleVelocityMassRead[neighborParticleIndex].w, 1e-8);
+
+                    float3 grad = SpikyKernelGradient(r);
+
+                    // Continuity equation approximation:
+                    // dρ/dt = Σ m_j (v_i - v_j) · ∇W_ij
+                    densityRate += massJ * dot(velocityI - velocityJ, grad);
+                }
+            }
+        }
+    }
+
+    if (_EnableGpuBoundaryParticles != 0 &&
+    _EnableBoundaryDivergencePressure != 0)
+{
+    float boundaryDensityRate =
+        AccumulateBoundaryDivergenceRateForParticle(
+            positionI,
+            velocityI,
+            cell
+        );
+
+    densityRate +=
+        boundaryDensityRate;
+}
+
+    if (_InvertDivergenceErrorSign != 0)
+        densityRate = -densityRate;
+
+    densityRate *= _DivergenceErrorScale;
+
+    float compressionRate = densityRate;
+
+    if (_ClampDivergenceToCompressionOnly != 0)
+        compressionRate = max(compressionRate, 0.0);
+
+    float normalizedError =
+        compressionRate /
+        max(_RestDensity, 1e-6);
+
+    _DivergenceError[particleIndex] = normalizedError;
+
+    float alpha = _AlphaRead[particleIndex];
+
+    float pressure =
+        alpha *
+        compressionRate /
+        max(_Dt, 1e-6);
+
+    pressure = clamp(
+        pressure,
+        0.0,
+        _MaxDivergencePressure
+    );
+
+    _DivergencePressure[particleIndex] = pressure;
+}
+
+[numthreads(256, 1, 1)]
+void KApplyDivergenceVelocityCorrection(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _DfsphTempVector[particleIndex] = _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    int ownCellIndex = _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _DfsphTempVector[particleIndex] = _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    float3 positionI = _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    float4 vmI = _ParticleVelocityMassRead[particleIndex];
+
+    float3 velocityI = vmI.xyz;
+
+    float massI = max(vmI.w, 1e-8);
+
+    float pressureI = _DivergencePressureRead[particleIndex];
+
+    int3 cell = WorldToGridCoord(positionI);
+
+    float3 velocityCorrection = float3(0, 0, 0);
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell = cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex = FlattenGridCoord(neighborCell);
+
+                int cellCount = _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex = neighborCellIndex * _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex = _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId = _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState = (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ = _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r = positionI - positionJ;
+
+                    float dist2 = dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float massJ = max(_ParticleVelocityMassRead[neighborParticleIndex].w, 1e-8);
+
+                    float pressureJ = _DivergencePressureRead[neighborParticleIndex];
+
+                    float3 grad = SpikyKernelGradient(r);
+
+                    float pairPressure = pressureI + pressureJ;
+
+                    velocityCorrection +=
+                        -_Dt *
+                        _DivergenceCorrectionStrength *
+                        massJ *
+                        pairPressure *
+                        grad /
+                        max(_RestDensity * _RestDensity, 1e-6);
+                }
+            }
+        }
+    }
+
+    if (_EnableGpuBoundaryParticles != 0 && _EnableBoundaryDivergencePressure != 0)
+    {
+        float3 boundaryCorrection =
+            AccumulateBoundaryPressureVelocityCorrection(
+                positionI,
+                pressureI,
+                cell,
+                _BoundaryDivergencePressureStrength,
+                _MaxBoundaryDivergenceVelocityCorrection
+            );
+
+        velocityCorrection +=
+            boundaryCorrection;
+    }
+
+    velocityCorrection = ClampVectorLength(velocityCorrection, _MaxDivergenceVelocityCorrection);
+
+    float3 correctedVelocity = velocityI + velocityCorrection;
+
+    correctedVelocity = ClampSpeed(correctedVelocity);
+
+    _DfsphTempVector[particleIndex] = float4(correctedVelocity, massI);
+}
+
+[numthreads(256, 1, 1)]
+void KComputeDensityPressure(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableDensitySolve == 0)
+    {
+        _PredictedDensity[particleIndex] = _RestDensity;
+        _DensityError[particleIndex] = 0.0;
+        _DensityPressure[particleIndex] = 0.0;
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _PredictedDensity[particleIndex] = _RestDensity;
+        _DensityError[particleIndex] = 0.0;
+        _DensityPressure[particleIndex] = 0.0;
+        return;
+    }
+
+    int ownCellIndex =
+        _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _PredictedDensity[particleIndex] = _RestDensity;
+        _DensityError[particleIndex] = 0.0;
+        _DensityPressure[particleIndex] = 0.0;
+        return;
+    }
+
+    float3 positionI =
+        _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    float3 velocityI =
+        _ParticleVelocityMassRead[particleIndex].xyz;
+
+    int3 cell =
+        WorldToGridCoord(positionI);
+
+    float densityRate = 0.0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(
+                    cellCount,
+                    _MaxParticlesPerCell
+                );
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex =
+                        _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId =
+                        _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState =
+                        (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ =
+                        _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r =
+                        positionI - positionJ;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float3 velocityJ =
+                        _ParticleVelocityMassRead[neighborParticleIndex].xyz;
+
+                    float massJ =
+                        max(
+                            _ParticleVelocityMassRead[neighborParticleIndex].w,
+                            1e-8
+                        );
+
+                    float3 grad =
+                        SpikyKernelGradient(r);
+
+                    densityRate +=
+                        massJ *
+                        dot(velocityI - velocityJ, grad);
+                }
+            }
+        }
+    }
+
+    float currentDensity = _DensityRead[particleIndex];
+
+    float predictedDensity =
+        currentDensity +
+        _Dt * densityRate;
+
+    predictedDensity = clamp(
+        predictedDensity,
+        _MinDensityClamp,
+        _MaxDensityClamp
+    );
+
+    float compression =
+        predictedDensity - _RestDensity;
+
+    if (_InvertDensityErrorSign != 0)
+        compression = -compression;
+
+    compression *= _DensityErrorScale;
+
+    if (_ClampDensityToCompressionOnly != 0)
+        compression = max(compression, 0.0);
+
+    float normalizedError =
+        compression /
+        max(_RestDensity, 1e-6);
+
+    _PredictedDensity[particleIndex] =
+        predictedDensity;
+
+    _DensityError[particleIndex] =
+        normalizedError;
+
+    float alpha =
+        _AlphaRead[particleIndex];
+
+    float pressure =
+        alpha *
+        compression /
+        max(_Dt * _Dt, 1e-8);
+
+    pressure = clamp(
+        pressure,
+        0.0,
+        _MaxDensityPressure
+    );
+
+    _DensityPressure[particleIndex] =
+        pressure;
+}
+
+[numthreads(256, 1, 1)]
+void KApplyDensityVelocityCorrection(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _DfsphTempVector[particleIndex] =
+            _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    int ownCellIndex =
+        _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _DfsphTempVector[particleIndex] =
+            _ParticleVelocityMassRead[particleIndex];
+        return;
+    }
+
+    float3 positionI =
+        _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    float4 vmI =
+        _ParticleVelocityMassRead[particleIndex];
+
+    float3 velocityI =
+        vmI.xyz;
+
+    float massI =
+        max(vmI.w, 1e-8);
+
+    float pressureI =
+        _DensityPressureRead[particleIndex];
+
+    int3 cell =
+        WorldToGridCoord(positionI);
+
+    float3 velocityCorrection =
+        float3(0, 0, 0);
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(
+                    cellCount,
+                    _MaxParticlesPerCell
+                );
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex =
+                        _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (!IsValidParticleIndex(neighborParticleIndex))
+                        continue;
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId =
+                        _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState =
+                        (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ =
+                        _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r =
+                        positionI - positionJ;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= _SupportRadius2)
+                        continue;
+
+                    float massJ =
+                        max(
+                            _ParticleVelocityMassRead[neighborParticleIndex].w,
+                            1e-8
+                        );
+
+                    float pressureJ =
+                        _DensityPressureRead[neighborParticleIndex];
+
+                    float3 grad =
+                        SpikyKernelGradient(r);
+
+                    float pairPressure =
+                        pressureI + pressureJ;
+
+                    velocityCorrection +=
+                        -_Dt *
+                        _DensityCorrectionStrength *
+                        massJ *
+                        pairPressure *
+                        grad /
+                        max(_RestDensity * _RestDensity, 1e-6);
+                }
+            }
+        }
+    }
+
+    if (_EnableGpuBoundaryParticles != 0 && _EnableBoundaryDensityPressure != 0)
+    {
+        float3 boundaryCorrection =
+            AccumulateBoundaryPressureVelocityCorrection(
+                positionI,
+                pressureI,
+                cell,
+                _BoundaryDensityPressureStrength,
+                _MaxBoundaryDensityVelocityCorrection
+            );
+
+        velocityCorrection +=
+            boundaryCorrection;
+    }
+
+    velocityCorrection =
+        ClampVectorLength(
+            velocityCorrection,
+            _MaxDensityVelocityCorrection
+        );
+
+    float3 correctedVelocity =
+        velocityI + velocityCorrection;
+
+    correctedVelocity =
+        ClampSpeed(correctedVelocity);
+
+    _DfsphTempVector[particleIndex] =
+        float4(correctedVelocity, massI);
+}
+
+[numthreads(256, 1, 1)]
+void KApplyBoundaryPressurePush(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBoundaryAwareDfsph == 0 ||
+        _EnableBoundaryPressurePush == 0 ||
+        _EnableBucketSdfBoundary == 0)
+    {
+        return;
+    }
+
+    float boundaryFactor =
+        _BoundaryFactorRead[index];
+
+    if (boundaryFactor <= 1e-5)
+        return;
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadiusRead[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 pWorld = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 vWorld = vm.xyz;
+    float mass = vm.w;
+
+    float3 pLocal =
+        TransformPoint(
+            _BucketWorldToLocal,
+            pWorld
+        );
+
+    float3 vLocal =
+        TransformVector(
+            _BucketWorldToLocal,
+            vWorld
+        );
+
+    float3 normalIntoFluidLocal;
+    float distanceToBoundary;
+
+    bool found =
+        FindNearestBucketWallNormalLocal(
+            pLocal,
+            particleRadius,
+            normalIntoFluidLocal,
+            distanceToBoundary
+        );
+
+    if (!found)
+        return;
+
+    normalIntoFluidLocal =
+        normalize(normalIntoFluidLocal);
+
+    float3 wallVelocityLocal =
+        float3(0, 0, 0);
+
+    if (_UseMovingWallVelocityForBoundaryPush != 0)
+    {
+        wallVelocityLocal =
+            ComputeBucketWallVelocityLocal(pLocal);
+    }
+
+    float3 relativeVelocity =
+        vLocal - wallVelocityLocal;
+
+    float vn =
+        dot(relativeVelocity, normalIntoFluidLocal);
+
+    float inwardSpeed =
+        max(-vn, 0.0);
+
+    float densityError =
+        max(_DensityErrorRead[index], 0.0);
+
+    float densityPushSpeed =
+        saturate(
+            densityError *
+            _BoundaryDensityErrorPushScale
+        ) *
+        _MaxBoundaryPressureVelocityCorrection;
+
+    float correctionSpeed =
+        (
+            inwardSpeed +
+            densityPushSpeed
+        ) *
+        _BoundaryPressurePushStrength *
+        saturate(boundaryFactor);
+
+    float3 correctionLocal =
+        normalIntoFluidLocal *
+        correctionSpeed;
+
+    correctionLocal =
+        ClampVectorLength(
+            correctionLocal,
+            _MaxBoundaryPressureVelocityCorrection
+        );
+
+    vLocal += correctionLocal;
+
+    vWorld =
+        TransformVector(
+            _BucketLocalToWorld,
+            vLocal
+        );
+
+    vWorld =
+        ClampSpeed(vWorld);
+
+    _ParticleVelocityMass[index] =
+        float4(vWorld, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KCopyVelocityTempToMain(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    _ParticleVelocityMass[index] = _DfsphTempVectorRead[index];
+}
+
+[numthreads(256, 1, 1)]
+void KComputeNeighborCountDebug(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+    {
+        _NeighborCount[particleIndex] = 0;
+        return;
+    }
+
+    int ownCellIndex = _ParticleCellIndexRead[particleIndex];
+
+    if (ownCellIndex < 0)
+    {
+        _NeighborCount[particleIndex] = 0;
+        return;
+    }
+
+    float3 positionI = _ParticlePositionRadiusRead[particleIndex].xyz;
+
+    int3 cell = WorldToGridCoord(positionI);
+
+    int count = 0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell = cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex = FlattenGridCoord(neighborCell);
+
+                int cellCount = _CellParticleCountRead[neighborCellIndex];
+
+                cellCount = min(cellCount, _MaxParticlesPerCell);
+
+                int baseIndex = neighborCellIndex * _MaxParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int neighborParticleIndex = _CellParticleIndicesRead[baseIndex + slot];
+
+                    if (neighborParticleIndex == (int)particleIndex)
+                        continue;
+
+                    float4 neighborStateAgeId = _ParticleStateAgeIdRead[neighborParticleIndex];
+
+                    int neighborState = (int)round(neighborStateAgeId.x);
+
+                    if (!IsValidParticleState(neighborState))
+                        continue;
+
+                    float3 positionJ = _ParticlePositionRadiusRead[neighborParticleIndex].xyz;
+
+                    float3 r = positionI - positionJ;
+                    float dist2 = dot(r, r);
+
+                    if (dist2 < _SupportRadius2)
+                    {
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+
+    _NeighborCount[particleIndex] = count;
+}
+
+[numthreads(256, 1, 1)]
+void KApplyBucketFrameTransport(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableBucketFrameTransport == 0 ||
+        _EnableBucketSdfBoundary == 0)
+    {
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[index];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 pr =
+        _ParticlePositionRadius[index];
+
+    float4 vm =
+        _ParticleVelocityMass[index];
+
+    float3 oldWorldPosition = pr.xyz;
+    float particleRadius = pr.w;
+
+    float3 oldVelocity = vm.xyz;
+    float mass = vm.w;
+
+    float3 previousLocalPosition =
+        TransformPoint(
+            _PreviousBucketWorldToLocal,
+            oldWorldPosition
+        );
+
+    float3 targetWorldPosition =
+        TransformPoint(
+            _CurrentBucketLocalToWorld,
+            previousLocalPosition
+        );
+
+    float3 transportDelta =
+        targetWorldPosition - oldWorldPosition;
+
+    float deltaLength =
+        length(transportDelta);
+
+    if (deltaLength < _BucketFrameTransportMinDelta)
+        return;
+
+    float positionStrength =
+        saturate(_BucketFramePositionTransportStrength);
+
+    float3 newWorldPosition =
+        oldWorldPosition +
+        transportDelta * positionStrength;
+
+    float3 transportVelocity =
+        transportDelta /
+        max(_Dt, 1e-6);
+
+    transportVelocity =
+        ClampVectorLength(
+            transportVelocity,
+            _MaxBucketFrameTransportVelocity
+        );
+
+    float velocityStrength =
+        saturate(_BucketFrameVelocityTransportStrength);
+
+    float3 newVelocity =
+        oldVelocity +
+        transportVelocity * velocityStrength;
+
+    newVelocity =
+        ClampSpeed(newVelocity);
+
+    _ParticlePositionRadius[index] =
+        float4(newWorldPosition, particleRadius);
+
+    _ParticleVelocityMass[index] =
+        float4(newVelocity, mass);
+}
+
+[numthreads(256, 1, 1)]
+void KClearBoundarySpatialGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index < (uint)_GridCellCount)
+    {
+        _BoundaryCellCount[index] = 0;
+    }
+
+    if (index < 4)
+    {
+        _BoundaryGridStats[index] = 0;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KBuildBoundarySpatialGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint boundaryIndex = id.x;
+
+    if (boundaryIndex >= (uint)_BoundaryParticleCount)
+        return;
+
+    if (_EnableGpuBoundaryParticles == 0)
+        return;
+
+    float4 pr =
+        _BoundaryPositionRadiusRead[boundaryIndex];
+
+    float3 position =
+        pr.xyz;
+
+    int3 cell =
+        WorldToGridCoord(position);
+
+    if (!IsValidGridCoord(cell))
+    {
+        InterlockedAdd(_BoundaryGridStats[2], 1);
+        return;
+    }
+
+    int cellIndex =
+        FlattenGridCoord(cell);
+
+    int slot;
+    InterlockedAdd(
+        _BoundaryCellCount[cellIndex],
+        1,
+        slot
+    );
+
+    int observedCount =
+        slot + 1;
+
+    InterlockedMax(
+        _BoundaryGridStats[3],
+        observedCount
+    );
+
+    if (slot >= _MaxBoundaryParticlesPerCell)
+    {
+        InterlockedAdd(_BoundaryGridStats[1], 1);
+        return;
+    }
+
+    int writeIndex =
+        cellIndex *
+        _MaxBoundaryParticlesPerCell +
+        slot;
+
+    _BoundaryCellIndices[writeIndex] =
+        (int)boundaryIndex;
+
+    InterlockedAdd(_BoundaryGridStats[0], 1);
+}
+
+[numthreads(256, 1, 1)]
+void KResolveBoundaryParticleCollisionPreSolve(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableGpuBoundaryParticles == 0 ||
+        _EnableBoundaryParticleCollisionPreSolve == 0 ||
+        _BoundaryParticleCount <= 0)
+    {
+        return;
+    }
+
+    float4 stateAgeId =
+        _ParticleStateAgeIdRead[particleIndex];
+
+    int state =
+        (int)round(stateAgeId.x);
+
+    if (!IsValidParticleState(state))
+        return;
+
+    float4 prI =
+        _ParticlePositionRadius[particleIndex];
+
+    float4 vmI =
+        _ParticleVelocityMass[particleIndex];
+
+    float3 positionI =
+        prI.xyz;
+
+    float radiusI =
+        prI.w;
+
+    float3 velocityI =
+        vmI.xyz;
+
+    float massI =
+        vmI.w;
+
+    int3 cell =
+        WorldToGridCoord(positionI);
+
+    float collisionDistance =
+        max(
+            _SupportRadius * _BoundaryCollisionDistanceFactor,
+            radiusI * 2.0
+        );
+
+    float collisionDistance2 =
+        collisionDistance * collisionDistance;
+
+    float3 totalVelocityDelta =
+        float3(0, 0, 0);
+
+    float3 totalPositionDelta =
+        float3(0, 0, 0);
+
+    int contactCount = 0;
+
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int3 neighborCell =
+                    cell + int3(dx, dy, dz);
+
+                if (!IsValidGridCoord(neighborCell))
+                    continue;
+
+                int neighborCellIndex =
+                    FlattenGridCoord(neighborCell);
+
+                int cellCount =
+                    _BoundaryCellCountRead[neighborCellIndex];
+
+                cellCount =
+                    min(cellCount, _MaxBoundaryParticlesPerCell);
+
+                int baseIndex =
+                    neighborCellIndex *
+                    _MaxBoundaryParticlesPerCell;
+
+                for (int slot = 0; slot < cellCount; slot++)
+                {
+                    int boundaryIndex =
+                        _BoundaryCellIndicesRead[baseIndex + slot];
+
+                    if (boundaryIndex < 0 ||
+                        boundaryIndex >= _BoundaryParticleCount)
+                    {
+                        continue;
+                    }
+
+                    float4 bPr =
+                        _BoundaryPositionRadiusRead[boundaryIndex];
+
+                    float4 bNormalType =
+                        _BoundaryNormalTypeRead[boundaryIndex];
+
+                    float4 bVelPsi =
+                        _BoundaryVelocityPsiRead[boundaryIndex];
+
+                    float3 positionB =
+                        bPr.xyz;
+
+                    float3 normalB =
+                        normalize(bNormalType.xyz);
+
+                    float3 r =
+                        positionI - positionB;
+
+                    float dist2 =
+                        dot(r, r);
+
+                    if (dist2 >= collisionDistance2)
+                        continue;
+
+                    if (!PassBoundaryCollisionNormalFilter(positionI, positionB, normalB))
+                        continue;
+
+                    float dist =
+                        sqrt(max(dist2, 1e-10));
+
+                    float proximity =
+                        saturate(
+                            1.0 -
+                            dist / max(collisionDistance, 1e-6)
+                        );
+
+                    float3 velocityB =
+                        float3(0, 0, 0);
+
+                    if (_UseBoundaryVelocityInCollision != 0)
+                        velocityB = bVelPsi.xyz;
+
+                    float3 relativeVelocity =
+                        velocityI - velocityB;
+
+                    float vn =
+                        dot(relativeVelocity, normalB);
+
+                    // vn < 0 means particle moves into the wall.
+                    if (vn < 0.0)
+                    {
+                        float removal =
+                            saturate(_BoundaryCollisionNormalVelocityRemoval) *
+                            proximity;
+
+                        float3 normalDelta =
+                            -vn *
+                            normalB *
+                            removal;
+
+                        totalVelocityDelta +=
+                            normalDelta;
+                    }
+
+                    float3 normalVelocity =
+                        vn * normalB;
+
+                    float3 tangentialVelocity =
+                        relativeVelocity - normalVelocity;
+
+                    float3 frictionDelta =
+                        -tangentialVelocity *
+                        saturate(_BoundaryCollisionTangentialFriction) *
+                        proximity;
+
+                    totalVelocityDelta +=
+                        frictionDelta;
+
+                    // Very small non-penetration position correction.
+                    // Do not push hard. This is safety only.
+                    float penetration =
+                        collisionDistance - dist;
+
+                    if (penetration > 0.0 &&
+                        _MaxBoundaryCollisionPositionCorrection > 0.0)
+                    {
+                        float posAmount =
+                            min(
+                                penetration * 0.15 * proximity,
+                                _MaxBoundaryCollisionPositionCorrection
+                            );
+
+                        totalPositionDelta +=
+                            normalB * posAmount;
+                    }
+
+                    contactCount++;
+                }
+            }
+        }
+    }
+
+    if (contactCount <= 0)
+        return;
+
+    totalVelocityDelta /=
+        max((float)contactCount, 1.0);
+
+    totalPositionDelta /=
+        max((float)contactCount, 1.0);
+
+    totalVelocityDelta =
+        ClampVectorLength(
+            totalVelocityDelta,
+            _MaxBoundaryCollisionVelocityCorrection
+        );
+
+    positionI +=
+        totalPositionDelta;
+
+    velocityI +=
+        totalVelocityDelta;
+
+    velocityI =
+        ClampSpeed(velocityI);
+
+    _ParticlePositionRadius[particleIndex] =
+        float4(positionI, radiusI);
+
+    _ParticleVelocityMass[particleIndex] =
+        float4(velocityI, massI);
+}

@@ -17,11 +17,11 @@ MonoBehaviour:
   generateWall: 1
   generateBottom: 1
   generateHoleEdges: 1
-  minRadialParticles: 30
+  minRadialParticles: 16
   holeEdgeAxialRings: 2
   holeClearanceMeters: 0.01
   renderBoundaryParticles: 1
-  visualParticleSizeMeters: 0.015
-  wallColor: {r: 0.10366231, g: 0.11320752, b: 0.10199357, a: 1}
+  visualParticleSizeMeters: 0.018
+  wallColor: {r: 0.08957815, g: 0.09715896, b: 0.103773594, a: 1}
   bottomColor: {r: 0.2, g: 1, b: 0.55, a: 1}
   holeEdgeColor: {r: 1, g: 0.25, b: 0.15, a: 1}

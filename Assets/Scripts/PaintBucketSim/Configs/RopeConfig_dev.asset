@@ -35,7 +35,7 @@ MonoBehaviour:
   segmentDampingRatio: 0.08
   enableBreakByTension: 0
   breakTensionNewton: 340
-  enableBreakByStrain: 1
+  enableBreakByStrain: 0
   breakStrain: 0.35
   pivotMotionMode: 0
   pivotMotionAmplitude: {x: 0.05, y: 0, z: 0}

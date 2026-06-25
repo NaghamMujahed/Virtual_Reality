@@ -40,6 +40,14 @@ namespace PaintBucketSim.Configs
         [Header("Diagnostics")]
         public bool enableDiagnostics = true;
 
+        [Header("Initialization")]
+        public bool alignBucketAttachmentToRopeEndOnInitialize = true;
+
+        public bool resetBucketVelocityAfterInitialAlignment = true;
+
+        [Min(0.0f)]
+        public float initialAlignmentWarningDistance = 0.02f;
+
         private void OnValidate()
         {
             if (solverIterations < 1)

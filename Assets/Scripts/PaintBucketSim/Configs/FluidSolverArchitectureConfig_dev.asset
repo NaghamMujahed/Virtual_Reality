@@ -12,10 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 075446a52e9bfd14599d94bcab087e9f, type: 3}
   m_Name: FluidSolverArchitectureConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.FluidSolverArchitectureConfig
-  activeSolver: 1
+  activeSolver: 10
   fallbackToCpuPbfIfSelectedSolverUnavailable: 1
   enableSolverStats: 1
   logSolverLifecycle: 1
   architectureGoal: The paint system is solver-independent. CPU PBF remains as a
     baseline solver. GPU Sparse APIC/MLS-MPM will be added as an advanced solver
     using the same material, particle pool, states, and diagnostics.
+  gpuDfsphSolverConfig: {fileID: 11400000, guid: 86e1194e999ce8e4ebe76dd1d2d39b50, type: 2}
