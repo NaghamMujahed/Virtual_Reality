@@ -1,4 +1,5 @@
 ﻿#pragma kernel KClearGrid
+#pragma kernel KClearMpmDiagnostics
 #pragma kernel KP2G
 #pragma kernel KGridUpdate
 // Changes after G6.A 
@@ -9,17 +10,21 @@
 // Changes after G8.A 
 #pragma kernel KBucketCollision
 // End Changes after G8.A 
+#pragma kernel KStepAirborneParticles
 
 #pragma kernel KClearProjectionGrid
 #pragma kernel KMarkBucketProjectionSolids
 #pragma kernel KMarkProjectionFluidCells
 #pragma kernel KFinalizeProjectionGrid
 #pragma kernel KApplyMovingBucketProjectionBoundaryVelocity
+#pragma kernel KBuildProjectionFaceVelocities
 
 #pragma kernel KComputeProjectionDivergence
 
 #pragma kernel KJacobiProjectionPressure
 #pragma kernel KSubtractProjectionPressureGradient
+#pragma kernel KApplyProjectionFaceVelocitiesToGrid
+#pragma kernel KCollectProjectionDiagnostics
 
 
 RWStructuredBuffer<float4> _ParticlePositionRadius;
@@ -62,13 +67,29 @@ RWStructuredBuffer<float4> _ProjectionCellData;
 RWStructuredBuffer<float> _ProjectionPressure;
 RWStructuredBuffer<float> _ProjectionPressureTemp;
 RWStructuredBuffer<float> _ProjectionDivergence;
+RWStructuredBuffer<float> _ProjectionDivergenceAfter;
+RWStructuredBuffer<float4> _ProjectionFaceVelocity;
 
 StructuredBuffer<int> _ProjectionCellTypeRead;
 StructuredBuffer<float4> _ProjectionCellDataRead;
+StructuredBuffer<float4> _ProjectionFaceVelocityRead;
 
 StructuredBuffer<float> _ProjectionDivergenceRead;
 StructuredBuffer<float> _ProjectionPressureRead;
 RWStructuredBuffer<float> _ProjectionPressureWrite;
+RWStructuredBuffer<uint> _MpmDiagnostics;
+
+// GPU bucket holes:
+// Data0: xyz = local center, w = half extent X / radius X
+// Data1: xyz = local normal/outlet direction, w = half extent Y / radius Y
+// Data2: xyz = local tangent X, w = active
+// Data3: xyz = local tangent Y, w = shape
+// Data4: x = wall thickness, y = edge softness, z = flow multiplier, w = exit velocity boost
+StructuredBuffer<float4> _BucketHoleData0;
+StructuredBuffer<float4> _BucketHoleData1;
+StructuredBuffer<float4> _BucketHoleData2;
+StructuredBuffer<float4> _BucketHoleData3;
+StructuredBuffer<float4> _BucketHoleData4;
 
 int _ParticleCount;
 int _GridNodeCount;
@@ -153,7 +174,17 @@ float3 _HoleLocalNormal;
 float _HoleRadius;
 float _HoleNearHeight;
 float _HoleRadialPadding;
+int _BucketHoleCount;
+float _HoleOutflowExitDistance;
 //      End Changes G8.A      //
+
+// G9 outflow / airborne prototype
+int _EnableAirborneAdvection;
+float _AirborneDragPerSecond;
+float _JetStateDuration;
+float _AirborneLifetime;
+float _AirborneKillBelowY;
+int _KillAirborneBelowY;
 
 /// /// /// ///       Changes G8.B      /// /// /// /// /// /// 
 
@@ -167,6 +198,8 @@ float3 _BucketAngularVelocityWorld;
 /// /// /// ///      End Changes G8.B      /// /// /// /// /// /// 
 
 int _EnableProjectionGrid;
+int _UsePressureWarmStart;
+float _PressureWarmStartFactor;
 int _ProjectionMassFixedScale;
 float _ProjectionMinFluidCellMass;
 
@@ -192,6 +225,9 @@ float _ProjectionPressureGradientScale;
 float _MaxPressureVelocityCorrection;
 int _InvertPressureGradientSign;
 int _PressureCorrectionFluidCellsOnly;
+int _UseStaggeredFaceProjection;
+int _EnableGpuDiagnostics;
+int _ProjectionDiagnosticsMode;
 
 int _EnableMovingBucketProjectionCoupling;
 int _UseMovingBucketVelocityInDivergence;
@@ -204,6 +240,46 @@ static const int PROJECTION_AIR = 0;
 static const int PROJECTION_FLUID = 1;
 static const int PROJECTION_SOLID = 2;
 
+static const uint DIAG_ACTIVE_PARTICLES = 0;
+static const uint DIAG_OUTSIDE_GRID = 1;
+static const uint DIAG_PARTIAL_GRID_SUPPORT = 2;
+static const uint DIAG_BUCKET_COLLISIONS = 3;
+static const uint DIAG_J_CLAMPS = 4;
+static const uint DIAG_FLUID_CELLS = 5;
+static const uint DIAG_SOLID_CELLS = 6;
+static const uint DIAG_AIR_CELLS = 7;
+static const uint DIAG_DIV_BEFORE_SUM = 8;
+static const uint DIAG_DIV_BEFORE_MAX = 9;
+static const uint DIAG_DIV_AFTER_SUM = 10;
+static const uint DIAG_DIV_AFTER_MAX = 11;
+static const uint DIAG_PRESSURE_SUM = 12;
+static const uint DIAG_PRESSURE_MAX = 13;
+static const uint DIAG_NAN_INF = 14;
+static const uint DIAG_J_SUM = 15;
+static const uint DIAG_J_MIN = 16;
+static const uint DIAG_J_MAX = 17;
+static const uint DIAG_OUTFLOW_TRANSITIONS = 18;
+static const uint DIAG_JET_PARTICLES = 19;
+static const uint DIAG_AIRBORNE_PARTICLES = 20;
+static const uint DIAG_LOST_PARTICLES = 21;
+static const uint DIAG_LOCAL_Y_SUM = 22;
+static const uint DIAG_LOCAL_Y_MIN = 23;
+static const uint DIAG_LOCAL_Y_MAX = 24;
+static const uint DIAG_SPEED_SUM = 25;
+static const uint DIAG_SPEED_MAX = 26;
+static const uint MPM_DIAGNOSTIC_COUNT = 27;
+static const float DIAG_DIVERGENCE_FIXED_SCALE = 100.0;
+static const float DIAG_PRESSURE_FIXED_SCALE = 1000000.0;
+static const float DIAG_J_FIXED_SCALE = 10000.0;
+static const float DIAG_HEIGHT_FIXED_SCALE = 1000.0;
+static const float DIAG_SPEED_FIXED_SCALE = 100.0;
+
+static const int HOLE_SHAPE_CIRCULAR = 0;
+static const int HOLE_SHAPE_SQUARE = 1;
+static const int HOLE_SHAPE_ELLIPSE = 2;
+static const int HOLE_SHAPE_RECTANGLE = 3;
+static const int HOLE_SHAPE_SLOT = 4;
+
 
 int FlattenGridIndex(int3 c)
 {
@@ -212,16 +288,18 @@ int FlattenGridIndex(int3 c)
            c.z * _GridResolution.x * _GridResolution.y;
 }
 
-int3 UnflattenGridIndex(int index)
+int3 UnflattenGridIndex(uint index)
 {
-    int xy = _GridResolution.x * _GridResolution.y;
+    uint resolutionX = (uint)_GridResolution.x;
+    uint resolutionY = (uint)_GridResolution.y;
+    uint xy = resolutionX * resolutionY;
 
-    int z = index / xy;
-    int rem = index - z * xy;
-    int y = rem / _GridResolution.x;
-    int x = rem - y * _GridResolution.x;
+    uint z = index / xy;
+    uint rem = index - z * xy;
+    uint y = rem / resolutionX;
+    uint x = rem - y * resolutionX;
 
-    return int3(x, y, z);
+    return int3((int)x, (int)y, (int)z);
 }
 
 bool IsValidCell(int3 c)
@@ -678,6 +756,31 @@ void KClearGrid(uint3 id : SV_DispatchThreadID)
     _GridVelocityMass[index] = float4(0, 0, 0, 0);
 }
 
+bool IsFiniteFloat3(float3 value)
+{
+    uint3 exponentBits = asuint(value) & 0x7f800000u;
+    return all(exponentBits != 0x7f800000u);
+}
+
+bool IsFiniteFloat(float value)
+{
+    return (asuint(value) & 0x7f800000u) != 0x7f800000u;
+}
+
+[numthreads(64, 1, 1)]
+void KClearMpmDiagnostics(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= MPM_DIAGNOSTIC_COUNT)
+        return;
+
+    _MpmDiagnostics[index] =
+        (index == DIAG_J_MIN || index == DIAG_LOCAL_Y_MIN)
+            ? 0xffffffffu
+            : 0u;
+}
+
 [numthreads(256, 1, 1)]
 void KP2G(uint3 id : SV_DispatchThreadID)
 {
@@ -695,9 +798,45 @@ void KP2G(uint3 id : SV_DispatchThreadID)
     if (!IsMpmActiveState(state))
         return;
 
+    if (_EnableGpuDiagnostics != 0)
+        InterlockedAdd(_MpmDiagnostics[DIAG_ACTIVE_PARTICLES], 1);
+
     float3 p = pr.xyz;
     float3 v = vm.xyz;
-    float mass = max(vm.w, 1e-12);
+    float rawMass = vm.w;
+
+    if (!IsFiniteFloat3(p) ||
+        !IsFiniteFloat3(v) ||
+        !IsFiniteFloat(rawMass))
+    {
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+        return;
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        float3 localPForDiagnostics =
+            mul(_BucketWorldToLocal, float4(p, 1.0)).xyz;
+        float normalizedBucketY = saturate(
+            (localPForDiagnostics.y + 0.5 * _BucketHeight) /
+            max(_BucketHeight, 1e-6)
+        );
+        uint fixedLocalY = (uint)round(
+            normalizedBucketY * DIAG_HEIGHT_FIXED_SCALE
+        );
+        uint fixedSpeed = (uint)round(
+            min(length(v), 10.0) * DIAG_SPEED_FIXED_SCALE
+        );
+
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Y_SUM], fixedLocalY);
+        InterlockedMin(_MpmDiagnostics[DIAG_LOCAL_Y_MIN], fixedLocalY);
+        InterlockedMax(_MpmDiagnostics[DIAG_LOCAL_Y_MAX], fixedLocalY);
+        InterlockedAdd(_MpmDiagnostics[DIAG_SPEED_SUM], fixedSpeed);
+        InterlockedMax(_MpmDiagnostics[DIAG_SPEED_MAX], fixedSpeed);
+    }
+
+    float mass = max(rawMass, 1e-12);
 
     float3 c0 = _ParticleAffineC0[particleIndex].xyz;
     float3 c1 = _ParticleAffineC1[particleIndex].xyz;
@@ -741,6 +880,9 @@ void KP2G(uint3 id : SV_DispatchThreadID)
     QuadraticBSplineWeights(f.z, wz, dwz);
     ////////  End G6.B Changes   ////////
 
+    int validNodeCount = 0;
+    float validSupportWeight = 0.0;
+
     for (int dz = 0; dz <= 2; dz++)
     {
         for (int dy = 0; dy <= 2; dy++)
@@ -765,6 +907,9 @@ void KP2G(uint3 id : SV_DispatchThreadID)
 
                 float w = wxi * wyi * wzi;
                 ////////  End G6.B Changes   ////////
+
+                validNodeCount++;
+                validSupportWeight += w;
 
                 int nodeIndex = FlattenGridIndex(node);
 
@@ -815,6 +960,18 @@ void KP2G(uint3 id : SV_DispatchThreadID)
             }
         }
     }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        if (validNodeCount == 0)
+        {
+            InterlockedAdd(_MpmDiagnostics[DIAG_OUTSIDE_GRID], 1);
+        }
+        else if (validSupportWeight < 0.999)
+        {
+            InterlockedAdd(_MpmDiagnostics[DIAG_PARTIAL_GRID_SUPPORT], 1);
+        }
+    }
 }
 
 [numthreads(256, 1, 1)]
@@ -842,6 +999,14 @@ void KGridUpdate(uint3 id : SV_DispatchThreadID)
     );
 
     float3 v = momentum / mass;
+
+    if (!IsFiniteFloat3(v))
+    {
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, mass);
+        return;
+    }
 
     v += _Gravity * _Dt;
 
@@ -1046,6 +1211,13 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
 
     p += newV * _Dt;
 
+    if (!IsFiniteFloat3(p) || !IsFiniteFloat3(newV))
+    {
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+        return;
+    }
+
     //if (_EnableBoxBoundary != 0)
     //{
     //    float3 minP = _GridOrigin + float3(radius, radius, radius);
@@ -1118,6 +1290,15 @@ float2 SafeNormalize2(float2 v)
     return v / len;
 }
 
+float3 SafeNormalize3(float3 v, float3 fallback)
+{
+    float len = length(v);
+    if (len < 1e-6)
+        return fallback;
+
+    return v / len;
+}
+
 float3 RemoveNormalComponent(float3 v, float3 n)
 {
     return v - dot(v, n) * n;
@@ -1143,6 +1324,7 @@ float3 ApplyCollisionVelocity(float3 vLocal, float3 normalLocal)
 
 bool IsInsideBottomHoleRegion(float3 localP, float radius)
 {
+    // Backward-compatible fallback for old single-bottom-hole paths.
     float2 p = localP.xz;
     float2 c = _HoleLocalCenter.xz;
 
@@ -1160,6 +1342,180 @@ bool IsInsideBottomHoleRegion(float3 localP, float radius)
     return radialOk && heightOk;
 }
 
+bool IsValidGpuHoleIndex(int holeIndex)
+{
+    return holeIndex >= 0 && holeIndex < _BucketHoleCount;
+}
+
+float3 GetHoleCenterLocal(int holeIndex)
+{
+    return _BucketHoleData0[holeIndex].xyz;
+}
+
+float3 GetHoleNormalLocal(int holeIndex)
+{
+    return SafeNormalize3(
+        _BucketHoleData1[holeIndex].xyz,
+        float3(0, -1, 0)
+    );
+}
+
+float3 GetHoleTangentLocal(int holeIndex)
+{
+    return SafeNormalize3(
+        _BucketHoleData2[holeIndex].xyz,
+        float3(1, 0, 0)
+    );
+}
+
+float3 GetHoleBitangentLocal(int holeIndex)
+{
+    return SafeNormalize3(
+        _BucketHoleData3[holeIndex].xyz,
+        float3(0, 0, 1)
+    );
+}
+
+int GetHoleShape(int holeIndex)
+{
+    return (int)round(_BucketHoleData3[holeIndex].w);
+}
+
+float2 GetHoleHalfExtents(int holeIndex)
+{
+    return max(
+        float2(_BucketHoleData0[holeIndex].w, _BucketHoleData1[holeIndex].w),
+        float2(0.001, 0.001)
+    );
+}
+
+float GetHolePlaneDistance(float3 localP, int holeIndex)
+{
+    return dot(
+        localP - GetHoleCenterLocal(holeIndex),
+        GetHoleNormalLocal(holeIndex)
+    );
+}
+
+bool IsInsideHoleFootprintLocal(
+    float3 localP,
+    int holeIndex,
+    float extraPadding)
+{
+    if (!IsValidGpuHoleIndex(holeIndex))
+        return false;
+
+    if (_BucketHoleData2[holeIndex].w <= 0.5)
+        return false;
+
+    float3 delta = localP - GetHoleCenterLocal(holeIndex);
+    float3 tangent = GetHoleTangentLocal(holeIndex);
+    float3 bitangent = GetHoleBitangentLocal(holeIndex);
+
+    float u = dot(delta, tangent);
+    float v = dot(delta, bitangent);
+
+    float perHoleSoftness = max(_BucketHoleData4[holeIndex].y, 0.0);
+    float padding = max(extraPadding, 0.0) + perHoleSoftness;
+
+    float2 halfExtents = GetHoleHalfExtents(holeIndex) + padding;
+    float a = max(halfExtents.x, 0.001);
+    float b = max(halfExtents.y, 0.001);
+    int shape = GetHoleShape(holeIndex);
+
+    if (shape == HOLE_SHAPE_SQUARE ||
+        shape == HOLE_SHAPE_RECTANGLE)
+    {
+        return abs(u) <= a && abs(v) <= b;
+    }
+
+    if (shape == HOLE_SHAPE_SLOT)
+    {
+        float radius = max(b, 0.001);
+        float segmentHalfLength = max(a - radius, 0.0);
+        float du = max(abs(u) - segmentHalfLength, 0.0);
+        return du * du + v * v <= radius * radius;
+    }
+
+    // Circle and ellipse.
+    float nx = u / a;
+    float ny = v / b;
+    return nx * nx + ny * ny <= 1.0;
+}
+
+bool IsInsideAnyOpenHoleRegionLocal(
+    float3 localP,
+    float radius,
+    out int holeIndex)
+{
+    holeIndex = -1;
+
+    if (_ClassifyBottomHoleRegion == 0 || _BucketHoleCount <= 0)
+        return false;
+
+    int maxHoleCount = min(_BucketHoleCount, 64);
+
+    [loop]
+    for (int i = 0; i < maxHoleCount; i++)
+    {
+        float planeDistance = GetHolePlaneDistance(localP, i);
+        float wallThickness = max(_BucketHoleData4[i].x, _BucketWallThickness);
+        float heightLimit = max(
+            _HoleNearHeight,
+            wallThickness + radius * 2.0 + _CellSize
+        );
+
+        if (abs(planeDistance) > heightLimit)
+            continue;
+
+        float padding = _HoleRadialPadding + radius;
+
+        if (!IsInsideHoleFootprintLocal(localP, i, padding))
+            continue;
+
+        holeIndex = i;
+        return true;
+    }
+
+    return false;
+}
+
+bool IsPastOpenHoleExitLocal(
+    float3 localP,
+    float radius,
+    out int holeIndex)
+{
+    holeIndex = -1;
+
+    if (_EnableBottomHoleOpening == 0 || _BucketHoleCount <= 0)
+        return false;
+
+    int maxHoleCount = min(_BucketHoleCount, 64);
+
+    [loop]
+    for (int i = 0; i < maxHoleCount; i++)
+    {
+        float planeDistance = GetHolePlaneDistance(localP, i);
+        float exitDistance = max(
+            _HoleOutflowExitDistance,
+            max(radius * 0.25, 0.001)
+        );
+
+        if (planeDistance <= exitDistance)
+            continue;
+
+        float padding = _HoleRadialPadding + radius;
+
+        if (!IsInsideHoleFootprintLocal(localP, i, padding))
+            continue;
+
+        holeIndex = i;
+        return true;
+    }
+
+    return false;
+}
+
 bool IsInsideBucketInteriorLocal(float3 pLocal)             
 {
     float halfH = 0.5 * _BucketHeight;
@@ -1173,7 +1529,7 @@ bool IsInsideBucketInteriorLocal(float3 pLocal)
     if (_ProjectionTopOpen != 0)
     {
         if (pLocal.y > topY)
-            return false;
+            return true;
     }
     else
     {
@@ -1194,43 +1550,50 @@ bool IsInsideBucketInteriorLocal(float3 pLocal)
 
 float3 ComputeBucketWallVelocityWorld(float3 pWorld)
 {
-    if (_EnableMovingBucketBoundaryVelocity == 0)
-        return float3(0, 0, 0);
+    float3 wallVelocity = float3(0, 0, 0);
 
-    // Bucket center/origin in world.
-    float3 bucketCenterWorld = TransformPoint(_BucketLocalToWorld, float3(0, 0, 0));
+    if (_EnableMovingBucketBoundaryVelocity != 0)
+    {
+        // Bucket center/origin in world.
+        float3 bucketCenterWorld =
+            TransformPoint(_BucketLocalToWorld, float3(0, 0, 0));
 
-    float3 r = pWorld - bucketCenterWorld;
+        float3 r = pWorld - bucketCenterWorld;
 
-    float3 wallVelocity =
-        _BucketLinearVelocityWorld +
-        cross(_BucketAngularVelocityWorld, r);
+        wallVelocity =
+            _BucketLinearVelocityWorld +
+            cross(_BucketAngularVelocityWorld, r);
 
-    wallVelocity *= saturate(_BucketBoundaryVelocityStrength);
+        wallVelocity *= saturate(_BucketBoundaryVelocityStrength);
 
-    wallVelocity = ClampVectorLength(
-        wallVelocity,
-        _MaxBucketBoundaryVelocity
-    );
+        wallVelocity = ClampVectorLength(
+            wallVelocity,
+            _MaxBucketBoundaryVelocity
+        );
+    }
 
     return wallVelocity;
 }
 
 float3 ComputeProjectionWallVelocityWorld(float3 pWorld)
 {
-    if (_EnableMovingBucketProjectionCoupling == 0)
-        return float3(0, 0, 0);
+    float3 wallVelocity = float3(0, 0, 0);
 
-    float3 wallVelocity = ComputeBucketWallVelocityWorld(pWorld);
+    if (_EnableMovingBucketProjectionCoupling != 0)
+    {
+        wallVelocity = ComputeBucketWallVelocityWorld(pWorld);
 
-    wallVelocity *= saturate(
-        _ProjectionMovingBoundaryVelocityStrength
-    );
+        wallVelocity *= saturate(
+            _ProjectionMovingBoundaryVelocityStrength
+        );
 
-    return ClampVectorLength(
-        wallVelocity,
-        _MaxBucketBoundaryVelocity
-    );
+        wallVelocity = ClampVectorLength(
+            wallVelocity,
+            _MaxBucketBoundaryVelocity
+        );
+    }
+
+    return wallVelocity;
 }
 
 float3 ApplyMovingWallNoPenetrationWorld(
@@ -1300,9 +1663,15 @@ void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
 
     _ProjectionCellData[index] = float4(0, 0, 0, 0);
 
-    _ProjectionPressure[index] = 0.0;
-    _ProjectionPressureTemp[index] = 0.0;
+    float warmStartFactor = _UsePressureWarmStart != 0
+        ? saturate(_PressureWarmStartFactor)
+        : 0.0;
+
+    _ProjectionPressure[index] *= warmStartFactor;
+    _ProjectionPressureTemp[index] *= warmStartFactor;
     _ProjectionDivergence[index] = 0.0;
+    _ProjectionDivergenceAfter[index] = 0.0;
+    _ProjectionFaceVelocity[index] = float4(0, 0, 0, 0);
 }
 
 [numthreads(256, 1, 1)]
@@ -1320,10 +1689,10 @@ void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    int3 cell = UnflattenGridIndex((int)index);
+    int3 cell = UnflattenGridIndex(index);
 
-    // Cell center in world space.
-    float3 worldP = GridToWorld((float3)cell + float3(0.5, 0.5, 0.5));
+    // Projection shares the node-centered MPM grid.
+    float3 worldP = GridToWorld((float3)cell);
 
     float3 localP = TransformPoint(_BucketWorldToLocal, worldP);
 
@@ -1331,6 +1700,18 @@ void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
 
     if (!insideInterior)
     {
+        int openHoleIndex = -1;
+        bool insideOpenHoleChannel =
+            _EnableBottomHoleOpening != 0 &&
+            IsInsideAnyOpenHoleRegionLocal(
+                localP,
+                _CellSize * 0.75,
+                openHoleIndex
+            );
+
+        if (insideOpenHoleChannel)
+            return;
+
         _ProjectionCellType[index] = PROJECTION_SOLID;
     }
 }
@@ -1422,6 +1803,8 @@ void KFinalizeProjectionGrid(uint3 id : SV_DispatchThreadID)
     if (cellType == PROJECTION_SOLID)
     {
         _ProjectionCellData[index] = float4(0, 0, 1, 0);
+        _ProjectionPressure[index] = 0.0;
+        _ProjectionPressureTemp[index] = 0.0;
         return;
     }
 
@@ -1440,6 +1823,8 @@ void KFinalizeProjectionGrid(uint3 id : SV_DispatchThreadID)
     {
         _ProjectionCellType[index] = PROJECTION_AIR;
         _ProjectionCellData[index] = float4(0, 0, 0, 0);
+        _ProjectionPressure[index] = 0.0;
+        _ProjectionPressureTemp[index] = 0.0;
     }
 }
 
@@ -1459,20 +1844,29 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
         return;
     }
 
-    int cellType = _ProjectionCellTypeRead[index];
-
-    if (cellType != PROJECTION_FLUID)
-        return;
-
     float4 velocityMass = _GridVelocityMass[index];
 
     if (velocityMass.w <= 1e-8)
         return;
 
-    int3 cell = UnflattenGridIndex((int)index);
+    int cellType = _ProjectionCellTypeRead[index];
+
+    if (cellType == PROJECTION_SOLID)
+    {
+        int3 nodeCell = UnflattenGridIndex(index);
+        float3 nodeWorld = GridToWorld((float3)nodeCell);
+        float3 wallVelocity = ComputeProjectionWallVelocityWorld(nodeWorld);
+        _GridVelocityMass[index] = float4(ClampSpeed(wallVelocity), velocityMass.w);
+        return;
+    }
+
+    if (cellType != PROJECTION_FLUID)
+        return;
+
+    int3 cell = UnflattenGridIndex(index);
 
     float3 centerWorld =
-        GridToWorld((float3)cell + float3(0.5, 0.5, 0.5));
+        GridToWorld((float3)cell);
 
     float3 v = velocityMass.xyz;
 
@@ -1547,8 +1941,9 @@ float3 GetProjectionFaceVelocity(
     float3 dirToNeighbor,
     float3 centerVelocity)
 {
+    float3 result = centerVelocity;
     float3 centerWorld =
-        GridToWorld((float3)centerCell + float3(0.5, 0.5, 0.5));
+        GridToWorld((float3)centerCell);
 
     float3 faceWorld =
         centerWorld + dirToNeighbor * (0.5 * _CellSize);
@@ -1556,33 +1951,167 @@ float3 GetProjectionFaceVelocity(
     if (!IsValidCell(neighborCell))
     {
         if (_UseMovingBucketVelocityInDivergence != 0)
-            return ComputeProjectionWallVelocityWorld(faceWorld);
+            result = ComputeProjectionWallVelocityWorld(faceWorld);
+    }
+    else
+    {
+        int neighborIndex = FlattenGridIndex(neighborCell);
+        int neighborType = _ProjectionCellTypeRead[neighborIndex];
 
-        return centerVelocity;
+        if (neighborType == PROJECTION_SOLID)
+        {
+            if (_UseMovingBucketVelocityInDivergence != 0)
+                result = ComputeProjectionWallVelocityWorld(faceWorld);
+        }
+        else
+        {
+            float3 neighborVelocity =
+                _GridVelocityMassRead[neighborIndex].xyz;
+
+            // Fluid and air both use a centered face velocity in the legacy
+            // collocated fallback.
+            result = 0.5 * (centerVelocity + neighborVelocity);
+        }
     }
 
-    int neighborIndex = FlattenGridIndex(neighborCell);
-    int neighborType = _ProjectionCellTypeRead[neighborIndex];
+    return result;
+}
 
-    if (neighborType == PROJECTION_SOLID)
+float GetFloat3Component(float3 value, int axis)
+{
+    if (axis == 0)
+        return value.x;
+
+    if (axis == 1)
+        return value.y;
+
+    return value.z;
+}
+
+float3 GetProjectionAxis(int axis)
+{
+    if (axis == 0)
+        return float3(1, 0, 0);
+
+    if (axis == 1)
+        return float3(0, 1, 0);
+
+    return float3(0, 0, 1);
+}
+
+float GetStaggeredFaceVelocityComponent(
+    int3 lowerCell,
+    int3 upperCell,
+    int axis)
+{
+    float result = 0.0;
+    bool lowerValid = IsValidCell(lowerCell);
+    bool upperValid = IsValidCell(upperCell);
+
+    int lowerType = PROJECTION_SOLID;
+    int upperType = PROJECTION_SOLID;
+    float lowerVelocity = 0.0;
+    float upperVelocity = 0.0;
+
+    if (lowerValid)
+    {
+        int lowerIndex = FlattenGridIndex(lowerCell);
+        lowerType = _ProjectionCellTypeRead[lowerIndex];
+        lowerVelocity = GetFloat3Component(
+            _GridVelocityMassRead[lowerIndex].xyz,
+            axis
+        );
+    }
+
+    if (upperValid)
+    {
+        int upperIndex = FlattenGridIndex(upperCell);
+        upperType = _ProjectionCellTypeRead[upperIndex];
+        upperVelocity = GetFloat3Component(
+            _GridVelocityMassRead[upperIndex].xyz,
+            axis
+        );
+    }
+
+    float3 axisDirection = GetProjectionAxis(axis);
+    float3 faceWorld =
+        GridToWorld((float3)lowerCell) +
+        axisDirection * (0.5 * _CellSize);
+
+    if (lowerType == PROJECTION_SOLID ||
+        upperType == PROJECTION_SOLID)
     {
         if (_UseMovingBucketVelocityInDivergence != 0)
-            return ComputeProjectionWallVelocityWorld(faceWorld);
-
-        return centerVelocity;
+        {
+            result = GetFloat3Component(
+                ComputeProjectionWallVelocityWorld(faceWorld),
+                axis
+            );
+        }
     }
-
-    float3 neighborVelocity =
-        _GridVelocityMassRead[neighborIndex].xyz;
-
-    if (neighborType == PROJECTION_FLUID)
+    else
     {
-        return 0.5 * (centerVelocity + neighborVelocity);
+        bool lowerFluid = lowerType == PROJECTION_FLUID;
+        bool upperFluid = upperType == PROJECTION_FLUID;
+
+        if (lowerFluid && upperFluid)
+        {
+            result = 0.5 * (lowerVelocity + upperVelocity);
+        }
+        else if (lowerFluid)
+        {
+            // Extrapolate fluid velocity across a free surface instead of
+            // averaging it with a zero-mass air node.
+            result = lowerVelocity;
+        }
+        else if (upperFluid)
+        {
+            result = upperVelocity;
+        }
+        else
+        {
+            result = 0.5 * (lowerVelocity + upperVelocity);
+        }
     }
 
-    // Air boundary V1:
-    // For now, average with air velocity. Later free-surface handling will improve this.
-    return 0.5 * (centerVelocity + neighborVelocity);
+    return result;
+}
+
+[numthreads(256, 1, 1)]
+void KBuildProjectionFaceVelocities(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_GridNodeCount)
+        return;
+
+    if (_EnableProjectionGrid == 0 ||
+        _EnableProjectionDivergence == 0 ||
+        _UseStaggeredFaceProjection == 0)
+    {
+        return;
+    }
+
+    int3 cell = UnflattenGridIndex(index);
+
+    float3 faceVelocity;
+    faceVelocity.x = GetStaggeredFaceVelocityComponent(
+        cell,
+        cell + int3(1, 0, 0),
+        0
+    );
+    faceVelocity.y = GetStaggeredFaceVelocityComponent(
+        cell,
+        cell + int3(0, 1, 0),
+        1
+    );
+    faceVelocity.z = GetStaggeredFaceVelocityComponent(
+        cell,
+        cell + int3(0, 0, 1),
+        2
+    );
+
+    _ProjectionFaceVelocity[index] = float4(faceVelocity, 0.0);
 }
 
 [numthreads(256, 1, 1)]
@@ -1607,7 +2136,57 @@ void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    int3 cell = UnflattenGridIndex((int)index);
+    int3 cell = UnflattenGridIndex(index);
+
+    if (_UseStaggeredFaceProjection != 0)
+    {
+        float3 positiveFaces =
+            _ProjectionFaceVelocityRead[index].xyz;
+
+        float faceLeft = IsValidCell(cell + int3(-1, 0, 0))
+            ? _ProjectionFaceVelocityRead[
+                FlattenGridIndex(cell + int3(-1, 0, 0))
+              ].x
+            : GetStaggeredFaceVelocityComponent(
+                cell + int3(-1, 0, 0),
+                cell,
+                0
+              );
+
+        float faceDown = IsValidCell(cell + int3(0, -1, 0))
+            ? _ProjectionFaceVelocityRead[
+                FlattenGridIndex(cell + int3(0, -1, 0))
+              ].y
+            : GetStaggeredFaceVelocityComponent(
+                cell + int3(0, -1, 0),
+                cell,
+                1
+              );
+
+        float faceBack = IsValidCell(cell + int3(0, 0, -1))
+            ? _ProjectionFaceVelocityRead[
+                FlattenGridIndex(cell + int3(0, 0, -1))
+              ].z
+            : GetStaggeredFaceVelocityComponent(
+                cell + int3(0, 0, -1),
+                cell,
+                2
+              );
+
+        float divergence =
+            _InvCellSize *
+            (
+                (positiveFaces.x - faceLeft) +
+                (positiveFaces.y - faceDown) +
+                (positiveFaces.z - faceBack)
+            );
+
+        divergence *= _ProjectionDivergenceScale;
+        divergence = ClampDivergence(divergence);
+
+        _ProjectionDivergence[index] = divergence;
+        return;
+    }
 
     float3 centerVelocity =
         _GridVelocityMassRead[index].xyz;
@@ -1691,7 +2270,7 @@ void KJacobiProjectionPressure(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    int3 cell = UnflattenGridIndex((int)index);
+    int3 cell = UnflattenGridIndex(index);
 
     float centerPressure = _ProjectionPressureRead[index];
 
@@ -1795,6 +2374,81 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
 
     int cellType = _ProjectionCellTypeRead[index];
 
+    if (_UseStaggeredFaceProjection != 0)
+    {
+        int3 cell = UnflattenGridIndex(index);
+        float3 faceVelocity = _ProjectionFaceVelocity[index].xyz;
+        float3 correction = float3(0, 0, 0);
+        float sign = _InvertPressureGradientSign != 0 ? -1.0 : 1.0;
+
+        int3 upperCells[3] =
+        {
+            cell + int3(1, 0, 0),
+            cell + int3(0, 1, 0),
+            cell + int3(0, 0, 1)
+        };
+
+        for (int axis = 0; axis < 3; axis++)
+        {
+            int3 upperCell = upperCells[axis];
+            bool upperValid = IsValidCell(upperCell);
+
+            int upperType = upperValid
+                ? _ProjectionCellTypeRead[FlattenGridIndex(upperCell)]
+                : PROJECTION_SOLID;
+
+            bool lowerFluid = cellType == PROJECTION_FLUID;
+            bool upperFluid = upperType == PROJECTION_FLUID;
+
+            if (!lowerFluid && !upperFluid)
+                continue;
+
+            // A solid face keeps the wall velocity established when the
+            // staggered face buffer was built (Neumann pressure boundary).
+            if (cellType == PROJECTION_SOLID ||
+                upperType == PROJECTION_SOLID)
+            {
+                continue;
+            }
+
+            float lowerPressure = lowerFluid
+                ? _ProjectionPressureRead[index]
+                : 0.0;
+
+            float upperPressure = upperFluid
+                ? _ProjectionPressureRead[FlattenGridIndex(upperCell)]
+                : 0.0;
+
+            float axisCorrection =
+                sign *
+                _ProjectionPressureGradientScale *
+                (upperPressure - lowerPressure) *
+                _InvCellSize;
+
+            axisCorrection = clamp(
+                axisCorrection,
+                -_MaxPressureVelocityCorrection,
+                _MaxPressureVelocityCorrection
+            );
+
+            if (axis == 0)
+                correction.x = axisCorrection;
+            else if (axis == 1)
+                correction.y = axisCorrection;
+            else
+                correction.z = axisCorrection;
+        }
+
+        correction = ClampVectorLength(
+            correction,
+            _MaxPressureVelocityCorrection
+        );
+
+        _ProjectionFaceVelocity[index] =
+            float4(faceVelocity - correction, 0.0);
+        return;
+    }
+
     if (_PressureCorrectionFluidCellsOnly != 0 &&
         cellType != PROJECTION_FLUID)
     {
@@ -1806,7 +2460,7 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
     if (velocityMass.w <= 1e-8)
         return;
 
-    int3 cell = UnflattenGridIndex((int)index);
+    int3 cell = UnflattenGridIndex(index);
 
     float centerPressure = _ProjectionPressureRead[index];
 
@@ -1869,6 +2523,137 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
         float4(correctedVelocity, velocityMass.w);
 }
 
+[numthreads(256, 1, 1)]
+void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_GridNodeCount)
+        return;
+
+    if (_EnableProjectionGrid == 0 ||
+        _EnableProjectionDivergence == 0 ||
+        _EnableJacobiPressureSolve == 0 ||
+        _EnablePressureGradientSubtraction == 0 ||
+        _UseStaggeredFaceProjection == 0)
+    {
+        return;
+    }
+
+    float4 velocityMass = _GridVelocityMass[index];
+
+    if (velocityMass.w <= 1e-8)
+        return;
+
+    int cellType = _ProjectionCellTypeRead[index];
+    int3 cell = UnflattenGridIndex(index);
+
+    if (cellType == PROJECTION_SOLID)
+    {
+        float3 nodeWorld = GridToWorld((float3)cell);
+        float3 wallVelocity = ComputeProjectionWallVelocityWorld(nodeWorld);
+        _GridVelocityMass[index] =
+            float4(ClampSpeed(wallVelocity), velocityMass.w);
+        return;
+    }
+
+    if (cellType != PROJECTION_FLUID)
+        return;
+
+    float3 positiveFaces =
+        _ProjectionFaceVelocityRead[index].xyz;
+
+    float faceLeft = IsValidCell(cell + int3(-1, 0, 0))
+        ? _ProjectionFaceVelocityRead[
+            FlattenGridIndex(cell + int3(-1, 0, 0))
+          ].x
+        : positiveFaces.x;
+
+    float faceDown = IsValidCell(cell + int3(0, -1, 0))
+        ? _ProjectionFaceVelocityRead[
+            FlattenGridIndex(cell + int3(0, -1, 0))
+          ].y
+        : positiveFaces.y;
+
+    float faceBack = IsValidCell(cell + int3(0, 0, -1))
+        ? _ProjectionFaceVelocityRead[
+            FlattenGridIndex(cell + int3(0, 0, -1))
+          ].z
+        : positiveFaces.z;
+
+    float3 correctedVelocity = float3(
+        0.5 * (faceLeft + positiveFaces.x),
+        0.5 * (faceDown + positiveFaces.y),
+        0.5 * (faceBack + positiveFaces.z)
+    );
+
+    _GridVelocityMass[index] =
+        float4(ClampSpeed(correctedVelocity), velocityMass.w);
+}
+
+[numthreads(256, 1, 1)]
+void KCollectProjectionDiagnostics(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_GridNodeCount || _EnableGpuDiagnostics == 0)
+        return;
+
+    int cellType = _ProjectionCellTypeRead[index];
+
+    if (_ProjectionDiagnosticsMode == 0)
+    {
+        if (cellType == PROJECTION_FLUID)
+            InterlockedAdd(_MpmDiagnostics[DIAG_FLUID_CELLS], 1);
+        else if (cellType == PROJECTION_SOLID)
+            InterlockedAdd(_MpmDiagnostics[DIAG_SOLID_CELLS], 1);
+        else
+            InterlockedAdd(_MpmDiagnostics[DIAG_AIR_CELLS], 1);
+
+        if (cellType == PROJECTION_FLUID)
+        {
+            uint fixedDivergence = (uint)round(
+                abs(_ProjectionDivergenceRead[index]) *
+                DIAG_DIVERGENCE_FIXED_SCALE
+            );
+
+            InterlockedAdd(
+                _MpmDiagnostics[DIAG_DIV_BEFORE_SUM],
+                fixedDivergence
+            );
+            InterlockedMax(
+                _MpmDiagnostics[DIAG_DIV_BEFORE_MAX],
+                fixedDivergence
+            );
+        }
+
+        return;
+    }
+
+    if (cellType != PROJECTION_FLUID)
+        return;
+
+    uint fixedDivergenceAfter = (uint)round(
+        abs(_ProjectionDivergenceRead[index]) *
+        DIAG_DIVERGENCE_FIXED_SCALE
+    );
+    uint fixedPressure = (uint)round(
+        abs(_ProjectionPressureRead[index]) *
+        DIAG_PRESSURE_FIXED_SCALE
+    );
+
+    InterlockedAdd(
+        _MpmDiagnostics[DIAG_DIV_AFTER_SUM],
+        fixedDivergenceAfter
+    );
+    InterlockedMax(
+        _MpmDiagnostics[DIAG_DIV_AFTER_MAX],
+        fixedDivergenceAfter
+    );
+    InterlockedAdd(_MpmDiagnostics[DIAG_PRESSURE_SUM], fixedPressure);
+    InterlockedMax(_MpmDiagnostics[DIAG_PRESSURE_MAX], fixedPressure);
+}
+
 
 [numthreads(256, 1, 1)]
 void KBucketCollision(uint3 id : SV_DispatchThreadID)
@@ -1904,18 +2689,66 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
 
     bool collided = false;
 
-    // 1) Bottom hole region classification
-    bool nearBottomHole = false;
+    // 1) Hole region classification
+    bool nearOpenHole = false;
+    int nearestHoleIndex = -1;
 
     if (_ClassifyBottomHoleRegion != 0)
     {
-        nearBottomHole = IsInsideBottomHoleRegion(pLocal, radius);
+        nearOpenHole = IsInsideAnyOpenHoleRegionLocal(
+            pLocal,
+            radius,
+            nearestHoleIndex
+        );
 
-        if (nearBottomHole)
+        if (nearOpenHole)
         {
             // FluidParticleState.NearHole = 3
             stateAgeId.x = 3.0;
         }
+    }
+
+    bool canPassThroughHole =
+        _EnableBottomHoleOpening != 0 &&
+        nearOpenHole;
+
+    int exitHoleIndex = -1;
+    if (canPassThroughHole &&
+        IsPastOpenHoleExitLocal(pLocal, radius, exitHoleIndex))
+    {
+        float3 holeNormalLocal = GetHoleNormalLocal(exitHoleIndex);
+        float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
+
+        float perHoleFlow = max(_BucketHoleData4[exitHoleIndex].z, 0.0);
+        float exitBoost =
+            max(_BucketHoleData4[exitHoleIndex].w, 0.0) *
+            perHoleFlow;
+
+        float3 relativeVelocity = vLocal - wallVelocityLocal;
+        float normalSpeed = dot(relativeVelocity, holeNormalLocal);
+        float targetNormalSpeed = max(normalSpeed, exitBoost);
+
+        relativeVelocity +=
+            (targetNormalSpeed - normalSpeed) *
+            holeNormalLocal;
+
+        vLocal = wallVelocityLocal + relativeVelocity;
+        vLocal = ClampSpeed(vLocal);
+
+        // FluidParticleState.Jet = 4
+        stateAgeId.x = 4.0;
+        stateAgeId.z = 0.0;
+
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_OUTFLOW_TRANSITIONS], 1);
+
+        float3 outWorld = TransformPoint(_BucketLocalToWorld, pLocal);
+        float3 outVelocityWorld = TransformVector(_BucketLocalToWorld, vLocal);
+
+        _ParticlePositionRadius[particleIndex] = float4(outWorld, radius);
+        _ParticleVelocityMass[particleIndex] = float4(outVelocityWorld, vm.w);
+        _ParticleStateAgeId[particleIndex] = stateAgeId;
+        return;
     }
 
     // 2) Side wall collision
@@ -1929,7 +2762,7 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
     float2 radial = pLocal.xz;
     float radialLen = length(radial);
 
-    if (radialLen > innerRadius)
+    if (!canPassThroughHole && radialLen > innerRadius)
     {
         float2 n2 = SafeNormalize2(radial);
 
@@ -1950,16 +2783,12 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
         collided = true;
 
         // FluidParticleState.NearBoundary = 2, but do not overwrite NearHole.
-        if (!nearBottomHole)
+        if (!nearOpenHole)
             stateAgeId.x = 2.0;
     }
 
     // 3) Bottom collision
     float minY = bottomY + _BucketCollisionPadding + radius;
-
-    bool canPassThroughHole =
-        _EnableBottomHoleOpening != 0 &&
-        nearBottomHole;
 
     if (!canPassThroughHole && pLocal.y < minY)
     {
@@ -1978,7 +2807,7 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
 
         collided = true;
 
-        if (!nearBottomHole)
+        if (!nearOpenHole)
             stateAgeId.x = 2.0;
     }
 
@@ -2000,7 +2829,7 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
 
             collided = true;
 
-            if (!nearBottomHole)
+            if (!nearOpenHole)
                 stateAgeId.x = 2.0;
         }
     }
@@ -2015,11 +2844,14 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
     }
 
     // 5) If no special state, keep inside
-    if (!collided && !nearBottomHole && state == 2)
+    if (!collided && !nearOpenHole && (state == 2 || state == 3))
     {
-        // Return NearBoundary to InsideFluid when no longer colliding.
+        // Return NearBoundary/NearHole to InsideFluid when no longer colliding.
         stateAgeId.x = 1.0;
     }
+
+    if (collided && _EnableGpuDiagnostics != 0)
+        InterlockedAdd(_MpmDiagnostics[DIAG_BUCKET_COLLISIONS], 1);
 
     float3 correctedWorld = TransformPoint(_BucketLocalToWorld, pLocal);
     float3 correctedVelocityWorld = TransformVector(_BucketLocalToWorld, vLocal);
@@ -2065,8 +2897,45 @@ void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
     f1New = ClampVector3(f1New, _MaxDeformationGradientValue);
     f2New = ClampVector3(f2New, _MaxDeformationGradientValue);
 
-    float J = DeterminantRows(f0New, f1New, f2New);
-    J = clamp(J, _MinJ, _MaxJ);
+    float rawJ = DeterminantRows(f0New, f1New, f2New);
+    float J = clamp(rawJ, _MinJ, _MaxJ);
+
+    if (_EnableGpuDiagnostics != 0 && abs(rawJ - J) > 1e-6)
+        InterlockedAdd(_MpmDiagnostics[DIAG_J_CLAMPS], 1);
+
+    // Keep F and the stored J consistent. Previously only volumeJ.y was
+    // clamped while F retained an out-of-range determinant, so the next
+    // substep immediately reintroduced the same collapse or expansion.
+    if (rawJ > 1e-8)
+    {
+        float determinantScale = pow(
+            max(J / rawJ, 1e-12),
+            1.0 / 3.0
+        );
+
+        f0New *= determinantScale;
+        f1New *= determinantScale;
+        f2New *= determinantScale;
+    }
+    else
+    {
+        float isotropicScale = pow(max(J, 1e-8), 1.0 / 3.0);
+        f0New = float3(isotropicScale, 0, 0);
+        f1New = float3(0, isotropicScale, 0);
+        f2New = float3(0, 0, isotropicScale);
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        uint fixedJ = (uint)round(
+            max(J, 0.0) *
+            DIAG_J_FIXED_SCALE
+        );
+
+        InterlockedAdd(_MpmDiagnostics[DIAG_J_SUM], fixedJ);
+        InterlockedMin(_MpmDiagnostics[DIAG_J_MIN], fixedJ);
+        InterlockedMax(_MpmDiagnostics[DIAG_J_MAX], fixedJ);
+    }
 
     float4 volumeJ = _ParticleVolumeJ[particleIndex];
     volumeJ.y = J;
@@ -2075,4 +2944,103 @@ void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
     _ParticleF1[particleIndex] = float4(f1New, 0);
     _ParticleF2[particleIndex] = float4(f2New, 0);
     _ParticleVolumeJ[particleIndex] = volumeJ;
+}
+
+bool IsAirDomainState(int state)
+{
+    // Jet=4, Emitted=5, Airborne=6, Spilled=7
+    return state == 4 || state == 5 || state == 6 || state == 7;
+}
+
+[numthreads(256, 1, 1)]
+void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_EnableAirborneAdvection == 0)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeId[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsAirDomainState(state))
+        return;
+
+    float4 pr = _ParticlePositionRadius[particleIndex];
+    float4 vm = _ParticleVelocityMass[particleIndex];
+
+    float3 p = pr.xyz;
+    float radius = pr.w;
+    float3 v = vm.xyz;
+
+    if (!IsFiniteFloat3(p) || !IsFiniteFloat3(v))
+    {
+        stateAgeId.x = 10.0; // Lost
+        stateAgeId.z = 0.0;
+
+        if (_EnableGpuDiagnostics != 0)
+        {
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+            InterlockedAdd(_MpmDiagnostics[DIAG_LOST_PARTICLES], 1);
+        }
+
+        _ParticleStateAgeId[particleIndex] = stateAgeId;
+        return;
+    }
+
+    stateAgeId.y += _Dt;
+    stateAgeId.z += _Dt;
+
+    if ((state == 4 || state == 5) &&
+        stateAgeId.z >= max(_JetStateDuration, 0.0))
+    {
+        state = 6; // Airborne
+        stateAgeId.x = 6.0;
+        stateAgeId.z = 0.0;
+    }
+
+    v += _Gravity * _Dt;
+
+    float drag = exp(-max(_AirborneDragPerSecond, 0.0) * _Dt);
+    v *= drag;
+    v = ClampSpeed(v);
+
+    p += v * _Dt;
+
+    bool lost =
+        stateAgeId.y >= max(_AirborneLifetime, 0.1) ||
+        (_KillAirborneBelowY != 0 && p.y < _AirborneKillBelowY);
+
+    if (!IsFiniteFloat3(p) || !IsFiniteFloat3(v))
+    {
+        lost = true;
+
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+    }
+
+    if (lost)
+    {
+        state = 10; // Lost
+        stateAgeId.x = 10.0;
+        stateAgeId.z = 0.0;
+        v = float3(0, 0, 0);
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        if (state == 4 || state == 5)
+            InterlockedAdd(_MpmDiagnostics[DIAG_JET_PARTICLES], 1);
+        else if (state == 6 || state == 7)
+            InterlockedAdd(_MpmDiagnostics[DIAG_AIRBORNE_PARTICLES], 1);
+        else if (state == 10)
+            InterlockedAdd(_MpmDiagnostics[DIAG_LOST_PARTICLES], 1);
+    }
+
+    _ParticlePositionRadius[particleIndex] = float4(p, radius);
+    _ParticleVelocityMass[particleIndex] = float4(v, vm.w);
+    _ParticleStateAgeId[particleIndex] = stateAgeId;
 }

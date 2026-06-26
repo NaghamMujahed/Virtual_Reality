@@ -20,7 +20,10 @@ namespace PaintBucketSim.Configs
     public enum BucketHoleShape
     {
         Circular = 0,
-        Square = 1
+        Square = 1,
+        Ellipse = 2,
+        Rectangle = 3,
+        Slot = 4
     }
 
     [Serializable]
@@ -38,6 +41,24 @@ namespace PaintBucketSim.Configs
 
         [Min(0.001f)]
         public float radiusMeters = 0.035f;
+
+        [Tooltip("Full local X/Y size used by ellipse, rectangle, and slot holes. Circle/square can keep using radius.")]
+        public Vector2 sizeMeters = new Vector2(0.07f, 0.035f);
+
+        [Tooltip("Local tangent direction defining the hole's X axis inside the hole plane.")]
+        public Vector3 localTangent = Vector3.right;
+
+        [Tooltip("Extra soft opening around the analytic hole edge. Helps particles pass cleanly through GPU collision/projection.")]
+        [Min(0.0f)]
+        public float edgeSoftnessMeters = 0.004f;
+
+        [Tooltip("Art/physics multiplier for this hole's outflow impulse.")]
+        [Min(0.0f)]
+        public float flowMultiplier = 1.0f;
+
+        [Tooltip("Small outward speed added when a particle transitions from in-bucket MPM to jet/airborne.")]
+        [Min(0.0f)]
+        public float exitVelocityBoostMetersPerSecond = 0.15f;
 
         [Min(0.0001f)]
         public float wallThicknessMeters = 0.01f;
@@ -143,8 +164,23 @@ namespace PaintBucketSim.Configs
                 if (holes[i].radiusMeters < 0.001f)
                     holes[i].radiusMeters = 0.001f;
 
+                holes[i].sizeMeters.x = Mathf.Max(holes[i].sizeMeters.x, 0.001f);
+                holes[i].sizeMeters.y = Mathf.Max(holes[i].sizeMeters.y, 0.001f);
+
                 if (holes[i].localNormal.sqrMagnitude < 1e-6f)
                     holes[i].localNormal = Vector3.down;
+
+                if (holes[i].localTangent.sqrMagnitude < 1e-6f)
+                    holes[i].localTangent = Vector3.right;
+
+                if (holes[i].edgeSoftnessMeters < 0.0f)
+                    holes[i].edgeSoftnessMeters = 0.0f;
+
+                if (holes[i].flowMultiplier < 0.0f)
+                    holes[i].flowMultiplier = 0.0f;
+
+                if (holes[i].exitVelocityBoostMetersPerSecond < 0.0f)
+                    holes[i].exitVelocityBoostMetersPerSecond = 0.0f;
             }
         }
 
@@ -178,6 +214,84 @@ namespace PaintBucketSim.Configs
                 n = Vector3.down;
 
             return n.normalized;
+        }
+
+        public Vector3 GetResolvedHoleLocalTangent(BucketHoleConfig hole)
+        {
+            Vector3 normal = GetResolvedHoleLocalNormal(hole);
+            Vector3 tangent = hole != null ? hole.localTangent : Vector3.right;
+
+            tangent -= normal * Vector3.Dot(tangent, normal);
+
+            if (tangent.sqrMagnitude < 1e-6f)
+                tangent = Vector3.Cross(normal, Vector3.forward);
+
+            if (tangent.sqrMagnitude < 1e-6f)
+                tangent = Vector3.Cross(normal, Vector3.right);
+
+            return tangent.normalized;
+        }
+
+        public Vector3 GetResolvedHoleLocalBitangent(BucketHoleConfig hole)
+        {
+            Vector3 normal = GetResolvedHoleLocalNormal(hole);
+            Vector3 tangent = GetResolvedHoleLocalTangent(hole);
+            Vector3 bitangent = Vector3.Cross(normal, tangent);
+
+            if (bitangent.sqrMagnitude < 1e-6f)
+                bitangent = Vector3.forward;
+
+            return bitangent.normalized;
+        }
+
+        public Vector2 GetResolvedHoleHalfExtents(BucketHoleConfig hole)
+        {
+            if (hole == null)
+                return Vector2.one * 0.0175f;
+
+            float radius = Mathf.Max(hole.radiusMeters, 0.001f);
+
+            if (hole.shape == BucketHoleShape.Circular ||
+                hole.shape == BucketHoleShape.Square)
+            {
+                return Vector2.one * radius;
+            }
+
+            return new Vector2(
+                Mathf.Max(hole.sizeMeters.x * 0.5f, 0.001f),
+                Mathf.Max(hole.sizeMeters.y * 0.5f, 0.001f)
+            );
+        }
+
+        public float GetResolvedHoleArea(BucketHoleConfig hole)
+        {
+            if (hole == null)
+                return 0.0f;
+
+            Vector2 halfExtents = GetResolvedHoleHalfExtents(hole);
+            float a = Mathf.Max(halfExtents.x, 0.001f);
+            float b = Mathf.Max(halfExtents.y, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                    return 4.0f * a * b;
+
+                case BucketHoleShape.Slot:
+                {
+                    float radius = Mathf.Min(a, b);
+                    float halfLength = Mathf.Max(a, b);
+                    float straightHalfLength = Mathf.Max(0.0f, halfLength - radius);
+                    return 4.0f * straightHalfLength * radius + Mathf.PI * radius * radius;
+                }
+
+                case BucketHoleShape.Ellipse:
+                    return Mathf.PI * a * b;
+
+                default:
+                    return Mathf.PI * a * a;
+            }
         }
 
         public float GetRepresentativeRadius()

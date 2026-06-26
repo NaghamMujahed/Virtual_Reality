@@ -13,10 +13,12 @@ MonoBehaviour:
   m_Name: GpuParticleRenderConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuParticleRenderConfig
   enableGpuIndirectRendering: 1
-  maxRenderedParticles: 50000
+  maxRenderedParticles: 200000
   renderStride: 1
   uploadEveryNFrames: 1
-  visualRadiusScale: 1
+  visualMode: 1
+  visualRadiusScale: 1.18
+  splatNormalStrength: 0.85
   usePerParticleColor: 1
   fallbackColor: {r: 0.1, g: 0.35, b: 1, a: 1}
   worldBoundsCenter: {x: 0, y: 0, z: 0}

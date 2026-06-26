@@ -31,14 +31,22 @@ namespace PaintBucketSim.Runtime
 
         public float3 localCenter;
         public float3 localNormal;
+        public float3 localTangent;
+        public float3 localBitangent;
 
         public float3 worldCenter;
         public float3 worldNormal;
+        public float3 worldTangent;
+        public float3 worldBitangent;
         public float3 worldVelocity;
 
         public float radius;
+        public float2 halfExtents;
         public float area;
         public float wallThickness;
+        public float edgeSoftness;
+        public float flowMultiplier;
+        public float exitVelocityBoost;
     }
 
     public struct BucketDiagnostics

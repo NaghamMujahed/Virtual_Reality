@@ -309,17 +309,20 @@ namespace PaintBucketSim.Systems.Boundary
 
                 Vector3 centerV = bucketConfig.GetResolvedHoleLocalCenter(hole);
                 Vector3 normalV = bucketConfig.GetResolvedHoleLocalNormal(hole);
+                Vector3 tangentV = bucketConfig.GetResolvedHoleLocalTangent(hole);
+                Vector3 bitangentV = bucketConfig.GetResolvedHoleLocalBitangent(hole);
 
                 float3 center = new float3(centerV.x, centerV.y, centerV.z);
                 float3 normal = math.normalize(new float3(normalV.x, normalV.y, normalV.z));
+                float3 tangentA = math.normalize(new float3(tangentV.x, tangentV.y, tangentV.z));
+                float3 tangentB = math.normalize(new float3(bitangentV.x, bitangentV.y, bitangentV.z));
 
-                BuildBasis(normal, out float3 tangentA, out float3 tangentB);
-
-                float holeRadius = Mathf.Max(hole.radiusMeters, 0.001f);
+                Vector2 halfExtents = bucketConfig.GetResolvedHoleHalfExtents(hole);
+                float estimatedPerimeter = EstimateHolePerimeter(hole, halfExtents);
 
                 int radialCount = Mathf.Max(
                     8,
-                    Mathf.CeilToInt(2.0f * Mathf.PI * holeRadius / spacing)
+                    Mathf.CeilToInt(estimatedPerimeter / spacing)
                 );
 
                 int axialRings = Mathf.Max(1, boundaryConfig.holeEdgeAxialRings);
@@ -336,14 +339,13 @@ namespace PaintBucketSim.Systems.Boundary
 
                     for (int i = 0; i < radialCount; i++)
                     {
-                        float angle = (float)i / radialCount * Mathf.PI * 2.0f;
+                        float t = (float)i / radialCount;
+                        Vector2 uv = SampleHoleBoundary(hole, halfExtents, t);
 
-                        float cos = Mathf.Cos(angle);
-                        float sin = Mathf.Sin(angle);
+                        float3 localOffset = tangentA * uv.x + tangentB * uv.y;
+                        float3 radial = math.normalizesafe(localOffset, tangentA);
 
-                        float3 radial = math.normalize(cos * tangentA + sin * tangentB);
-
-                        float3 localPos = ringCenter + radial * holeRadius;
+                        float3 localPos = ringCenter + localOffset;
 
                         positions.Add(localPos);
                         normals.Add(radial);
@@ -367,24 +369,159 @@ namespace PaintBucketSim.Systems.Boundary
 
                 Vector3 centerV = bucketConfig.GetResolvedHoleLocalCenter(hole);
                 Vector3 normalV = bucketConfig.GetResolvedHoleLocalNormal(hole);
+                Vector3 tangentV = bucketConfig.GetResolvedHoleLocalTangent(hole);
+                Vector3 bitangentV = bucketConfig.GetResolvedHoleLocalBitangent(hole);
+                Vector2 halfExtents = bucketConfig.GetResolvedHoleHalfExtents(hole);
 
                 // For B2 we only exclude bottom-like holes from bottom disk.
                 if (Vector3.Dot(normalV.normalized, Vector3.down) < 0.8f)
                     continue;
 
-                float2 p = new float2(localPoint.x, localPoint.z);
-                float2 c = new float2(centerV.x, centerV.z);
+                Vector3 deltaV = new Vector3(
+                    localPoint.x - centerV.x,
+                    localPoint.y - centerV.y,
+                    localPoint.z - centerV.z
+                );
 
-                float clearanceRadius =
-                    hole.radiusMeters +
+                float u = Vector3.Dot(deltaV, tangentV);
+                float v = Vector3.Dot(deltaV, bitangentV);
+
+                float clearance =
                     boundaryConfig.holeClearanceMeters +
                     boundaryConfig.particleSpacingMeters * 0.5f;
 
-                if (math.lengthsq(p - c) <= clearanceRadius * clearanceRadius)
+                if (IsPointInsideHoleFootprint(
+                        hole,
+                        u,
+                        v,
+                        halfExtents,
+                        clearance))
                     return true;
             }
 
             return false;
+        }
+
+        private static float EstimateHolePerimeter(
+            BucketHoleConfig hole,
+            Vector2 halfExtents)
+        {
+            float a = Mathf.Max(halfExtents.x, 0.001f);
+            float b = Mathf.Max(halfExtents.y, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                    return 4.0f * (a + b);
+
+                case BucketHoleShape.Slot:
+                {
+                    float radius = Mathf.Min(a, b);
+                    float halfLength = Mathf.Max(a, b);
+                    float segmentHalfLength = Mathf.Max(halfLength - radius, 0.0f);
+                    return 4.0f * segmentHalfLength + 2.0f * Mathf.PI * radius;
+                }
+
+                case BucketHoleShape.Ellipse:
+                {
+                    // Ramanujan approximation.
+                    float h = Mathf.Pow(a - b, 2.0f) / Mathf.Pow(a + b, 2.0f);
+                    return Mathf.PI * (a + b) * (1.0f + 3.0f * h / (10.0f + Mathf.Sqrt(4.0f - 3.0f * h)));
+                }
+
+                case BucketHoleShape.Circular:
+                default:
+                    return 2.0f * Mathf.PI * a;
+            }
+        }
+
+        private static Vector2 SampleHoleBoundary(
+            BucketHoleConfig hole,
+            Vector2 halfExtents,
+            float t)
+        {
+            float a = Mathf.Max(halfExtents.x, 0.001f);
+            float b = Mathf.Max(halfExtents.y, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                {
+                    float u = Mathf.Repeat(t, 1.0f) * 4.0f;
+                    if (u < 1.0f)
+                        return new Vector2(Mathf.Lerp(-a, a, u), -b);
+                    if (u < 2.0f)
+                        return new Vector2(a, Mathf.Lerp(-b, b, u - 1.0f));
+                    if (u < 3.0f)
+                        return new Vector2(Mathf.Lerp(a, -a, u - 2.0f), b);
+
+                    return new Vector2(-a, Mathf.Lerp(b, -b, u - 3.0f));
+                }
+
+                case BucketHoleShape.Slot:
+                {
+                    float radius = Mathf.Max(b, 0.001f);
+                    float segmentHalfLength = Mathf.Max(a - radius, 0.0f);
+                    float angle = Mathf.Repeat(t, 1.0f) * Mathf.PI * 2.0f;
+                    float capCenter = Mathf.Cos(angle) >= 0.0f
+                        ? segmentHalfLength
+                        : -segmentHalfLength;
+
+                    return new Vector2(
+                        capCenter + Mathf.Cos(angle) * radius,
+                        Mathf.Sin(angle) * radius
+                    );
+                }
+
+                case BucketHoleShape.Ellipse:
+                case BucketHoleShape.Circular:
+                default:
+                {
+                    float angle = Mathf.Repeat(t, 1.0f) * Mathf.PI * 2.0f;
+                    return new Vector2(
+                        Mathf.Cos(angle) * a,
+                        Mathf.Sin(angle) * b
+                    );
+                }
+            }
+        }
+
+        private static bool IsPointInsideHoleFootprint(
+            BucketHoleConfig hole,
+            float u,
+            float v,
+            Vector2 halfExtents,
+            float padding)
+        {
+            float a = Mathf.Max(halfExtents.x + padding, 0.001f);
+            float b = Mathf.Max(halfExtents.y + padding, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                    return Mathf.Abs(u) <= a && Mathf.Abs(v) <= b;
+
+                case BucketHoleShape.Slot:
+                {
+                    float halfLength = Mathf.Max(a, b);
+                    float radius = Mathf.Min(a, b);
+                    float segmentHalfLength = Mathf.Max(0.0f, halfLength - radius);
+                    float du = Mathf.Max(Mathf.Abs(u) - segmentHalfLength, 0.0f);
+                    return du * du + v * v <= radius * radius;
+                }
+
+                case BucketHoleShape.Ellipse:
+                case BucketHoleShape.Circular:
+                default:
+                {
+                    float nx = u / a;
+                    float ny = v / b;
+                    return nx * nx + ny * ny <= 1.0f;
+                }
+            }
         }
 
         private float GetInnerRadiusAtT(BucketConfig bucketConfig, float t)

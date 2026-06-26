@@ -28,6 +28,16 @@ namespace PaintBucketSim.Configs
         [Min(0.005f)]
         public float cellSizeMeters = 0.08f;
 
+        [Tooltip("Center the dense grid on the bucket every simulation substep. Required for a moving bucket.")]
+        public bool followBucketWithGrid = true;
+
+        [Tooltip("Extra world-space margin required between the bucket and the dense grid boundary.")]
+        [Min(0.0f)]
+        public float gridBucketMarginMeters = 0.08f;
+
+        [Tooltip("Stop the GPU step when the configured grid cannot contain the rotating bucket plus transfer stencil.")]
+        public bool rejectUndersizedGrid = true;
+
         [Header("Simulation")]
         public bool enableGpuDenseMpm = true;
 
@@ -65,6 +75,12 @@ namespace PaintBucketSim.Configs
         [Header("Debug")]
         public bool logLifecycle = true;
 
+        [Tooltip("Enable compact GPU counters and asynchronous readback for solver validation.")]
+        public bool enableGpuDiagnostics = true;
+
+        [Min(1)]
+        public int diagnosticsReadbackInterval = 15;
+
         // G5 Changes //
         [Header("MLS-MPM Affine Transfer")]
         //public bool enableApicTransfer = true;
@@ -97,6 +113,17 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Use the same dense grid as the MPM solver for the pressure projection prototype.")]
         public bool useMpmGridForProjection = true;
+
+        [Tooltip("Run the pressure projection every N MPM substeps. 1 = every substep, 2 = every second substep.")]
+        [Min(1)]
+        public int projectionSubstepInterval = 1;
+
+        [Tooltip("Reuse a damped version of the previous pressure field as the next Jacobi initial guess.")]
+        public bool enablePressureWarmStart = true;
+
+        [Tooltip("Pressure retained between projection solves. Lower values forget stale pressure faster when the bucket moves.")]
+        [Range(0.0f, 1.0f)]
+        public float pressureWarmStartFactor = 0.75f;
 
         [Tooltip("Fixed point scale for atomically accumulating cell mass on GPU.")]
         [Min(1)]
@@ -210,8 +237,12 @@ namespace PaintBucketSim.Configs
         [Header("GPU Hole Region - Prototype")]
         public bool classifyBottomHoleRegion = true;
 
-        [Tooltip("If true, particles inside the bottom hole are not blocked by the bottom. Keep false until G9 outflow.")]
+        [Tooltip("If true, particles inside active GPU hole apertures are allowed to pass through the bucket wall.")]
         public bool enableBottomHoleOpening = false;
+
+        [Tooltip("Maximum number of active BucketConfig holes uploaded to the GPU solver.")]
+        [Range(1, 64)]
+        public int maxGpuBucketHoles = 16;
 
         [Range(0.5f, 2.0f)]
         public float holeRadiusMultiplier = 1.0f;
@@ -221,6 +252,27 @@ namespace PaintBucketSim.Configs
 
         [Min(0.0f)]
         public float holeRadialPaddingMeters = 0.02f;
+
+        [Tooltip("Distance past the hole plane before an in-bucket MPM particle becomes a jet particle.")]
+        [Min(0.0f)]
+        public float holeOutflowExitDistanceMeters = 0.004f;
+
+        [Header("GPU Outflow / Airborne Prototype")]
+        public bool enableAirborneParticleAdvection = true;
+
+        [Min(0.0f)]
+        public float airborneDragPerSecond = 0.15f;
+
+        [Min(0.0f)]
+        public float jetStateDurationSeconds = 0.08f;
+
+        [Min(0.1f)]
+        public float airborneLifetimeSeconds = 8.0f;
+
+        [Tooltip("Particles below this world-space Y become Lost until canvas collision/deposition is implemented.")]
+        public float airborneKillBelowWorldY = -2.0f;
+
+        public bool killAirborneBelowWorldY = false;
         /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
         /// /// /// /// /// /// /// <G8.B Changes> /// /// /// /// /// /// 
@@ -293,6 +345,9 @@ namespace PaintBucketSim.Configs
         [Tooltip("Apply pressure correction only to projection fluid cells.")]
         public bool pressureCorrectionFluidCellsOnly = true;
 
+        [Tooltip("Use a staggered face-velocity projection. This keeps divergence, Jacobi, and pressure gradients consistent.")]
+        public bool useStaggeredFaceProjection = true;
+
         [Header("MLS-MPM Projection / Moving Bucket Boundary Coupling")]
         public bool enableMovingBucketProjectionCoupling = true;
 
@@ -328,6 +383,19 @@ namespace PaintBucketSim.Configs
 
             if (cellSizeMeters < 0.005f)
                 cellSizeMeters = 0.005f;
+
+            if (gridBucketMarginMeters < 0.0f)
+                gridBucketMarginMeters = 0.0f;
+
+            if (diagnosticsReadbackInterval < 1)
+                diagnosticsReadbackInterval = 1;
+
+            if (projectionSubstepInterval < 1)
+                projectionSubstepInterval = 1;
+
+            pressureWarmStartFactor = Mathf.Clamp01(
+                pressureWarmStartFactor
+            );
 
             if (maxParticleSpeed < 0.1f)
                 maxParticleSpeed = 0.1f;
@@ -405,6 +473,20 @@ namespace PaintBucketSim.Configs
 
             if (holeRadialPaddingMeters < 0.0f)
                 holeRadialPaddingMeters = 0.0f;
+
+            maxGpuBucketHoles = Mathf.Clamp(maxGpuBucketHoles, 1, 64);
+
+            if (holeOutflowExitDistanceMeters < 0.0f)
+                holeOutflowExitDistanceMeters = 0.0f;
+
+            if (airborneDragPerSecond < 0.0f)
+                airborneDragPerSecond = 0.0f;
+
+            if (jetStateDurationSeconds < 0.0f)
+                jetStateDurationSeconds = 0.0f;
+
+            if (airborneLifetimeSeconds < 0.1f)
+                airborneLifetimeSeconds = 0.1f;
             /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
             /// /// /// /// /// /// /// <G8.B Changes> /// /// /// /// /// /// 

@@ -48,6 +48,11 @@ namespace PaintBucketSim.Systems.Fluid
             if (paintFluidSystem == null || !paintFluidSystem.IsInitialized)
                 return;
 
+            // GPU simulation owns a different position buffer after bootstrap.
+            // Rendering the stale CPU copy at the same time is misleading.
+            if (paintFluidSystem.IsGpuSolverActive)
+                return;
+
             if (paintFluidConfig != null && !paintFluidConfig.renderParticles)
                 return;
 

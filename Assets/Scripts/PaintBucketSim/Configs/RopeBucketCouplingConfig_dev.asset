@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: RopeBucketCouplingConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeBucketCouplingConfig
   enableCoupling: 1
+  snapBucketToRopeOnInitialize: 1
   attachmentCompliance: 0.000001
   solverIterations: 6
   correctRopeEnd: 1

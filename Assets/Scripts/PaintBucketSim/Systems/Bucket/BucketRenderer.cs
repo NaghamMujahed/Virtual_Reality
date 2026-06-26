@@ -330,12 +330,110 @@ namespace PaintBucketSim.Systems.Bucket
 
                 Vector3 localCenter = config.GetResolvedHoleLocalCenter(hole);
                 Vector3 localNormal = config.GetResolvedHoleLocalNormal(hole);
+                Vector3 localBitangent = config.GetResolvedHoleLocalBitangent(hole);
 
                 _holeRingRenderers[i].transform.localPosition = localCenter;
                 _holeRingRenderers[i].transform.localRotation =
-                    Quaternion.FromToRotation(Vector3.up, localNormal);
+                    Quaternion.LookRotation(localBitangent, localNormal);
 
-                SetLocalCircle(_holeRingRenderers[i], hole.radiusMeters, Vector3.up);
+                SetLocalHoleShape(_holeRingRenderers[i], config, hole);
+            }
+        }
+
+        private void SetLocalHoleShape(
+            LineRenderer lr,
+            BucketConfig config,
+            BucketHoleConfig hole)
+        {
+            if (lr == null || config == null || hole == null)
+                return;
+
+            Vector2 halfExtents = config.GetResolvedHoleHalfExtents(hole);
+            float a = Mathf.Max(halfExtents.x, 0.001f);
+            float b = Mathf.Max(halfExtents.y, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                    lr.positionCount = 4;
+                    lr.SetPosition(0, new Vector3(-a, 0.0f, -b));
+                    lr.SetPosition(1, new Vector3( a, 0.0f, -b));
+                    lr.SetPosition(2, new Vector3( a, 0.0f,  b));
+                    lr.SetPosition(3, new Vector3(-a, 0.0f,  b));
+                    break;
+
+                case BucketHoleShape.Slot:
+                    SetLocalSlot(lr, a, b);
+                    break;
+
+                case BucketHoleShape.Ellipse:
+                    SetLocalEllipse(lr, a, b);
+                    break;
+
+                case BucketHoleShape.Circular:
+                default:
+                    SetLocalEllipse(lr, a, a);
+                    break;
+            }
+        }
+
+        private void SetLocalEllipse(LineRenderer lr, float radiusX, float radiusZ)
+        {
+            if (lr == null)
+                return;
+
+            int count = Mathf.Max(lr.positionCount, 48);
+            lr.positionCount = count;
+
+            for (int i = 0; i < count; i++)
+            {
+                float t = (float)i / count;
+                float angle = t * Mathf.PI * 2.0f;
+
+                Vector3 p = new Vector3(
+                    Mathf.Cos(angle) * radiusX,
+                    0.0f,
+                    Mathf.Sin(angle) * radiusZ
+                );
+
+                lr.SetPosition(i, p);
+            }
+        }
+
+        private void SetLocalSlot(LineRenderer lr, float halfLength, float halfWidth)
+        {
+            if (lr == null)
+                return;
+
+            int count = Mathf.Max(lr.positionCount, 48);
+            lr.positionCount = count;
+
+            float radius = Mathf.Max(halfWidth, 0.001f);
+            float segmentHalfLength = Mathf.Max(halfLength - radius, 0.0f);
+            int halfCount = count / 2;
+
+            for (int i = 0; i < count; i++)
+            {
+                bool rightCap = i < halfCount;
+                float capT = rightCap
+                    ? (float)i / Mathf.Max(halfCount - 1, 1)
+                    : (float)(i - halfCount) / Mathf.Max(count - halfCount - 1, 1);
+
+                float angle = rightCap
+                    ? Mathf.Lerp(-0.5f * Mathf.PI, 0.5f * Mathf.PI, capT)
+                    : Mathf.Lerp(0.5f * Mathf.PI, 1.5f * Mathf.PI, capT);
+
+                float centerX = rightCap ? segmentHalfLength : -segmentHalfLength;
+
+                lr.SetPosition(
+                    i,
+                    new Vector3(
+                        centerX + Mathf.Cos(angle) * radius,
+                        0.0f,
+                        Mathf.Sin(angle) * radius
+                    )
+                );
             }
         }
 

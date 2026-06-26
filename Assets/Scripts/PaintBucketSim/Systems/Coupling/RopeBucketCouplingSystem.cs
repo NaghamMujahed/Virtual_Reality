@@ -51,6 +51,23 @@ namespace PaintBucketSim.Systems.Coupling
                 bucketSystem = FindFirstObjectByType<BucketSystem>();
 
             _diagnostics = default;
+
+            if (couplingConfig != null &&
+                couplingConfig.enableCoupling &&
+                couplingConfig.snapBucketToRopeOnInitialize &&
+                IsReady)
+            {
+                Vector3 correction =
+                    ropeSystem.GetRopeEndPosition() -
+                    bucketSystem.GetAttachmentWorldPosition();
+
+                bucketSystem.ApplyCouplingCorrection(
+                    correction,
+                    Vector3.zero,
+                    1.0f,
+                    false
+                );
+            }
         }
 
         public void ResetSystem(SimulationContext context)

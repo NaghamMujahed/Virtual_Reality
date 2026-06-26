@@ -2,6 +2,12 @@
 
 namespace PaintBucketSim.Configs
 {
+    public enum GpuParticleVisualMode
+    {
+        OctahedronMesh = 0,
+        CameraFacingSplat = 1
+    }
+
     [CreateAssetMenu(
         fileName = "GpuParticleRenderConfig",
         menuName = "Paint Bucket Sim/GPU Particle Render Config")]
@@ -23,8 +29,15 @@ namespace PaintBucketSim.Configs
         public int uploadEveryNFrames = 1;
 
         [Header("Visual")]
+        public GpuParticleVisualMode visualMode = GpuParticleVisualMode.CameraFacingSplat;
+
         [Min(0.001f)]
-        public float visualRadiusScale = 1.0f;
+        [Tooltip("Visual-only particle scale. Values above 1 help adjacent particles read as a connected liquid surface.")]
+        public float visualRadiusScale = 1.18f;
+
+        [Range(0.05f, 2.0f)]
+        [Tooltip("Only used by CameraFacingSplat. Higher values make each splat shade more like a rounded droplet.")]
+        public float splatNormalStrength = 0.85f;
 
         public bool usePerParticleColor = true;
 
@@ -55,6 +68,8 @@ namespace PaintBucketSim.Configs
 
             if (visualRadiusScale < 0.001f)
                 visualRadiusScale = 0.001f;
+
+            splatNormalStrength = Mathf.Clamp(splatNormalStrength, 0.05f, 2.0f);
 
             worldBoundsSize.x = Mathf.Max(0.1f, worldBoundsSize.x);
             worldBoundsSize.y = Mathf.Max(0.1f, worldBoundsSize.y);

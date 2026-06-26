@@ -14,11 +14,16 @@ namespace PaintBucketSim.Runtime
         public int uploadedParticles;
         public int maxRenderedParticles;
         public int renderStride;
+        public int visualMode;
+        public float visualRadiusScale;
+        public int meshVertexCount;
+        public int meshIndexCount;
 
         public int uploadFrame;
         public float cpuUploadMilliseconds;
         public float cpuRenderSubmitMilliseconds;
 
         public bool usingPerParticleColor;
+        public bool usingCameraFacingSplat;
     }
 }

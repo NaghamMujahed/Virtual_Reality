@@ -11,6 +11,9 @@ namespace PaintBucketSim.Configs
         [Tooltip("If true, the rope end is physically constrained to the bucket attachment point.")]
         public bool enableCoupling = true;
 
+        [Tooltip("Remove the initial rope/bucket attachment gap without injecting correction velocity.")]
+        public bool snapBucketToRopeOnInitialize = true;
+
         [Tooltip("Lower value means stronger attachment. 0 is very rigid.")]
         [Min(0.0f)]
         public float attachmentCompliance = 1e-7f;

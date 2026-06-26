@@ -29,6 +29,7 @@ namespace PaintBucketSim.Core
 
         public SimulationContext Context { get; private set; }
         public TimeStepController TimeController { get; private set; }
+        public SimulationConfig Config => simulationConfig;
 
         private EnvironmentSystem _environmentSystem;
 
@@ -91,11 +92,11 @@ namespace PaintBucketSim.Core
             _environmentSystem = new EnvironmentSystem();
             _environmentSystem.Initialize(Context);
 
-            if (ropeSystem != null)
-                ropeSystem.Initialize(Context);
-
             if (bucketSystem != null)
                 bucketSystem.Initialize(Context);
+
+            if (ropeSystem != null)
+                ropeSystem.Initialize(Context);
 
             if (ropeBucketCouplingSystem != null)
                 ropeBucketCouplingSystem.Initialize(Context);

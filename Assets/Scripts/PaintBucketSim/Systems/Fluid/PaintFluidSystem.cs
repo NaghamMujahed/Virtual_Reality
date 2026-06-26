@@ -43,6 +43,7 @@ namespace PaintBucketSim.Systems.Fluid
         public PaintMaterialConfig MaterialConfig => paintMaterialConfig;
         public PaintFluidConfig FluidConfig => paintFluidConfig;
         public PbfSolverConfig PbfConfig => pbfSolverConfig;
+        public GpuMpmSolverConfig GpuMpmConfig => gpuMpmSolverConfig;
         public FluidSolverArchitectureConfig ArchitectureConfig => architectureConfig;
 
         public bool IsInitialized => _initialized && _data != null && _data.IsCreated;
@@ -52,6 +53,10 @@ namespace PaintBucketSim.Systems.Fluid
 
         public FluidSolverStats SolverStats =>
             _activeSolver != null ? _activeSolver.Stats : default;
+
+        public bool IsGpuSolverActive =>
+            _activeSolver != null &&
+            _activeSolver.SolverType == FluidSolverType.GpuSparseMpmPrototype;
 
         private FluidParticlePoolStats _poolStats;
         public FluidParticlePoolStats PoolStats => _poolStats;
@@ -365,9 +370,8 @@ namespace PaintBucketSim.Systems.Fluid
 
             _data.ClearActive();
 
-            float bucketVolume = ComputeBucketInnerVolumeM3();
             float fillFraction = Mathf.Clamp01(paintFluidConfig.fillFraction01);
-            float targetPaintVolume = bucketVolume * fillFraction;
+            float targetPaintVolume = ComputeBucketFillVolumeM3(fillFraction);
 
             int targetCount = Mathf.Max(1, paintFluidConfig.targetParticleCount);
 
@@ -375,8 +379,13 @@ namespace PaintBucketSim.Systems.Fluid
             float restVolume = targetPaintVolume / targetCount;
             float mass = restDensity * restVolume;
 
-            float estimatedSpacing = EstimateSpacingFromVolume(restVolume);
-            float radius = estimatedSpacing * 0.45f;
+            float estimatedSpacing =
+                paintFluidConfig.initializationMode == FluidInitializationMode.ManualSpacing
+                    ? Mathf.Max(paintFluidConfig.manualParticleSpacingMeters, 0.005f)
+                    : EstimateSpacingFromVolume(restVolume);
+            float radius =
+                estimatedSpacing *
+                Mathf.Clamp(paintFluidConfig.particleRadiusToSpacing, 0.25f, 0.65f);
 
             //float spacing = ComputeParticleSpacing(bucketConfig);
             //float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
@@ -465,7 +474,9 @@ namespace PaintBucketSim.Systems.Fluid
             //    centerOfMassWorld = float3.zero
             //};
             
-            targetPaintVolume = bucketVolume * Mathf.Clamp01(paintFluidConfig.fillFraction01);
+            targetPaintVolume = ComputeBucketFillVolumeM3(
+                Mathf.Clamp01(paintFluidConfig.fillFraction01)
+            );
 
             RecalibrateGeneratedParticles(targetPaintVolume, restDensity);
         }
@@ -612,16 +623,29 @@ namespace PaintBucketSim.Systems.Fluid
                     continue;
 
                 Vector3 centerV = bucketConfig.GetResolvedHoleLocalCenter(hole);
+                Vector3 tangentV = bucketConfig.GetResolvedHoleLocalTangent(hole);
+                Vector3 bitangentV = bucketConfig.GetResolvedHoleLocalBitangent(hole);
+                Vector2 halfExtents = bucketConfig.GetResolvedHoleHalfExtents(hole);
 
-                float2 p = new float2(localPoint.x, localPoint.z);
-                float2 c = new float2(centerV.x, centerV.z);
+                Vector3 deltaV = new Vector3(
+                    localPoint.x - centerV.x,
+                    localPoint.y - centerV.y,
+                    localPoint.z - centerV.z
+                );
+
+                float u = Vector3.Dot(deltaV, tangentV);
+                float v = Vector3.Dot(deltaV, bitangentV);
 
                 float clearance =
-                    hole.radiusMeters +
                     paintFluidConfig.holeClearanceMeters +
                     particleRadius;
 
-                if (math.lengthsq(p - c) <= clearance * clearance)
+                if (IsPointInsideHoleFootprint(
+                        hole,
+                        u,
+                        v,
+                        halfExtents,
+                        clearance))
                 {
                     float bottomY = -bucketConfig.heightMeters * 0.5f;
                     if (localPoint.y < bottomY + clearance * 1.5f)
@@ -630,6 +654,43 @@ namespace PaintBucketSim.Systems.Fluid
             }
 
             return false;
+        }
+
+        private static bool IsPointInsideHoleFootprint(
+            BucketHoleConfig hole,
+            float u,
+            float v,
+            Vector2 halfExtents,
+            float padding)
+        {
+            float a = Mathf.Max(halfExtents.x + padding, 0.001f);
+            float b = Mathf.Max(halfExtents.y + padding, 0.001f);
+
+            switch (hole.shape)
+            {
+                case BucketHoleShape.Square:
+                case BucketHoleShape.Rectangle:
+                    return Mathf.Abs(u) <= a && Mathf.Abs(v) <= b;
+
+                case BucketHoleShape.Slot:
+                {
+                    float halfLength = Mathf.Max(a, b);
+                    float radius = Mathf.Min(a, b);
+                    float segmentHalfLength = Mathf.Max(0.0f, halfLength - radius);
+                    float du = Mathf.Abs(u) - segmentHalfLength;
+                    du = Mathf.Max(du, 0.0f);
+                    return du * du + v * v <= radius * radius;
+                }
+
+                case BucketHoleShape.Ellipse:
+                case BucketHoleShape.Circular:
+                default:
+                {
+                    float nx = u / a;
+                    float ny = v / b;
+                    return nx * nx + ny * ny <= 1.0f;
+                }
+            }
         }
 
         private void StepParticlePool(float dt)
@@ -958,6 +1019,35 @@ namespace PaintBucketSim.Systems.Fluid
                    );
         }
 
+        private float ComputeBucketFillVolumeM3(float fillFraction)
+        {
+            if (bucketSystem == null || bucketSystem.Config == null)
+                return 0.0f;
+
+            var config = bucketSystem.Config;
+            float fraction = Mathf.Clamp01(fillFraction);
+            float fillHeight = Mathf.Max(config.heightMeters, 0.0f) * fraction;
+            float bottomRadius = Mathf.Max(
+                config.bottomRadiusMeters - config.wallThicknessMeters,
+                0.001f
+            );
+            float topRadius = Mathf.Max(
+                config.topRadiusMeters - config.wallThicknessMeters,
+                0.001f
+            );
+
+            if (config.shapeType == BucketShapeType.Cylinder)
+                return Mathf.PI * bottomRadius * bottomRadius * fillHeight;
+
+            float fillRadius = Mathf.Lerp(bottomRadius, topRadius, fraction);
+            return Mathf.PI * fillHeight / 3.0f *
+                   (
+                       bottomRadius * bottomRadius +
+                       bottomRadius * fillRadius +
+                       fillRadius * fillRadius
+                   );
+        }
+
         private static float EstimateSpacingFromVolume(float restVolume)
         {
             return Mathf.Pow(Mathf.Max(restVolume, 1e-12f), 1.0f / 3.0f);
@@ -971,7 +1061,9 @@ namespace PaintBucketSim.Systems.Fluid
             float mass = restDensity * restVolume;
 
             float spacing = EstimateSpacingFromVolume(restVolume);
-            float radius = spacing * 0.45f;
+            float radius =
+                spacing *
+                Mathf.Clamp(paintFluidConfig.particleRadiusToSpacing, 0.25f, 0.65f);
 
             for (int i = 0; i < _data.Count; i++)
             {
@@ -1011,7 +1103,14 @@ namespace PaintBucketSim.Systems.Fluid
                 particleSpacingToCellSizeRatio =
                     gpuMpmSolverConfig != null && gpuMpmSolverConfig.cellSizeMeters > 1e-6f
                         ? spacing / gpuMpmSolverConfig.cellSizeMeters
-                        : 0.0f
+                        : 0.0f,
+
+                correctFillVolumeM3 = targetPaintVolume,
+                configuredFillFraction = Mathf.Clamp01(paintFluidConfig.fillFraction01),
+                dryBucketMassKg = bucketSystem != null && bucketSystem.Config != null
+                    ? bucketSystem.Config.massKg
+                    : 0.0f,
+                initialPaintMassKg = mass * count
             };
         }
     }

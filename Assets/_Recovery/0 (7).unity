@@ -2905,14 +2905,14 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 303841542}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3b8488e6a01299949abab3fb92cc976a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Boundary.BoundaryRenderer
   boundarySystem: {fileID: 303841551}
   boundaryConfig: {fileID: 11400000, guid: 0680ed81fb328ea4ea571ecb915d936d, type: 2}
-  visible: 0
+  visible: 1
 --- !u!114 &303841551
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2920,7 +2920,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 303841542}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: cb4c298b25dc2394e9e65733e0ab8a9f, type: 3}
   m_Name: 

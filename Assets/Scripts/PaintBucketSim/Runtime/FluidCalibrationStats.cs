@@ -23,5 +23,10 @@
 
         public float gridCellSizeM;
         public float particleSpacingToCellSizeRatio;
+
+        public float correctFillVolumeM3;
+        public float configuredFillFraction;
+        public float dryBucketMassKg;
+        public float initialPaintMassKg;
     }
 }

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: GpuFluidBufferConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuFluidBufferConfig
   enableGpuFluidBuffers: 1
-  maxGpuParticles: 100000
+  maxGpuParticles: 150000
   uploadFromCpuWhileCpuSolverActive: 1
   uploadEveryNFrames: 1
   uploadStride: 1

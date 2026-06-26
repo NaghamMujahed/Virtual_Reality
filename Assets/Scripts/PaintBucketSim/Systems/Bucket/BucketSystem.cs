@@ -72,7 +72,7 @@ namespace PaintBucketSim.Systems.Bucket
 
             if (bucketConfig.motionMode == BucketMotionMode.KinematicFollowTransform)
             {
-                ReadStateFromReferenceTransform();
+                ReadStateFromReferenceTransform(dt);
                 UpdateAttachmentAndHoles();
                 UpdateDiagnostics();
                 return;
@@ -161,7 +161,7 @@ namespace PaintBucketSim.Systems.Bucket
             _data.State = state;
         }
 
-        private void ReadStateFromReferenceTransform()
+        private void ReadStateFromReferenceTransform(float dt)
         {
             Vector3 p = poseReferenceTransform != null ? poseReferenceTransform.position : transform.position;
             Quaternion r = poseReferenceTransform != null ? poseReferenceTransform.rotation : transform.rotation;
@@ -171,12 +171,28 @@ namespace PaintBucketSim.Systems.Bucket
             float3 newPosition = new float3(p.x, p.y, p.z);
             quaternion newRotation = new quaternion(r.x, r.y, r.z, r.w);
 
-            // Kinematic mode is mainly for visual/transform-driven testing.
-            // Velocity is estimated weakly later when needed by coupling.
+            float safeDt = math.max(dt, 1e-6f);
+            float3 previousPosition = state.position;
+            quaternion previousRotation = state.rotation;
+
             state.position = newPosition;
             state.rotation = math.normalize(newRotation);
-            state.velocity = float3.zero;
-            state.angularVelocity = float3.zero;
+            state.velocity = (newPosition - previousPosition) / safeDt;
+
+            quaternion delta = math.normalize(math.mul(state.rotation, math.inverse(previousRotation)));
+            if (delta.value.w < 0.0f)
+                delta.value = -delta.value;
+
+            float sinHalf = math.length(delta.value.xyz);
+            if (sinHalf > 1e-7f)
+            {
+                float angle = 2.0f * math.atan2(sinHalf, math.clamp(delta.value.w, -1.0f, 1.0f));
+                state.angularVelocity = delta.value.xyz / sinHalf * (angle / safeDt);
+            }
+            else
+            {
+                state.angularVelocity = float3.zero;
+            }
 
             _data.State = state;
         }
@@ -279,6 +295,9 @@ namespace PaintBucketSim.Systems.Bucket
 
                 Vector3 localCenterVector = bucketConfig.GetResolvedHoleLocalCenter(holeConfig);
                 Vector3 localNormalVector = bucketConfig.GetResolvedHoleLocalNormal(holeConfig);
+                Vector3 localTangentVector = bucketConfig.GetResolvedHoleLocalTangent(holeConfig);
+                Vector3 localBitangentVector = bucketConfig.GetResolvedHoleLocalBitangent(holeConfig);
+                Vector2 halfExtentsVector = bucketConfig.GetResolvedHoleHalfExtents(holeConfig);
 
                 float3 localCenter = new float3(
                     localCenterVector.x,
@@ -292,12 +311,30 @@ namespace PaintBucketSim.Systems.Bucket
                     localNormalVector.z
                 ));
 
+                float3 localTangent = math.normalize(new float3(
+                    localTangentVector.x,
+                    localTangentVector.y,
+                    localTangentVector.z
+                ));
+
+                float3 localBitangent = math.normalize(new float3(
+                    localBitangentVector.x,
+                    localBitangentVector.y,
+                    localBitangentVector.z
+                ));
+
                 float3 worldCenter = LocalToWorldPoint(localCenter);
                 float3 worldNormal = math.normalize(LocalToWorldVector(localNormal));
+                float3 worldTangent = math.normalize(LocalToWorldVector(localTangent));
+                float3 worldBitangent = math.normalize(LocalToWorldVector(localBitangent));
                 float3 worldVelocity = GetWorldPointVelocity(worldCenter);
 
                 float radius = math.max(holeConfig.radiusMeters, 0.001f);
-                float area = math.PI * radius * radius;
+                float area = math.max(bucketConfig.GetResolvedHoleArea(holeConfig), 0.0f);
+                float2 halfExtents = new float2(
+                    math.max(halfExtentsVector.x, 0.001f),
+                    math.max(halfExtentsVector.y, 0.001f)
+                );
 
                 _data.Holes[i] = new BucketHoleWorldState
                 {
@@ -306,14 +343,22 @@ namespace PaintBucketSim.Systems.Bucket
 
                     localCenter = localCenter,
                     localNormal = localNormal,
+                    localTangent = localTangent,
+                    localBitangent = localBitangent,
 
                     worldCenter = worldCenter,
                     worldNormal = worldNormal,
+                    worldTangent = worldTangent,
+                    worldBitangent = worldBitangent,
                     worldVelocity = worldVelocity,
 
                     radius = radius,
+                    halfExtents = halfExtents,
                     area = area,
-                    wallThickness = math.max(holeConfig.wallThicknessMeters, bucketConfig.wallThicknessMeters)
+                    wallThickness = math.max(holeConfig.wallThicknessMeters, bucketConfig.wallThicknessMeters),
+                    edgeSoftness = math.max(holeConfig.edgeSoftnessMeters, 0.0f),
+                    flowMultiplier = math.max(holeConfig.flowMultiplier, 0.0f),
+                    exitVelocityBoost = math.max(holeConfig.exitVelocityBoostMetersPerSecond, 0.0f)
                 };
             }
         }

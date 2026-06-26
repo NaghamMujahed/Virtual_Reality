@@ -24,6 +24,8 @@ namespace PaintBucketSim.Systems.Fluid
         private GraphicsBuffer.IndirectDrawIndexedArgs[] _commandData;
 
         private MaterialPropertyBlock _mpb;
+        private Mesh _generatedParticleMesh;
+        private GpuParticleVisualMode _generatedVisualMode;
 
         private readonly Stopwatch _renderSubmitWatch = new Stopwatch();
 
@@ -36,8 +38,7 @@ namespace PaintBucketSim.Systems.Fluid
             if (gpuBufferSet == null)
                 gpuBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
 
-            if (particleMesh == null)
-                particleMesh = CreateOctahedronMesh();
+            EnsureParticleMesh();
 
             if (particleMaterial == null)
                 particleMaterial = CreateDefaultMaterial();
@@ -58,6 +59,7 @@ namespace PaintBucketSim.Systems.Fluid
         private void OnDestroy()
         {
             ReleaseCommandBuffer();
+            ReleaseGeneratedMesh();
         }
 
         private void LateUpdate()
@@ -74,6 +76,7 @@ namespace PaintBucketSim.Systems.Fluid
                 return;
             }
 
+            EnsureParticleMesh();
             EnsureCommandBuffer();
             UpdateCommandBuffer();
             RenderParticles();
@@ -114,14 +117,26 @@ namespace PaintBucketSim.Systems.Fluid
 
         private void UpdateCommandBuffer()
         {
-            uint visibleCount = (uint)Mathf.Max(0, gpuBufferSet.UploadedParticleCount);
+            int uploadedCount = Mathf.Max(0, gpuBufferSet.UploadedParticleCount);
+            int stride = renderConfig != null
+                ? Mathf.Max(1, renderConfig.renderStride)
+                : 1;
 
-            // Optional extra safety cap from render config.
-            if (renderConfig != null)
-                visibleCount = (uint)Mathf.Min((int)visibleCount, renderConfig.maxRenderedParticles);
+            int visibleCount = Mathf.CeilToInt(uploadedCount / (float)stride);
+
+            if (renderConfig != null && visibleCount > renderConfig.maxRenderedParticles)
+            {
+                stride = Mathf.Max(
+                    stride,
+                    Mathf.CeilToInt(uploadedCount / (float)renderConfig.maxRenderedParticles)
+                );
+                visibleCount = Mathf.CeilToInt(uploadedCount / (float)stride);
+            }
+
+            _effectiveRenderStride = stride;
 
             _commandData[0].indexCountPerInstance = particleMesh.GetIndexCount(0);
-            _commandData[0].instanceCount = visibleCount;
+            _commandData[0].instanceCount = (uint)Mathf.Max(0, visibleCount);
             _commandData[0].startIndex = particleMesh.GetIndexStart(0);
             _commandData[0].baseVertexIndex = particleMesh.GetBaseVertex(0);
             _commandData[0].startInstance = 0;
@@ -139,9 +154,31 @@ namespace PaintBucketSim.Systems.Fluid
             _mpb.SetBuffer("_ParticlePositionRadius", gpuBufferSet.PositionRadiusBuffer);
             _mpb.SetBuffer("_ParticleColor", gpuBufferSet.ColorBuffer);
 
+            bool useSplat =
+                renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
+
             _mpb.SetFloat("_VisualRadiusScale", renderConfig.visualRadiusScale);
             _mpb.SetFloat("_UsePerParticleColor", renderConfig.usePerParticleColor ? 1.0f : 0.0f);
             _mpb.SetColor("_FallbackColor", renderConfig.fallbackColor);
+            _mpb.SetInt("_ParticleIndexStride", _effectiveRenderStride);
+            _mpb.SetInt("_ParticleCount", gpuBufferSet.UploadedParticleCount);
+            _mpb.SetFloat("_RenderMode", useSplat ? 1.0f : 0.0f);
+            _mpb.SetFloat("_SplatNormalStrength", renderConfig.splatNormalStrength);
+
+            Camera camera = Camera.main != null ? Camera.main : Camera.current;
+            if (camera != null)
+            {
+                Transform cameraTransform = camera.transform;
+                _mpb.SetVector("_CameraRightWS", cameraTransform.right);
+                _mpb.SetVector("_CameraUpWS", cameraTransform.up);
+                _mpb.SetVector("_CameraForwardWS", -cameraTransform.forward);
+            }
+            else
+            {
+                _mpb.SetVector("_CameraRightWS", Vector3.right);
+                _mpb.SetVector("_CameraUpWS", Vector3.up);
+                _mpb.SetVector("_CameraForwardWS", Vector3.back);
+            }
 
             RenderParams renderParams = new RenderParams(particleMaterial)
             {
@@ -178,9 +215,19 @@ namespace PaintBucketSim.Systems.Fluid
                 ? renderConfig.maxRenderedParticles
                 : 0;
 
-            _stats.renderStride = gpuBufferSet != null && gpuBufferSet.Config != null
-                ? gpuBufferSet.Config.uploadStride
-                : 1;
+            _stats.renderStride = _effectiveRenderStride;
+            _stats.visualMode = renderConfig != null
+                ? (int)renderConfig.visualMode
+                : 0;
+            _stats.visualRadiusScale = renderConfig != null
+                ? renderConfig.visualRadiusScale
+                : 1.0f;
+            _stats.meshVertexCount = particleMesh != null
+                ? particleMesh.vertexCount
+                : 0;
+            _stats.meshIndexCount = particleMesh != null
+                ? (int)particleMesh.GetIndexCount(0)
+                : 0;
 
             _stats.uploadFrame = gpuBufferSet != null
                 ? gpuBufferSet.Stats.uploadFrame
@@ -194,6 +241,9 @@ namespace PaintBucketSim.Systems.Fluid
                 (float)_renderSubmitWatch.Elapsed.TotalMilliseconds;
 
             _stats.usingPerParticleColor = renderConfig != null && renderConfig.usePerParticleColor;
+            _stats.usingCameraFacingSplat =
+                renderConfig != null &&
+                renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
         }
 
         private void ReleaseCommandBuffer()
@@ -208,6 +258,50 @@ namespace PaintBucketSim.Systems.Fluid
             _stats = default;
         }
 
+        private int _effectiveRenderStride = 1;
+
+        private void EnsureParticleMesh()
+        {
+            GpuParticleVisualMode mode = renderConfig != null
+                ? renderConfig.visualMode
+                : GpuParticleVisualMode.OctahedronMesh;
+
+            if (particleMesh != null &&
+                particleMesh != _generatedParticleMesh)
+            {
+                return;
+            }
+
+            if (_generatedParticleMesh != null &&
+                _generatedVisualMode == mode)
+            {
+                particleMesh = _generatedParticleMesh;
+                return;
+            }
+
+            ReleaseGeneratedMesh();
+
+            _generatedVisualMode = mode;
+            _generatedParticleMesh =
+                mode == GpuParticleVisualMode.CameraFacingSplat
+                    ? CreateCameraFacingQuadMesh()
+                    : CreateOctahedronMesh();
+            particleMesh = _generatedParticleMesh;
+        }
+
+        private void ReleaseGeneratedMesh()
+        {
+            if (_generatedParticleMesh == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(_generatedParticleMesh);
+            else
+                DestroyImmediate(_generatedParticleMesh);
+
+            _generatedParticleMesh = null;
+        }
+
         private Material CreateDefaultMaterial()
         {
             Shader shader = Shader.Find("PaintBucketSim/GPU Indirect Paint Particle URP");
@@ -219,6 +313,43 @@ namespace PaintBucketSim.Systems.Fluid
             material.enableInstancing = true;
 
             return material;
+        }
+
+        private Mesh CreateCameraFacingQuadMesh()
+        {
+            Vector3[] vertices =
+            {
+                new Vector3(-1, -1, 0),
+                new Vector3(-1,  1, 0),
+                new Vector3( 1,  1, 0),
+                new Vector3( 1, -1, 0)
+            };
+
+            Vector3[] normals =
+            {
+                Vector3.back,
+                Vector3.back,
+                Vector3.back,
+                Vector3.back
+            };
+
+            int[] triangles =
+            {
+                0, 1, 2,
+                0, 2, 3
+            };
+
+            Mesh mesh = new Mesh
+            {
+                name = "GPU Paint Particle Camera Facing Splat"
+            };
+
+            mesh.vertices = vertices;
+            mesh.normals = normals;
+            mesh.triangles = triangles;
+            mesh.RecalculateBounds();
+
+            return mesh;
         }
 
         private Mesh CreateOctahedronMesh()
@@ -257,6 +388,15 @@ namespace PaintBucketSim.Systems.Fluid
             mesh.RecalculateBounds();
 
             return mesh;
+        }
+
+        private void OnValidate()
+        {
+            if (!Application.isPlaying)
+                return;
+
+            if (particleMesh == _generatedParticleMesh)
+                particleMesh = null;
         }
     }
 }

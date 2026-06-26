@@ -14,32 +14,40 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuMpmSolverConfig
   denseLocalMpmCompute: {fileID: 7200000, guid: 6baff0c33dcf5fd4da0d039aed50f8c6, type: 3}
   gridOriginWorld: {x: -3, y: -3, z: -3}
-  gridResolution: {x: 64, y: 64, z: 64}
-  cellSizeMeters: 0.008
+  gridResolution: {x: 80, y: 80, z: 80}
+  cellSizeMeters: 0.01
+  followBucketWithGrid: 1
+  gridBucketMarginMeters: 0.02
+  rejectUndersizedGrid: 1
   enableGpuDenseMpm: 1
   gravityScale: 1
   velocityDampingPerSecond: 0.05
-  maxParticleSpeed: 10
+  maxParticleSpeed: 3
   massFixedScale: 1000000
   momentumFixedScale: 1000000
   logLifecycle: 1
+  enableGpuDiagnostics: 0
+  diagnosticsReadbackInterval: 15
   affineDamping: 0.02
   maxAffineMagnitude: 25
   useAutomaticApicDInverse: 1
   manualApicDInverse: 625
-  enableProjectionGridInfrastructure: 0
+  enableProjectionGridInfrastructure: 1
   useMpmGridForProjection: 1
+  projectionSubstepInterval: 2
+  enablePressureWarmStart: 1
+  pressureWarmStartFactor: 0.75
   projectionMassFixedScale: 1000000
   minFluidCellMass: 0.0000001
   enableBucketProjectionSolidCells: 1
-  projectionTopOpen: 1
+  projectionTopOpen: 0
   enableMaterialStress: 1
-  bulkModulus: 10000
+  bulkModulus: 30000
   mpmViscosity: 0.2
-  materialStressStrength: 0.25
-  maxStressMagnitude: 5000
-  minJ: 0.4
-  maxJ: 1.8
+  materialStressStrength: 1
+  maxStressMagnitude: 30000
+  minJ: 0.65
+  maxJ: 1.35
   maxDeformationGradientValue: 5
   enablePaintRheology: 1
   lowShearViscosity: 2
@@ -52,35 +60,44 @@ MonoBehaviour:
   rheologyStrength: 1
   enableGpuBucketCollision: 1
   useRealBucketCollision: 1
-  bucketCollisionPadding: 0.005
-  bucketRestitution: 0.05
-  bucketFriction: 0.25
+  bucketCollisionPadding: 0.002
+  bucketRestitution: 0
+  bucketFriction: 0.35
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
   enableBottomHoleOpening: 0
+  maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
   holeRadialPaddingMeters: 0.02
+  holeOutflowExitDistanceMeters: 0.004
+  enableAirborneParticleAdvection: 1
+  airborneDragPerSecond: 0.15
+  jetStateDurationSeconds: 0.08
+  airborneLifetimeSeconds: 8
+  airborneKillBelowWorldY: -2
+  killAirborneBelowWorldY: 0
   enableMovingBucketBoundaryVelocity: 1
-  bucketBoundaryVelocityStrength: 1
-  maxBucketBoundaryVelocity: 8
-  enableProjectionDivergenceComputation: 0
+  bucketBoundaryVelocityStrength: 0.5
+  maxBucketBoundaryVelocity: 4
+  enableProjectionDivergenceComputation: 1
   projectionDivergenceScale: 1
   maxAbsProjectionDivergence: 50
   projectionSolidNoFlux: 1
-  enableJacobiPressureSolve: 0
-  pressureJacobiIterations: 40
+  enableJacobiPressureSolve: 1
+  pressureJacobiIterations: 12
   pressureRhsScale: 1
   pressureJacobiRelaxation: 0.8
   maxProjectionPressure: 1000
   projectionAirPressureZero: 1
   projectionSolidPressureNeumann: 1
-  enablePressureGradientSubtraction: 0
-  pressureGradientScale: 0.5
-  maxPressureVelocityCorrection: 2
+  enablePressureGradientSubtraction: 1
+  pressureGradientScale: 1
+  maxPressureVelocityCorrection: 3
   invertPressureGradientSign: 0
   pressureCorrectionFluidCellsOnly: 1
+  useStaggeredFaceProjection: 1
   enableMovingBucketProjectionCoupling: 1
   useMovingBucketVelocityInDivergence: 1
   applyMovingBucketGridBoundaryVelocity: 1
