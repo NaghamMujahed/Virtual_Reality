@@ -23,10 +23,22 @@ MonoBehaviour:
   gravityScale: 1
   velocityDampingPerSecond: 0.05
   maxParticleSpeed: 3
+  enableActiveMpmGridBounds: 0
+  activeMpmGridBoundsPaddingMeters: 0.04
+  activeMpmGridBoundsPaddingCells: 2
+  activeMpmGridMaxFullGridFraction: 0.95
+  enableMpmTileOccupancy: 1
+  enableTiledMpmGridDispatch: 0
+  enableMpmParticleTileLists: 0
+  enableTiledP2G: 0
+  enableTileOrderedParticlePipeline: 0
+  enableHybridTiledP2G: 1
+  mpmTileSizeCells: 8
   massFixedScale: 1000000
   momentumFixedScale: 1000000
   logLifecycle: 1
   enableGpuDiagnostics: 0
+  enableGpuStageProfiling: 0
   diagnosticsReadbackInterval: 15
   affineDamping: 0.02
   maxAffineMagnitude: 25
@@ -35,17 +47,36 @@ MonoBehaviour:
   enableProjectionGridInfrastructure: 1
   useMpmGridForProjection: 1
   projectionSubstepInterval: 2
+  enableSparseProjectionPressureDispatch: 1
+  enableAdaptiveMultiRate: 1
+  adaptiveActivitySampleInterval: 8
+  calmInteriorDeformationInterval: 1
+  adaptivePriorityParticleSpeed: 1.25
+  adaptivePriorityBoundaryBandMeters: 0.025
+  adaptivePriorityTopFraction: 0.75
+  enableAdaptiveProjectionCadence: 1
+  calmProjectionSubstepInterval: 3
+  adaptiveProjectionCalmDelaySubsteps: 32
+  adaptiveProjectionCalmAverageSpeed: 0.7
+  adaptiveProjectionCalmPriorityFraction: 0.85
+  adaptiveProjectionMaxAverageJDeviation: 0.04
+  adaptiveProjectionBucketLinearSpeed: 0.08
+  adaptiveProjectionBucketAngularSpeed: 0.25
   enablePressureWarmStart: 1
   pressureWarmStartFactor: 0.75
   projectionMassFixedScale: 1000000
   minFluidCellMass: 0.0000001
   enableBucketProjectionSolidCells: 1
   projectionTopOpen: 0
+  enableActiveProjectionBounds: 1
+  activeProjectionBoundsPaddingMeters: 0.04
+  activeProjectionBoundsPaddingCells: 2
+  activeProjectionMaxFullGridFraction: 0.95
   enableMaterialStress: 1
-  bulkModulus: 30000
+  bulkModulus: 12500
   mpmViscosity: 0.2
   materialStressStrength: 1
-  maxStressMagnitude: 30000
+  maxStressMagnitude: 20000
   minJ: 0.65
   maxJ: 1.35
   maxDeformationGradientValue: 5
@@ -58,11 +89,18 @@ MonoBehaviour:
   maxYieldViscosityContribution: 5
   maxEffectiveViscosity: 8
   rheologyStrength: 1
+  enableFreeSurfacePolish: 1
+  freeSurfaceGradientScale: 0.08
+  freeSurfaceNormalDampingPerSecond: 2.5
+  freeSurfaceCohesionAcceleration: 0.75
+  maxFreeSurfaceVelocityCorrection: 0.35
   enableGpuBucketCollision: 1
   useRealBucketCollision: 1
   bucketCollisionPadding: 0.002
   bucketRestitution: 0
   bucketFriction: 0.35
+  enablePostG2PBucketCollision: 1
+  enableAdaptivePostG2PBucketCollision: 1
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
@@ -73,6 +111,7 @@ MonoBehaviour:
   holeRadialPaddingMeters: 0.02
   holeOutflowExitDistanceMeters: 0.004
   enableAirborneParticleAdvection: 1
+  enableSmartAirborneDispatch: 1
   airborneDragPerSecond: 0.15
   jetStateDurationSeconds: 0.08
   airborneLifetimeSeconds: 8
@@ -86,9 +125,12 @@ MonoBehaviour:
   maxAbsProjectionDivergence: 50
   projectionSolidNoFlux: 1
   enableJacobiPressureSolve: 1
+  pressureSolveMode: 1
   pressureJacobiIterations: 12
+  pressureRedBlackSorIterations: 4
   pressureRhsScale: 1
   pressureJacobiRelaxation: 0.8
+  pressureRedBlackSorOmega: 1.35
   maxProjectionPressure: 1000
   projectionAirPressureZero: 1
   projectionSolidPressureNeumann: 1

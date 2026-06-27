@@ -23,7 +23,26 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private GraphicsBuffer _projectionDivergenceBuffer;
         private GraphicsBuffer _projectionDivergenceAfterBuffer;
         private GraphicsBuffer _projectionFaceVelocityBuffer;
+        private GraphicsBuffer _projectionFluidCellIndicesBuffer;
+        private GraphicsBuffer _projectionFluidCellMetaBuffer;
+        private GraphicsBuffer _projectionFluidCellDispatchArgsBuffer;
+        private GraphicsBuffer _adaptiveParticlePriorityBuffer;
+        private GraphicsBuffer _adaptiveActivitySummaryBuffer;
         private GraphicsBuffer _diagnosticsBuffer;
+        private GraphicsBuffer _mpmTileFlagsBuffer;
+        private GraphicsBuffer _mpmActiveTileIndicesBuffer;
+        private GraphicsBuffer _mpmTileDispatchArgsBuffer;
+        private GraphicsBuffer _mpmTileParticleCountsBuffer;
+        private GraphicsBuffer _mpmTileParticleWriteCountsBuffer;
+        private GraphicsBuffer _mpmTileParticleOffsetsBuffer;
+        private GraphicsBuffer _mpmTileParticleIndicesBuffer;
+        private GraphicsBuffer _mpmTileParticleMetaBuffer;
+        private GraphicsBuffer _mpmTileOwnerParticleCountsBuffer;
+        private GraphicsBuffer _mpmTileOwnerParticleWriteCountsBuffer;
+        private GraphicsBuffer _mpmTileOwnerParticleOffsetsBuffer;
+        private GraphicsBuffer _mpmTileOrderedParticleIndicesBuffer;
+        private GraphicsBuffer _mpmTileOrderedParticleDispatchArgsBuffer;
+        private GraphicsBuffer _mpmTileOrderedParticleMetaBuffer;
         private GraphicsBuffer _bucketHoleData0Buffer;
         private GraphicsBuffer _bucketHoleData1Buffer;
         private GraphicsBuffer _bucketHoleData2Buffer;
@@ -39,43 +58,105 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         private int _kernelClearGrid         = -1;
         private int _kernelClearMpmDiagnostics = -1;
+        private int _kernelClearAdaptiveActivity = -1;
+        private int _kernelClassifyAdaptiveActivity = -1;
         private int _kernelP2G               = -1;
         private int _kernelGridUpdate        = -1;
+        private int _kernelClearMpmTileData = -1;
+        private int _kernelClearMpmTileOrderedData = -1;
+        private int _kernelMarkMpmActiveTiles = -1;
+        private int _kernelBuildMpmTileParticleOffsets = -1;
+        private int _kernelBuildMpmTileOwnerOffsets = -1;
+        private int _kernelFillMpmTileParticleLists = -1;
+        private int _kernelClearGridActiveTiles = -1;
+        private int _kernelGridUpdateActiveTiles = -1;
+        private int _kernelP2GTileOrdered = -1;
+        private int _kernelP2GHybridTiled = -1;
         //private int _kernelG2P               = -1;
         private int _kernelG2PVelocityApic   = -1;
+        private int _kernelG2PVelocityApicTileOrdered = -1;
         private int _kernelUpdateDeformation = -1;
+        private int _kernelUpdateDeformationTileOrdered = -1;
         private int _kernelApplyMovingBucketProjectionBoundaryVelocity = -1;
 
         private int _kernelClearProjectionGrid = -1;
         private int _kernelMarkBucketProjectionSolids = -1;
         private int _kernelMarkProjectionFluidCells = -1;
+        private int _kernelMarkProjectionFluidCellsTileOrdered = -1;
         private int _kernelFinalizeProjectionGrid = -1;
+        private int _kernelClearProjectionFluidCellList = -1;
+        private int _kernelBuildProjectionFluidCellDispatchArgs = -1;
         private int _kernelBuildProjectionFaceVelocities = -1;
         private int _kernelComputeProjectionDivergence = -1;
 
         private int _kernelJacobiProjectionPressure = -1;
+        private int _kernelJacobiProjectionPressureSparse = -1;
+        private int _kernelRedBlackSorProjectionPressure = -1;
+        private int _kernelRedBlackSorProjectionPressureSparse = -1;
         private int _kernelSubtractProjectionPressureGradient = -1;
         private int _kernelApplyProjectionFaceVelocitiesToGrid = -1;
         private int _kernelCollectProjectionDiagnostics = -1;
 
         /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelBucketCollision = -1;
+        private int _kernelBucketCollisionTileOrdered = -1;
         /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelStepAirborneParticles = -1;
 
         private FluidSolverStats _stats;
 
         private readonly Stopwatch _cpuDispatchWatch = new Stopwatch();
+        private readonly Stopwatch _gpuStageProfileWatch = new Stopwatch();
         private Vector3 _runtimeGridOriginWorld;
+        private Vector3Int _activeMpmGridMin;
+        private Vector3Int _activeMpmGridSize;
+        private int _activeMpmGridNodeCount;
+        private bool _useActiveMpmGridBoundsThisStep;
+        private Vector3Int _mpmTileResolution;
+        private int _mpmTileCount;
+        private int _mpmTileSizeCells = 8;
+        private int _mpmTileSizeShift = 3;
+        private int _mpmTileParticleListCapacity;
+        private bool _useMpmTileOccupancyThisStep;
+        private bool _useTiledMpmGridDispatchThisStep;
+        private bool _useMpmParticleTileListsThisStep;
+        private bool _buildMpmSupportParticleTileListsThisStep;
+        private bool _useTiledP2GThisStep;
+        private bool _useTileOrderedParticlePipelineThisStep;
+        private bool _useHybridTiledP2GThisStep;
+        private Vector3Int _activeProjectionMin;
+        private Vector3Int _activeProjectionSize;
+        private int _activeProjectionNodeCount;
+        private bool _useActiveProjectionBoundsThisStep;
+        private bool _useSparseProjectionPressureDispatchThisStep;
         private bool _gridContainsBucket;
         private bool _gridCoverageErrorLogged;
         private bool _diagnosticsReadbackPending;
+        private bool _adaptiveActivityReadbackPending;
+        private bool _adaptiveActivityReady;
+        private int _adaptiveActivityRequestedStepIndex;
+        private int _adaptiveActivityStepIndex;
+        private int _adaptiveActiveParticleCount;
+        private int _adaptivePriorityParticleCount;
+        private int _adaptiveCalmParticleCount;
+        private int _adaptiveAirParticleCount;
+        private float _adaptiveAverageSpeed;
+        private float _adaptiveMaximumSpeed;
+        private float _adaptiveAverageJDeviation;
+        private int _adaptiveProjectionCalmCounter;
+        private bool _adaptiveProjectionCalmMode;
+        private int _effectiveProjectionInterval = 1;
+        private int _lastProjectionCompletedStep;
+        private int _adaptiveProjectionCalmSubstepCount;
+        private int _adaptiveProjectionCalmEntryCount;
+        private int _adaptiveProjectionCalmExitCount;
         private bool _hasPressureHistory;
+        private bool _mayHaveAirDomainParticles;
         private int _diagnosticsRequestedStepIndex;
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
 
-        private const int DiagnosticsValueCount = 27;
+        private const int DiagnosticsValueCount = 34;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 10000.0f;
@@ -90,6 +171,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private const int DiagnosticLocalYMax = 24;
         private const int DiagnosticSpeedSum = 25;
         private const int DiagnosticSpeedMax = 26;
+        private const int DiagnosticMpmActiveTiles = 27;
+        private const int DiagnosticMpmTileCount = 28;
+        private const int DiagnosticMpmTileParticleRefs = 30;
+        private const int DiagnosticMpmTileMaxParticleRefs = 31;
+        private const int DiagnosticMpmTileParticleListOverflow = 32;
+        private const int DiagnosticMpmTileParticleListCapacity = 33;
+        private const int MaxMpmSupportTilesPerParticle = 8;
 
         public FluidSolverType SolverType => FluidSolverType.GpuSparseMpmPrototype;
         public bool IsInitialized { get; private set; }
@@ -218,10 +306,124 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _projectionFaceVelocityBuffer = null;
             }
 
+            if (_projectionFluidCellIndicesBuffer != null)
+            {
+                _projectionFluidCellIndicesBuffer.Release();
+                _projectionFluidCellIndicesBuffer = null;
+            }
+
+            if (_projectionFluidCellMetaBuffer != null)
+            {
+                _projectionFluidCellMetaBuffer.Release();
+                _projectionFluidCellMetaBuffer = null;
+            }
+
+            if (_projectionFluidCellDispatchArgsBuffer != null)
+            {
+                _projectionFluidCellDispatchArgsBuffer.Release();
+                _projectionFluidCellDispatchArgsBuffer = null;
+            }
+
+            if (_adaptiveParticlePriorityBuffer != null)
+            {
+                _adaptiveParticlePriorityBuffer.Release();
+                _adaptiveParticlePriorityBuffer = null;
+            }
+
+            if (_adaptiveActivitySummaryBuffer != null)
+            {
+                _adaptiveActivitySummaryBuffer.Release();
+                _adaptiveActivitySummaryBuffer = null;
+            }
+
             if (_diagnosticsBuffer != null)
             {
                 _diagnosticsBuffer.Release();
                 _diagnosticsBuffer = null;
+            }
+
+            if (_mpmTileFlagsBuffer != null)
+            {
+                _mpmTileFlagsBuffer.Release();
+                _mpmTileFlagsBuffer = null;
+            }
+
+            if (_mpmActiveTileIndicesBuffer != null)
+            {
+                _mpmActiveTileIndicesBuffer.Release();
+                _mpmActiveTileIndicesBuffer = null;
+            }
+
+            if (_mpmTileDispatchArgsBuffer != null)
+            {
+                _mpmTileDispatchArgsBuffer.Release();
+                _mpmTileDispatchArgsBuffer = null;
+            }
+
+            if (_mpmTileParticleCountsBuffer != null)
+            {
+                _mpmTileParticleCountsBuffer.Release();
+                _mpmTileParticleCountsBuffer = null;
+            }
+
+            if (_mpmTileParticleWriteCountsBuffer != null)
+            {
+                _mpmTileParticleWriteCountsBuffer.Release();
+                _mpmTileParticleWriteCountsBuffer = null;
+            }
+
+            if (_mpmTileParticleOffsetsBuffer != null)
+            {
+                _mpmTileParticleOffsetsBuffer.Release();
+                _mpmTileParticleOffsetsBuffer = null;
+            }
+
+            if (_mpmTileParticleIndicesBuffer != null)
+            {
+                _mpmTileParticleIndicesBuffer.Release();
+                _mpmTileParticleIndicesBuffer = null;
+            }
+
+            if (_mpmTileParticleMetaBuffer != null)
+            {
+                _mpmTileParticleMetaBuffer.Release();
+                _mpmTileParticleMetaBuffer = null;
+            }
+
+            if (_mpmTileOwnerParticleCountsBuffer != null)
+            {
+                _mpmTileOwnerParticleCountsBuffer.Release();
+                _mpmTileOwnerParticleCountsBuffer = null;
+            }
+
+            if (_mpmTileOwnerParticleWriteCountsBuffer != null)
+            {
+                _mpmTileOwnerParticleWriteCountsBuffer.Release();
+                _mpmTileOwnerParticleWriteCountsBuffer = null;
+            }
+
+            if (_mpmTileOwnerParticleOffsetsBuffer != null)
+            {
+                _mpmTileOwnerParticleOffsetsBuffer.Release();
+                _mpmTileOwnerParticleOffsetsBuffer = null;
+            }
+
+            if (_mpmTileOrderedParticleIndicesBuffer != null)
+            {
+                _mpmTileOrderedParticleIndicesBuffer.Release();
+                _mpmTileOrderedParticleIndicesBuffer = null;
+            }
+
+            if (_mpmTileOrderedParticleDispatchArgsBuffer != null)
+            {
+                _mpmTileOrderedParticleDispatchArgsBuffer.Release();
+                _mpmTileOrderedParticleDispatchArgsBuffer = null;
+            }
+
+            if (_mpmTileOrderedParticleMetaBuffer != null)
+            {
+                _mpmTileOrderedParticleMetaBuffer.Release();
+                _mpmTileOrderedParticleMetaBuffer = null;
             }
 
             if (_bucketHoleData0Buffer != null)
@@ -263,9 +465,49 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _diagnosticsReadbackPending = false;
             _hasPressureHistory = false;
+            _mayHaveAirDomainParticles = false;
             _diagnosticsRequestedStepIndex = 0;
             _lastDiagnosticsReadbackStep = 0;
             _stepIndex = 0;
+            _activeMpmGridMin = Vector3Int.zero;
+            _activeMpmGridSize = Vector3Int.zero;
+            _activeMpmGridNodeCount = 0;
+            _useActiveMpmGridBoundsThisStep = false;
+            _mpmTileResolution = Vector3Int.zero;
+            _mpmTileCount = 0;
+            _mpmTileSizeCells = 8;
+            _mpmTileSizeShift = 3;
+            _mpmTileParticleListCapacity = 0;
+            _useMpmTileOccupancyThisStep = false;
+            _useTiledMpmGridDispatchThisStep = false;
+            _useMpmParticleTileListsThisStep = false;
+            _buildMpmSupportParticleTileListsThisStep = false;
+            _useTiledP2GThisStep = false;
+            _useTileOrderedParticlePipelineThisStep = false;
+            _useHybridTiledP2GThisStep = false;
+            _useSparseProjectionPressureDispatchThisStep = false;
+            _adaptiveActivityReadbackPending = false;
+            _adaptiveActivityReady = false;
+            _adaptiveActivityRequestedStepIndex = 0;
+            _adaptiveActivityStepIndex = 0;
+            _adaptiveActiveParticleCount = 0;
+            _adaptivePriorityParticleCount = 0;
+            _adaptiveCalmParticleCount = 0;
+            _adaptiveAirParticleCount = 0;
+            _adaptiveAverageSpeed = 0.0f;
+            _adaptiveMaximumSpeed = 0.0f;
+            _adaptiveAverageJDeviation = 0.0f;
+            _adaptiveProjectionCalmCounter = 0;
+            _adaptiveProjectionCalmMode = false;
+            _effectiveProjectionInterval = 1;
+            _lastProjectionCompletedStep = 0;
+            _adaptiveProjectionCalmSubstepCount = 0;
+            _adaptiveProjectionCalmEntryCount = 0;
+            _adaptiveProjectionCalmExitCount = 0;
+            _activeProjectionMin = Vector3Int.zero;
+            _activeProjectionSize = Vector3Int.zero;
+            _activeProjectionNodeCount = 0;
+            _useActiveProjectionBoundsThisStep = false;
             IsInitialized = false;
         }
 
@@ -297,6 +539,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ComputeShader compute = solverContext.GpuMpmConfig.denseLocalMpmCompute;
 
             UpdateRuntimeGridPlacement(solverContext);
+            UpdateActiveMpmGridBounds(solverContext);
+            UpdateMpmTileDispatchMode(solverContext);
+            UpdateActiveProjectionBounds(solverContext);
+            UpdateSparseProjectionPressureDispatchMode(solverContext);
 
             if (solverContext.GpuMpmConfig.rejectUndersizedGrid &&
                 !_gridContainsBucket)
@@ -318,12 +564,38 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             SetCommonParameters(solverContext, simulationContext, stepInput);
 
+            bool profileGpuStages =
+                solverContext.GpuMpmConfig.enableGpuStageProfiling;
+            if (profileGpuStages)
+            {
+                _gpuStageProfileWatch.Restart();
+            }
+            else
+            {
+                _stats.gpuProfileMpmCoreMilliseconds = 0.0f;
+                _stats.gpuProfileMpmSetupMilliseconds = 0.0f;
+                _stats.gpuProfileP2GMilliseconds = 0.0f;
+                _stats.gpuProfileGridUpdateMilliseconds = 0.0f;
+                _stats.gpuProfileProjectionMilliseconds = 0.0f;
+                _stats.gpuProfileParticlePostMilliseconds = 0.0f;
+                _stats.gpuProfileTotalMilliseconds = 0.0f;
+            }
+
+            int adaptiveDispatches = RunAdaptiveActivitySampling(
+                compute: compute,
+                context: solverContext,
+                particleCount: particleCount
+            );
+
             bool runBucketCollision =
                 solverContext.GpuMpmConfig.enableGpuBucketCollision &&
                 solverContext.GpuMpmConfig.useRealBucketCollision &&
                 solverContext.BucketSystem != null &&
                 solverContext.BucketSystem.IsInitialized &&
                 _kernelBucketCollision >= 0;
+            bool runPostBucketCollision =
+                runBucketCollision &&
+                ShouldRunPostBucketCollision(solverContext.GpuMpmConfig);
 
             bool runGpuDiagnostics =
                 solverContext.GpuMpmConfig.enableGpuDiagnostics;
@@ -342,25 +614,87 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 compute.Dispatch(_kernelBucketCollision, Groups(particleCount), 1, 1);
             }
 
-            BindClearGrid(compute);
-            compute.Dispatch(_kernelClearGrid, Groups(gridNodeCount), 1, 1);
+            int tileDispatches = RunMpmTileOccupancy(
+                compute,
+                solverContext,
+                particleCount
+            );
 
-            BindP2G(compute, solverContext);
-            compute.Dispatch(_kernelP2G, Groups(particleCount), 1, 1);
+            BindClearGrid(compute);
+            if (_useTiledMpmGridDispatchThisStep)
+            {
+                BindClearGridActiveTiles(compute);
+                DispatchMpmActiveTileKernel(compute, _kernelClearGridActiveTiles);
+            }
+            else
+            {
+                DispatchMpmGridKernel(compute, _kernelClearGrid, solverContext);
+            }
+
+            float gpuMpmSetupMilliseconds =
+                profileGpuStages
+                    ? CompleteGpuStageProfileSegment()
+                    : 0.0f;
+
+            if (_useHybridTiledP2GThisStep)
+            {
+                BindP2GHybridTiled(compute, solverContext);
+                DispatchMpmActiveTileKernel(
+                    compute,
+                    _kernelP2GHybridTiled
+                );
+            }
+            else if (_useTiledP2GThisStep)
+            {
+                BindP2GTileOrdered(compute, solverContext);
+                compute.DispatchIndirect(
+                    _kernelP2GTileOrdered,
+                    _mpmTileOrderedParticleDispatchArgsBuffer,
+                    0
+                );
+            }
+            else
+            {
+                BindP2G(compute, solverContext);
+                compute.Dispatch(_kernelP2G, Groups(particleCount), 1, 1);
+            }
+
+            float gpuP2GMilliseconds =
+                profileGpuStages
+                    ? CompleteGpuStageProfileSegment()
+                    : 0.0f;
 
             BindGridUpdate(compute);
-            compute.Dispatch(_kernelGridUpdate, Groups(gridNodeCount), 1, 1);
+            if (_useTiledMpmGridDispatchThisStep)
+            {
+                BindGridUpdateActiveTiles(compute);
+                DispatchMpmActiveTileKernel(compute, _kernelGridUpdateActiveTiles);
+            }
+            else
+            {
+                DispatchMpmGridKernel(compute, _kernelGridUpdate, solverContext);
+            }
 
-            int projectionInterval = Mathf.Max(
-                1,
-                solverContext.GpuMpmConfig.projectionSubstepInterval
-            );
+            float gpuGridUpdateMilliseconds =
+                profileGpuStages
+                    ? CompleteGpuStageProfileSegment()
+                    : 0.0f;
+            float gpuMpmCoreMilliseconds =
+                gpuMpmSetupMilliseconds +
+                gpuP2GMilliseconds +
+                gpuGridUpdateMilliseconds;
+
+            int projectionInterval =
+                ResolveAdaptiveProjectionInterval(solverContext);
             bool runProjection =
                 solverContext.GpuMpmConfig.enableProjectionGridInfrastructure &&
-                (
-                    _stepIndex == 0 ||
-                    (_stepIndex + 1) % projectionInterval == 0
+                ShouldRunProjectionThisStep(
+                    solverContext.GpuMpmConfig,
+                    projectionInterval
                 );
+
+            if (runProjection)
+                _lastProjectionCompletedStep = _stepIndex + 1;
 
             int projectionDispatches = runProjection
                 ? RunProjectionGridInfrastructure(
@@ -371,6 +705,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 )
                 : 0;
 
+            float gpuProjectionMilliseconds =
+                profileGpuStages
+                    ? CompleteGpuStageProfileSegment()
+                    : 0.0f;
+
             if (runProjection &&
                 solverContext.GpuMpmConfig.enableJacobiPressureSolve)
             {
@@ -379,17 +718,38 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             //BindG2P(compute, solverContext);
             //compute.Dispatch(_kernelG2P, Groups(particleCount), 1, 1);
-            BindG2PVelocityApic(compute, solverContext);
-            compute.Dispatch(_kernelG2PVelocityApic, Groups(particleCount), 1, 1);
+            int g2pKernel = _useTileOrderedParticlePipelineThisStep
+                ? _kernelG2PVelocityApicTileOrdered
+                : _kernelG2PVelocityApic;
+            BindG2PVelocityApic(compute, solverContext, g2pKernel);
+            DispatchParticleKernel(
+                compute,
+                g2pKernel,
+                particleCount,
+                _useTileOrderedParticlePipelineThisStep
+            );
 
             /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// /// ///
             /// 
-            if (runBucketCollision)
+            if (runPostBucketCollision)
             {
-                BindBucketCollision(compute, solverContext);
-                compute.Dispatch(_kernelBucketCollision, Groups(particleCount), 1, 1);
+                int postCollisionKernel =
+                    _useTileOrderedParticlePipelineThisStep
+                        ? _kernelBucketCollisionTileOrdered
+                        : _kernelBucketCollision;
+                BindBucketCollision(
+                    compute,
+                    solverContext,
+                    postCollisionKernel
+                );
+                DispatchParticleKernel(
+                    compute,
+                    postCollisionKernel,
+                    particleCount,
+                    _useTileOrderedParticlePipelineThisStep
+                );
             }
-            else
+            else if (!runBucketCollision)
             {
                 UnityEngine.Debug.LogWarning(
                     "MLS-MPM solver is running without real bucket collision. " +
@@ -400,16 +760,36 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             //compute.Dispatch(_kernelBucketCollision, Groups(particleCount), 1, 1);
             /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// ///
 
-            BindUpdateDeformation(compute, solverContext);
-            compute.Dispatch(_kernelUpdateDeformation, Groups(particleCount), 1, 1);
+            int deformationKernel =
+                _useTileOrderedParticlePipelineThisStep
+                    ? _kernelUpdateDeformationTileOrdered
+                    : _kernelUpdateDeformation;
+            BindUpdateDeformation(
+                compute,
+                solverContext,
+                deformationKernel
+            );
+            DispatchParticleKernel(
+                compute,
+                deformationKernel,
+                particleCount,
+                _useTileOrderedParticlePipelineThisStep
+            );
 
+            bool runAirborneAdvection =
+                ShouldRunAirborneAdvection(solverContext.GpuMpmConfig);
             int airborneDispatches = 0;
-            if (solverContext.GpuMpmConfig.enableAirborneParticleAdvection)
+            if (runAirborneAdvection)
             {
                 BindStepAirborneParticles(compute, solverContext);
                 compute.Dispatch(_kernelStepAirborneParticles, Groups(particleCount), 1, 1);
                 airborneDispatches = 1;
             }
+
+            float gpuParticlePostMilliseconds =
+                profileGpuStages
+                    ? CompleteGpuStageProfileSegment(restart: false)
+                    : 0.0f;
 
             solverContext.GpuBufferSet.SetUploadedParticleCount(particleCount);
 
@@ -430,24 +810,154 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             int baseDispatches = runGpuDiagnostics ? 5 : 4;
             // Optional ClearDiagnostics, ClearGrid, P2G, GridUpdate, G2P
 
-            int bucketDispatches = runBucketCollision ? 2 : 0;
+            int bucketDispatches =
+                (runBucketCollision ? 1 : 0) +
+                (runPostBucketCollision ? 1 : 0);
             int deformationDispatches = 1;
 
             _stats.gpuDispatchCount =
                 baseDispatches +
+                adaptiveDispatches +
+                tileDispatches +
                 projectionDispatches +
                 bucketDispatches +
                 deformationDispatches +
                 airborneDispatches;
+            _stats.gpuStageProfilingEnabled = profileGpuStages;
+            _stats.gpuProfileMpmSetupMilliseconds =
+                gpuMpmSetupMilliseconds;
+            _stats.gpuProfileP2GMilliseconds =
+                gpuP2GMilliseconds;
+            _stats.gpuProfileGridUpdateMilliseconds =
+                gpuGridUpdateMilliseconds;
+            _stats.gpuProfileMpmCoreMilliseconds =
+                gpuMpmCoreMilliseconds;
+            _stats.gpuProfileProjectionMilliseconds =
+                gpuProjectionMilliseconds;
+            _stats.gpuProfileParticlePostMilliseconds =
+                gpuParticlePostMilliseconds;
+            _stats.gpuProfileTotalMilliseconds =
+                gpuMpmCoreMilliseconds +
+                gpuProjectionMilliseconds +
+                gpuParticlePostMilliseconds;
             _stats.gpuGridResolutionX = solverContext.GpuMpmConfig.gridResolution.x;
             _stats.gpuGridResolutionY = solverContext.GpuMpmConfig.gridResolution.y;
             _stats.gpuGridResolutionZ = solverContext.GpuMpmConfig.gridResolution.z;
             _stats.gpuGridNodeCount = gridNodeCount;
             _stats.gpuCellSizeMeters = solverContext.GpuMpmConfig.cellSizeMeters;
+            _stats.gpuActiveMpmGridBoundsEnabled =
+                solverContext.GpuMpmConfig.enableActiveMpmGridBounds;
+            _stats.gpuActiveMpmGridBoundsUsed =
+                _useActiveMpmGridBoundsThisStep;
+            _stats.gpuActiveMpmGridNodeCount =
+                GetMpmGridDispatchNodeCount(gridNodeCount);
+            _stats.gpuActiveMpmGridNodeFraction =
+                gridNodeCount > 0
+                    ? (float)_stats.gpuActiveMpmGridNodeCount / gridNodeCount
+                    : 1.0f;
+            _stats.gpuActiveMpmGridMinX = _activeMpmGridMin.x;
+            _stats.gpuActiveMpmGridMinY = _activeMpmGridMin.y;
+            _stats.gpuActiveMpmGridMinZ = _activeMpmGridMin.z;
+            _stats.gpuActiveMpmGridSizeX = _activeMpmGridSize.x;
+            _stats.gpuActiveMpmGridSizeY = _activeMpmGridSize.y;
+            _stats.gpuActiveMpmGridSizeZ = _activeMpmGridSize.z;
+            _stats.gpuMpmTileOccupancyEnabled =
+                solverContext.GpuMpmConfig.enableMpmTileOccupancy ||
+                solverContext.GpuMpmConfig.enableTiledMpmGridDispatch ||
+                solverContext.GpuMpmConfig.enableTiledP2G ||
+                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline ||
+                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuMpmTileOccupancyUsed =
+                _useMpmTileOccupancyThisStep;
+            _stats.gpuTiledMpmGridDispatchEnabled =
+                solverContext.GpuMpmConfig.enableTiledMpmGridDispatch;
+            _stats.gpuTiledMpmGridDispatchUsed =
+                _useTiledMpmGridDispatchThisStep;
+            _stats.gpuMpmParticleTileListsEnabled =
+                solverContext.GpuMpmConfig.enableMpmParticleTileLists ||
+                solverContext.GpuMpmConfig.enableTiledP2G ||
+                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline ||
+                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuMpmParticleTileListsUsed =
+                _useMpmParticleTileListsThisStep;
+            _stats.gpuTiledP2GEnabled =
+                solverContext.GpuMpmConfig.enableTiledP2G ||
+                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline;
+            _stats.gpuTiledP2GUsed =
+                _useTiledP2GThisStep;
+            _stats.gpuTileOrderedParticlePipelineEnabled =
+                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline;
+            _stats.gpuTileOrderedParticlePipelineUsed =
+                _useTileOrderedParticlePipelineThisStep;
+            _stats.gpuHybridTiledP2GEnabled =
+                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuHybridTiledP2GUsed =
+                _useHybridTiledP2GThisStep;
+            _stats.gpuMpmTileSizeCells = _mpmTileSizeCells;
+            _stats.gpuMpmTileResolutionX = _mpmTileResolution.x;
+            _stats.gpuMpmTileResolutionY = _mpmTileResolution.y;
+            _stats.gpuMpmTileResolutionZ = _mpmTileResolution.z;
+            _stats.gpuMpmTileCount = _mpmTileCount;
+            _stats.gpuMpmTileParticleListCapacity =
+                _mpmTileParticleListCapacity;
+            _stats.gpuAdaptiveMultiRateEnabled =
+                solverContext.GpuMpmConfig.enableAdaptiveMultiRate;
+            _stats.gpuAdaptiveActivityReady =
+                _adaptiveActivityReady;
+            _stats.gpuAdaptiveActivitySampleInterval =
+                Mathf.Clamp(
+                    solverContext.GpuMpmConfig.adaptiveActivitySampleInterval,
+                    1,
+                    32
+                );
+            _stats.gpuAdaptiveActivityStepIndex =
+                _adaptiveActivityStepIndex;
+            _stats.gpuAdaptivePriorityParticleCount =
+                _adaptivePriorityParticleCount;
+            _stats.gpuAdaptiveCalmInteriorParticleCount =
+                _adaptiveCalmParticleCount;
+            _stats.gpuAdaptiveAirParticleCount =
+                _adaptiveAirParticleCount;
+            _stats.gpuAdaptivePriorityParticleFraction =
+                _adaptiveActiveParticleCount > 0
+                    ? (float)_adaptivePriorityParticleCount /
+                      _adaptiveActiveParticleCount
+                    : 0.0f;
+            _stats.gpuAdaptiveAverageParticleSpeed =
+                _adaptiveAverageSpeed;
+            _stats.gpuAdaptiveMaximumParticleSpeed =
+                _adaptiveMaximumSpeed;
+            _stats.gpuAdaptiveAverageJDeviation =
+                _adaptiveAverageJDeviation;
+            _stats.gpuCalmInteriorDeformationInterval =
+                Mathf.Clamp(
+                    solverContext.GpuMpmConfig
+                        .calmInteriorDeformationInterval,
+                    1,
+                    4
+                );
+            _stats.gpuCalmInteriorDeformationUpdatedThisStep =
+                Mathf.Max(0, _stepIndex - 1) %
+                _stats.gpuCalmInteriorDeformationInterval == 0;
 
             _stats.projectionGridEnabled = solverContext.GpuMpmConfig.enableProjectionGridInfrastructure;
             _stats.projectionRanThisSubstep = runProjection;
             _stats.projectionSubstepInterval = projectionInterval;
+            _stats.projectionAdaptiveCadenceEnabled =
+                solverContext.GpuMpmConfig.enableAdaptiveMultiRate &&
+                solverContext.GpuMpmConfig.enableAdaptiveProjectionCadence;
+            _stats.projectionAdaptiveCalmMode =
+                _adaptiveProjectionCalmMode;
+            _stats.projectionEffectiveSubstepInterval =
+                _effectiveProjectionInterval;
+            _stats.projectionCalmCounter =
+                _adaptiveProjectionCalmCounter;
+            _stats.projectionAdaptiveCalmSubstepCount =
+                _adaptiveProjectionCalmSubstepCount;
+            _stats.projectionAdaptiveCalmEntryCount =
+                _adaptiveProjectionCalmEntryCount;
+            _stats.projectionAdaptiveCalmExitCount =
+                _adaptiveProjectionCalmExitCount;
             _stats.pressureWarmStartEnabled =
                 solverContext.GpuMpmConfig.enablePressureWarmStart;
             _stats.pressureWarmStartFactor =
@@ -461,11 +971,35 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _projectionDivergenceBuffer != null &&
                 _projectionDivergenceAfterBuffer != null &&
                 _projectionFaceVelocityBuffer != null &&
+                _projectionFluidCellIndicesBuffer != null &&
+                _projectionFluidCellMetaBuffer != null &&
+                _projectionFluidCellDispatchArgsBuffer != null &&
                 _diagnosticsBuffer != null;
 
             _stats.projectionGridNodeCount = gridNodeCount;
             _stats.projectionDispatchCount = projectionDispatches;
+            _stats.projectionSparsePressureDispatchEnabled =
+                solverContext.GpuMpmConfig.enableSparseProjectionPressureDispatch;
+            _stats.projectionSparsePressureDispatchUsed =
+                runProjection &&
+                _useSparseProjectionPressureDispatchThisStep;
             _stats.projectionMinFluidCellMass = solverContext.GpuMpmConfig.minFluidCellMass;
+            _stats.projectionActiveBoundsEnabled =
+                solverContext.GpuMpmConfig.enableActiveProjectionBounds;
+            _stats.projectionActiveBoundsUsed =
+                _useActiveProjectionBoundsThisStep;
+            _stats.projectionActiveNodeCount =
+                GetProjectionDispatchNodeCount(gridNodeCount);
+            _stats.projectionActiveNodeFraction =
+                gridNodeCount > 0
+                    ? (float)_stats.projectionActiveNodeCount / gridNodeCount
+                    : 1.0f;
+            _stats.projectionActiveMinX = _activeProjectionMin.x;
+            _stats.projectionActiveMinY = _activeProjectionMin.y;
+            _stats.projectionActiveMinZ = _activeProjectionMin.z;
+            _stats.projectionActiveSizeX = _activeProjectionSize.x;
+            _stats.projectionActiveSizeY = _activeProjectionSize.y;
+            _stats.projectionActiveSizeZ = _activeProjectionSize.z;
 
             _stats.projectionDivergenceEnabled = solverContext.GpuMpmConfig.enableProjectionDivergenceComputation;
 
@@ -477,11 +1011,19 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _stats.pressureSolveEnabled = solverContext.GpuMpmConfig.enableJacobiPressureSolve;
 
+            _stats.pressureSolveMode = (int)solverContext.GpuMpmConfig.pressureSolveMode;
+
             _stats.pressureJacobiIterations = solverContext.GpuMpmConfig.pressureJacobiIterations;
+
+            _stats.pressureRedBlackSorIterations =
+                solverContext.GpuMpmConfig.pressureRedBlackSorIterations;
 
             _stats.pressureRhsScale = solverContext.GpuMpmConfig.pressureRhsScale;
 
             _stats.pressureJacobiRelaxation = solverContext.GpuMpmConfig.pressureJacobiRelaxation;
+
+            _stats.pressureRedBlackSorOmega =
+                solverContext.GpuMpmConfig.pressureRedBlackSorOmega;
 
             _stats.maxProjectionPressure = solverContext.GpuMpmConfig.maxProjectionPressure;
 
@@ -519,6 +1061,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _uploadedBucketHoleCount > 0;
             _stats.gpuAirborneAdvectionEnabled =
                 solverContext.GpuMpmConfig.enableAirborneParticleAdvection;
+            _stats.gpuAirborneDispatchRan = runAirborneAdvection;
+            _stats.gpuPostBucketCollisionRan = runPostBucketCollision;
         }
 
         private bool ValidateContext(FluidSolverContext context)
@@ -556,24 +1100,45 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _kernelClearGrid = compute.FindKernel("KClearGrid");
             _kernelClearMpmDiagnostics = compute.FindKernel("KClearMpmDiagnostics");
+            _kernelClearAdaptiveActivity = compute.FindKernel("KClearAdaptiveActivity");
+            _kernelClassifyAdaptiveActivity = compute.FindKernel("KClassifyAdaptiveActivity");
             _kernelP2G = compute.FindKernel("KP2G");
             _kernelGridUpdate = compute.FindKernel("KGridUpdate");
+            _kernelClearMpmTileData = compute.FindKernel("KClearMpmTileData");
+            _kernelClearMpmTileOrderedData = compute.FindKernel("KClearMpmTileOrderedData");
+            _kernelMarkMpmActiveTiles = compute.FindKernel("KMarkMpmActiveTiles");
+            _kernelBuildMpmTileParticleOffsets = compute.FindKernel("KBuildMpmTileParticleOffsets");
+            _kernelBuildMpmTileOwnerOffsets = compute.FindKernel("KBuildMpmTileOwnerOffsets");
+            _kernelFillMpmTileParticleLists = compute.FindKernel("KFillMpmTileParticleLists");
+            _kernelClearGridActiveTiles = compute.FindKernel("KClearGridActiveTiles");
+            _kernelGridUpdateActiveTiles = compute.FindKernel("KGridUpdateActiveTiles");
+            _kernelP2GTileOrdered = compute.FindKernel("KP2GTileOrdered");
+            _kernelP2GHybridTiled = compute.FindKernel("KP2GHybridTiled");
             _kernelG2PVelocityApic = compute.FindKernel("KG2PVelocityApic");
+            _kernelG2PVelocityApicTileOrdered = compute.FindKernel("KG2PVelocityApicTileOrdered");
 
             /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// 
             _kernelBucketCollision = compute.FindKernel("KBucketCollision");
+            _kernelBucketCollisionTileOrdered = compute.FindKernel("KBucketCollisionTileOrdered");
             /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// 
             _kernelStepAirborneParticles = compute.FindKernel("KStepAirborneParticles");
             
             _kernelUpdateDeformation = compute.FindKernel("KUpdateDeformation");
+            _kernelUpdateDeformationTileOrdered = compute.FindKernel("KUpdateDeformationTileOrdered");
 
             _kernelClearProjectionGrid = compute.FindKernel("KClearProjectionGrid");
             _kernelMarkBucketProjectionSolids = compute.FindKernel("KMarkBucketProjectionSolids");
             _kernelMarkProjectionFluidCells = compute.FindKernel("KMarkProjectionFluidCells");
+            _kernelMarkProjectionFluidCellsTileOrdered = compute.FindKernel("KMarkProjectionFluidCellsTileOrdered");
             _kernelFinalizeProjectionGrid = compute.FindKernel("KFinalizeProjectionGrid");
+            _kernelClearProjectionFluidCellList = compute.FindKernel("KClearProjectionFluidCellList");
+            _kernelBuildProjectionFluidCellDispatchArgs = compute.FindKernel("KBuildProjectionFluidCellDispatchArgs");
             _kernelBuildProjectionFaceVelocities = compute.FindKernel("KBuildProjectionFaceVelocities");
             _kernelComputeProjectionDivergence = compute.FindKernel("KComputeProjectionDivergence");
             _kernelJacobiProjectionPressure = compute.FindKernel("KJacobiProjectionPressure");
+            _kernelJacobiProjectionPressureSparse = compute.FindKernel("KJacobiProjectionPressureSparse");
+            _kernelRedBlackSorProjectionPressure = compute.FindKernel("KRedBlackSorProjectionPressure");
+            _kernelRedBlackSorProjectionPressureSparse = compute.FindKernel("KRedBlackSorProjectionPressureSparse");
             _kernelSubtractProjectionPressureGradient = compute.FindKernel("KSubtractProjectionPressureGradient");
             _kernelApplyProjectionFaceVelocitiesToGrid = compute.FindKernel("KApplyProjectionFaceVelocitiesToGrid");
             _kernelCollectProjectionDiagnostics = compute.FindKernel("KCollectProjectionDiagnostics");
@@ -585,10 +1150,24 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             bool baseKernelsValid =
                 _kernelClearGrid >= 0 &&
                 _kernelClearMpmDiagnostics >= 0 &&
+                _kernelClearAdaptiveActivity >= 0 &&
+                _kernelClassifyAdaptiveActivity >= 0 &&
                 _kernelP2G >= 0 &&
                 _kernelGridUpdate >= 0 &&
+                _kernelClearMpmTileData >= 0 &&
+                _kernelClearMpmTileOrderedData >= 0 &&
+                _kernelMarkMpmActiveTiles >= 0 &&
+                _kernelBuildMpmTileParticleOffsets >= 0 &&
+                _kernelBuildMpmTileOwnerOffsets >= 0 &&
+                _kernelFillMpmTileParticleLists >= 0 &&
+                _kernelClearGridActiveTiles >= 0 &&
+                _kernelGridUpdateActiveTiles >= 0 &&
+                _kernelP2GTileOrdered >= 0 &&
+                _kernelP2GHybridTiled >= 0 &&
                 _kernelG2PVelocityApic >= 0 &&
+                _kernelG2PVelocityApicTileOrdered >= 0 &&
                 _kernelUpdateDeformation >= 0 &&
+                _kernelUpdateDeformationTileOrdered >= 0 &&
                 _kernelStepAirborneParticles >= 0;
 
             if (!baseKernelsValid)
@@ -603,11 +1182,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     _kernelClearProjectionGrid >= 0 &&
                     _kernelMarkBucketProjectionSolids >= 0 &&
                     _kernelMarkProjectionFluidCells >= 0 &&
+                    _kernelMarkProjectionFluidCellsTileOrdered >= 0 &&
                     _kernelFinalizeProjectionGrid >= 0 &&
+                    _kernelClearProjectionFluidCellList >= 0 &&
+                    _kernelBuildProjectionFluidCellDispatchArgs >= 0 &&
                     _kernelBuildProjectionFaceVelocities >= 0 &&
                     _kernelApplyMovingBucketProjectionBoundaryVelocity >= 0 &&
                     _kernelComputeProjectionDivergence >= 0 &&
                     _kernelJacobiProjectionPressure >= 0 &&
+                    _kernelJacobiProjectionPressureSparse >= 0 &&
+                    _kernelRedBlackSorProjectionPressure >= 0 &&
+                    _kernelRedBlackSorProjectionPressureSparse >= 0 &&
                     _kernelSubtractProjectionPressureGradient >= 0 &&
                     _kernelApplyProjectionFaceVelocitiesToGrid >= 0 &&
                     _kernelCollectProjectionDiagnostics >= 0;
@@ -620,7 +1205,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.enableGpuBucketCollision &&
                 context.GpuMpmConfig.useRealBucketCollision;
 
-            if (bucketRequested && _kernelBucketCollision < 0)
+            if (bucketRequested &&
+                (_kernelBucketCollision < 0 ||
+                 _kernelBucketCollisionTileOrdered < 0))
                 return false;
 
             return true;
@@ -690,13 +1277,178 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 sizeof(float) * 4
             );
 
+            _projectionFluidCellIndicesBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                nodeCount,
+                sizeof(uint)
+            );
+
+            _projectionFluidCellMetaBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint)
+            );
+
+            _projectionFluidCellDispatchArgsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured |
+                GraphicsBuffer.Target.IndirectArguments,
+                3,
+                sizeof(uint)
+            );
+
             _diagnosticsBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 DiagnosticsValueCount,
                 sizeof(uint)
             );
 
+            UpdateMpmTileLayout(context.GpuMpmConfig);
+
+            _mpmTileFlagsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmActiveTileIndicesBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileDispatchArgsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+                3,
+                sizeof(uint)
+            );
+
+            _mpmTileParticleCountsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileParticleWriteCountsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileParticleOffsetsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            int particleCount = Mathf.Max(
+                1,
+                context.GpuBufferSet != null
+                    ? context.GpuBufferSet.UploadedParticleCount
+                    : 1
+            );
+
+            _adaptiveParticlePriorityBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                particleCount,
+                sizeof(uint)
+            );
+
+            _adaptiveActivitySummaryBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                7,
+                sizeof(uint)
+            );
+
+            long particleListCapacityLong =
+                (long)particleCount * MaxMpmSupportTilesPerParticle;
+            _mpmTileParticleListCapacity =
+                Mathf.Max(
+                    1,
+                    (int)System.Math.Min(
+                        particleListCapacityLong,
+                        int.MaxValue
+                    )
+                );
+
+            _mpmTileParticleIndicesBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileParticleListCapacity,
+                sizeof(uint)
+            );
+
+            _mpmTileParticleMetaBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                4,
+                sizeof(uint)
+            );
+
+            _mpmTileOwnerParticleCountsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileOwnerParticleWriteCountsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileOwnerParticleOffsetsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                _mpmTileCount,
+                sizeof(uint)
+            );
+
+            _mpmTileOrderedParticleIndicesBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                particleCount,
+                sizeof(uint)
+            );
+
+            _mpmTileOrderedParticleDispatchArgsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured |
+                GraphicsBuffer.Target.IndirectArguments,
+                3,
+                sizeof(uint)
+            );
+
+            _mpmTileOrderedParticleMetaBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                4,
+                sizeof(uint)
+            );
+
             AllocateBucketHoleBuffers(context);
+        }
+
+        private void UpdateMpmTileLayout(GpuMpmSolverConfig config)
+        {
+            _mpmTileSizeCells = Mathf.Clamp(config.mpmTileSizeCells, 4, 8);
+            if (_mpmTileSizeCells <= 4)
+            {
+                _mpmTileSizeCells = 4;
+                _mpmTileSizeShift = 2;
+            }
+            else
+            {
+                _mpmTileSizeCells = 8;
+                _mpmTileSizeShift = 3;
+            }
+
+            Vector3Int resolution = config.gridResolution;
+            _mpmTileResolution = new Vector3Int(
+                Mathf.Max(1, Mathf.CeilToInt((float)resolution.x / _mpmTileSizeCells)),
+                Mathf.Max(1, Mathf.CeilToInt((float)resolution.y / _mpmTileSizeCells)),
+                Mathf.Max(1, Mathf.CeilToInt((float)resolution.z / _mpmTileSizeCells))
+            );
+
+            _mpmTileCount = Mathf.Max(
+                1,
+                _mpmTileResolution.x *
+                _mpmTileResolution.y *
+                _mpmTileResolution.z
+            );
         }
 
         private void AllocateBucketHoleBuffers(FluidSolverContext context)
@@ -758,6 +1510,114 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetInts("_GridResolution", res.x, res.y, res.z);
             compute.SetVector("_GridOrigin", _runtimeGridOriginWorld);
+
+            compute.SetInt(
+                "_EnableActiveMpmGridBounds",
+                _useActiveMpmGridBoundsThisStep ? 1 : 0
+            );
+
+            compute.SetInts(
+                "_ActiveMpmGridMin",
+                _activeMpmGridMin.x,
+                _activeMpmGridMin.y,
+                _activeMpmGridMin.z
+            );
+
+            compute.SetInts(
+                "_ActiveMpmGridSize",
+                _activeMpmGridSize.x,
+                _activeMpmGridSize.y,
+                _activeMpmGridSize.z
+            );
+
+            compute.SetInt(
+                "_ActiveMpmGridNodeCount",
+                GetMpmGridDispatchNodeCount(context.GpuMpmConfig.GridNodeCount)
+            );
+
+            compute.SetInt(
+                "_EnableMpmTileOccupancy",
+                _useMpmTileOccupancyThisStep ? 1 : 0
+            );
+
+            compute.SetInt(
+                "_EnableTiledMpmGridDispatch",
+                _useTiledMpmGridDispatchThisStep ? 1 : 0
+            );
+
+            compute.SetInt(
+                "_EnableMpmParticleTileLists",
+                _useMpmParticleTileListsThisStep ? 1 : 0
+            );
+
+            compute.SetInt(
+                "_EnableMpmSupportParticleTileLists",
+                _buildMpmSupportParticleTileListsThisStep ? 1 : 0
+            );
+
+            compute.SetInt(
+                "_EnableTiledP2G",
+                (_useTiledP2GThisStep ||
+                 _useHybridTiledP2GThisStep) ? 1 : 0
+            );
+
+            compute.SetInt(
+                "_EnableSparseProjectionPressureDispatch",
+                _useSparseProjectionPressureDispatchThisStep ? 1 : 0
+            );
+
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            int calmDeformationInterval = Mathf.Clamp(
+                config.calmInteriorDeformationInterval,
+                1,
+                4
+            );
+            bool calmDeformationUpdate =
+                _stepIndex % calmDeformationInterval == 0;
+
+            compute.SetInt(
+                "_EnableAdaptiveMultiRate",
+                config.enableAdaptiveMultiRate ? 1 : 0
+            );
+            compute.SetInt(
+                "_AdaptiveActivitySampleStep",
+                _stepIndex
+            );
+            compute.SetInt(
+                "_CalmInteriorDeformationInterval",
+                calmDeformationInterval
+            );
+            compute.SetInt(
+                "_CalmInteriorDeformationUpdateThisStep",
+                calmDeformationUpdate ? 1 : 0
+            );
+            compute.SetFloat(
+                "_AdaptivePriorityParticleSpeed",
+                Mathf.Max(0.0f, config.adaptivePriorityParticleSpeed)
+            );
+            compute.SetFloat(
+                "_AdaptivePriorityBoundaryBand",
+                Mathf.Max(0.0f, config.adaptivePriorityBoundaryBandMeters)
+            );
+            compute.SetFloat(
+                "_AdaptivePriorityTopFraction",
+                Mathf.Clamp01(config.adaptivePriorityTopFraction)
+            );
+
+            compute.SetInts(
+                "_MpmTileResolution",
+                _mpmTileResolution.x,
+                _mpmTileResolution.y,
+                _mpmTileResolution.z
+            );
+
+            compute.SetInt("_MpmTileCount", _mpmTileCount);
+            compute.SetInt("_MpmTileSizeCells", _mpmTileSizeCells);
+            compute.SetInt("_MpmTileSizeShift", _mpmTileSizeShift);
+            compute.SetInt(
+                "_MpmTileParticleListCapacity",
+                _mpmTileParticleListCapacity
+            );
 
             float cellSize = context.GpuMpmConfig.cellSizeMeters;
 
@@ -833,6 +1693,27 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetFloat("_MaxYieldViscosityContribution", context.GpuMpmConfig.maxYieldViscosityContribution);
             compute.SetFloat("_MaxEffectiveViscosity", context.GpuMpmConfig.maxEffectiveViscosity);
             compute.SetFloat("_RheologyStrength", context.GpuMpmConfig.rheologyStrength);
+
+            compute.SetInt(
+                "_EnableFreeSurfacePolish",
+                context.GpuMpmConfig.enableFreeSurfacePolish ? 1 : 0
+            );
+            compute.SetFloat(
+                "_FreeSurfaceGradientScale",
+                context.GpuMpmConfig.freeSurfaceGradientScale
+            );
+            compute.SetFloat(
+                "_FreeSurfaceNormalDampingPerSecond",
+                context.GpuMpmConfig.freeSurfaceNormalDampingPerSecond
+            );
+            compute.SetFloat(
+                "_FreeSurfaceCohesionAcceleration",
+                context.GpuMpmConfig.freeSurfaceCohesionAcceleration
+            );
+            compute.SetFloat(
+                "_MaxFreeSurfaceVelocityCorrection",
+                context.GpuMpmConfig.maxFreeSurfaceVelocityCorrection
+            );
             ////////// End G7 Paint Rheology //////////
 
             ////////// G8.A  bucket collision //////////
@@ -884,12 +1765,343 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetBuffer(_kernelClearGrid, "_GridVelocityMass", _gridVelocityMassBuffer);
         }
 
+        private void BindClearGridActiveTiles(ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelClearGridActiveTiles,
+                "_GridAccumInt",
+                _gridAccumIntBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearGridActiveTiles,
+                "_GridVelocityMass",
+                _gridVelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearGridActiveTiles,
+                "_MpmActiveTileIndices",
+                _mpmActiveTileIndicesBuffer
+            );
+        }
+
         private void BindClearMpmDiagnostics(ComputeShader compute)
         {
             compute.SetBuffer(
                 _kernelClearMpmDiagnostics,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
+            );
+        }
+
+        private int RunMpmTileOccupancy(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int particleCount)
+        {
+            if (!_useMpmTileOccupancyThisStep)
+                return 0;
+
+            BindClearMpmTileData(compute);
+            compute.Dispatch(
+                _kernelClearMpmTileData,
+                Groups64(Mathf.Max(_mpmTileCount, 3)),
+                1,
+                1
+            );
+
+            int dispatches = 1;
+
+            if (_useMpmParticleTileListsThisStep)
+            {
+                BindClearMpmTileOrderedData(compute);
+                compute.Dispatch(
+                    _kernelClearMpmTileOrderedData,
+                    Groups64(Mathf.Max(_mpmTileCount, 4)),
+                    1,
+                    1
+                );
+                dispatches++;
+            }
+
+            BindMarkMpmActiveTiles(compute, context);
+            compute.Dispatch(
+                _kernelMarkMpmActiveTiles,
+                Groups(particleCount),
+                1,
+                1
+            );
+            dispatches++;
+
+            if (!_useMpmParticleTileListsThisStep)
+                return dispatches;
+
+            if (_buildMpmSupportParticleTileListsThisStep)
+            {
+                BindBuildMpmTileParticleOffsets(compute);
+                compute.Dispatch(
+                    _kernelBuildMpmTileParticleOffsets,
+                    1,
+                    1,
+                    1
+                );
+                dispatches++;
+            }
+
+            BindBuildMpmTileOwnerOffsets(compute);
+            compute.Dispatch(_kernelBuildMpmTileOwnerOffsets, 1, 1, 1);
+            dispatches++;
+
+            BindFillMpmTileParticleLists(compute, context);
+            compute.Dispatch(
+                _kernelFillMpmTileParticleLists,
+                Groups(particleCount),
+                1,
+                1
+            );
+            dispatches++;
+
+            return dispatches;
+        }
+
+        private void BindClearMpmTileData(ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileFlags",
+                _mpmTileFlagsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmActiveTileIndices",
+                _mpmActiveTileIndicesBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileDispatchArgs",
+                _mpmTileDispatchArgsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileParticleCounts",
+                _mpmTileParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileParticleWriteCounts",
+                _mpmTileParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileParticleOffsets",
+                _mpmTileParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileData,
+                "_MpmTileParticleMeta",
+                _mpmTileParticleMetaBuffer
+            );
+        }
+
+        private void BindClearMpmTileOrderedData(ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelClearMpmTileOrderedData,
+                "_MpmTileOwnerParticleCounts",
+                _mpmTileOwnerParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileOrderedData,
+                "_MpmTileOwnerParticleWriteCounts",
+                _mpmTileOwnerParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileOrderedData,
+                "_MpmTileOwnerParticleOffsets",
+                _mpmTileOwnerParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileOrderedData,
+                "_MpmTileOrderedParticleDispatchArgs",
+                _mpmTileOrderedParticleDispatchArgsBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearMpmTileOrderedData,
+                "_MpmTileOrderedParticleMeta",
+                _mpmTileOrderedParticleMetaBuffer
+            );
+        }
+
+        private void BindMarkMpmActiveTiles(
+            ComputeShader compute,
+            FluidSolverContext context)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_ParticlePositionRadiusRead",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_ParticleVelocityMassRead",
+                buffers.VelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_ParticleStateAgeIdRead",
+                buffers.StateAgeIdBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmTileFlags",
+                _mpmTileFlagsBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmActiveTileIndices",
+                _mpmActiveTileIndicesBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmTileDispatchArgs",
+                _mpmTileDispatchArgsBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmTileParticleCounts",
+                _mpmTileParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelMarkMpmActiveTiles,
+                "_MpmTileOwnerParticleCounts",
+                _mpmTileOwnerParticleCountsBuffer
+            );
+        }
+
+        private void BindBuildMpmTileParticleOffsets(ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelBuildMpmTileParticleOffsets,
+                "_MpmTileParticleCounts",
+                _mpmTileParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileParticleOffsets,
+                "_MpmTileParticleWriteCounts",
+                _mpmTileParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileParticleOffsets,
+                "_MpmTileParticleOffsets",
+                _mpmTileParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileParticleOffsets,
+                "_MpmTileParticleMeta",
+                _mpmTileParticleMetaBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileParticleOffsets,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+        }
+
+        private void BindBuildMpmTileOwnerOffsets(ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelBuildMpmTileOwnerOffsets,
+                "_MpmTileOwnerParticleCounts",
+                _mpmTileOwnerParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileOwnerOffsets,
+                "_MpmTileOwnerParticleWriteCounts",
+                _mpmTileOwnerParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileOwnerOffsets,
+                "_MpmTileOwnerParticleOffsets",
+                _mpmTileOwnerParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileOwnerOffsets,
+                "_MpmTileOrderedParticleDispatchArgs",
+                _mpmTileOrderedParticleDispatchArgsBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildMpmTileOwnerOffsets,
+                "_MpmTileOrderedParticleMeta",
+                _mpmTileOrderedParticleMetaBuffer
+            );
+        }
+
+        private void BindFillMpmTileParticleLists(
+            ComputeShader compute,
+            FluidSolverContext context)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_ParticlePositionRadiusRead",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_ParticleStateAgeIdRead",
+                buffers.StateAgeIdBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileParticleCounts",
+                _mpmTileParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileParticleWriteCounts",
+                _mpmTileParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileParticleOffsets",
+                _mpmTileParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileParticleIndices",
+                _mpmTileParticleIndicesBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileOwnerParticleWriteCounts",
+                _mpmTileOwnerParticleWriteCountsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileOwnerParticleOffsets",
+                _mpmTileOwnerParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                _kernelFillMpmTileParticleLists,
+                "_MpmTileOrderedParticleIndices",
+                _mpmTileOrderedParticleIndicesBuffer
             );
         }
 
@@ -918,6 +2130,143 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetBuffer(_kernelP2G, "_MpmDiagnostics", _diagnosticsBuffer);
         }
 
+        private void BindP2GTileOrdered(
+            ComputeShader compute,
+            FluidSolverContext context)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticlePositionRadius",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleVelocityMass",
+                buffers.VelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleStateAgeIdRead",
+                buffers.StateAgeIdBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleAffineC0",
+                buffers.AffineC0Buffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleAffineC1",
+                buffers.AffineC1Buffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleAffineC2",
+                buffers.AffineC2Buffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_ParticleVolumeJRead",
+                buffers.VolumeJBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_GridAccumInt",
+                _gridAccumIntBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_MpmTileOrderedParticleIndicesRead",
+                _mpmTileOrderedParticleIndicesBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_MpmTileOrderedParticleMetaRead",
+                _mpmTileOrderedParticleMetaBuffer
+            );
+            compute.SetBuffer(
+                _kernelP2GTileOrdered,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+        }
+
+        private void BindP2GHybridTiled(
+            ComputeShader compute,
+            FluidSolverContext context)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+            int kernel = _kernelP2GHybridTiled;
+
+            compute.SetBuffer(
+                kernel,
+                "_ParticlePositionRadiusRead",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleVelocityMassRead",
+                buffers.VelocityMassBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleStateAgeIdRead",
+                buffers.StateAgeIdBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleAffineC0Read",
+                buffers.AffineC0Buffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleAffineC1Read",
+                buffers.AffineC1Buffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleAffineC2Read",
+                buffers.AffineC2Buffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ParticleVolumeJRead",
+                buffers.VolumeJBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_GridAccumInt",
+                _gridAccumIntBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmActiveTileIndicesRead",
+                _mpmActiveTileIndicesBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmTileOwnerParticleCountsRead",
+                _mpmTileOwnerParticleCountsBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmTileOwnerParticleOffsetsRead",
+                _mpmTileOwnerParticleOffsetsBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmTileOrderedParticleIndicesRead",
+                _mpmTileOrderedParticleIndicesBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+        }
+
         private void BindGridUpdate(ComputeShader compute)
         {
             compute.SetBuffer(_kernelGridUpdate, "_GridAccumInt", _gridAccumIntBuffer);
@@ -925,45 +2274,102 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetBuffer(_kernelGridUpdate, "_MpmDiagnostics", _diagnosticsBuffer);
         }
 
-        private void BindG2PVelocityApic(ComputeShader compute, FluidSolverContext context)
+        private void BindGridUpdateActiveTiles(ComputeShader compute)
         {
-            GpuFluidBufferSet buffers = context.GpuBufferSet;
-
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticlePositionRadius", buffers.PositionRadiusBuffer);
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticleVelocityMass", buffers.VelocityMassBuffer);
-
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticleStateAgeIdRead", buffers.StateAgeIdBuffer);
-            compute.SetBuffer(_kernelG2PVelocityApic, "_GridVelocityMassRead", _gridVelocityMassBuffer);
-
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticleAffineC0", buffers.AffineC0Buffer);
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticleAffineC1", buffers.AffineC1Buffer);
-            compute.SetBuffer(_kernelG2PVelocityApic, "_ParticleAffineC2", buffers.AffineC2Buffer);
             compute.SetBuffer(
-                _kernelG2PVelocityApic,
+                _kernelGridUpdateActiveTiles,
+                "_GridAccumInt",
+                _gridAccumIntBuffer
+            );
+            compute.SetBuffer(
+                _kernelGridUpdateActiveTiles,
+                "_GridVelocityMass",
+                _gridVelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelGridUpdateActiveTiles,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
             );
+            compute.SetBuffer(
+                _kernelGridUpdateActiveTiles,
+                "_MpmActiveTileIndices",
+                _mpmActiveTileIndicesBuffer
+            );
         }
 
-        private void BindUpdateDeformation(ComputeShader compute, FluidSolverContext context)
+        private void BindG2PVelocityApic(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int kernel)
         {
             GpuFluidBufferSet buffers = context.GpuBufferSet;
 
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleStateAgeIdRead", buffers.StateAgeIdBuffer);
+            compute.SetBuffer(kernel, "_ParticlePositionRadius", buffers.PositionRadiusBuffer);
+            compute.SetBuffer(kernel, "_ParticleVelocityMass", buffers.VelocityMassBuffer);
 
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleAffineC0Read", buffers.AffineC0Buffer);
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleAffineC1Read", buffers.AffineC1Buffer);
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleAffineC2Read", buffers.AffineC2Buffer);
+            compute.SetBuffer(kernel, "_ParticleStateAgeIdRead", buffers.StateAgeIdBuffer);
+            compute.SetBuffer(kernel, "_GridVelocityMassRead", _gridVelocityMassBuffer);
 
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleVolumeJ", buffers.VolumeJBuffer);
-
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleF0", buffers.DeformationF0Buffer);
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleF1", buffers.DeformationF1Buffer);
-            compute.SetBuffer(_kernelUpdateDeformation, "_ParticleF2", buffers.DeformationF2Buffer);
+            compute.SetBuffer(kernel, "_ParticleAffineC0", buffers.AffineC0Buffer);
+            compute.SetBuffer(kernel, "_ParticleAffineC1", buffers.AffineC1Buffer);
+            compute.SetBuffer(kernel, "_ParticleAffineC2", buffers.AffineC2Buffer);
             compute.SetBuffer(
-                _kernelUpdateDeformation,
+                kernel,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
+            );
+            BindTileOrderedParticleLookup(compute, kernel);
+        }
+
+        private void BindUpdateDeformation(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int kernel)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+
+            compute.SetBuffer(kernel, "_ParticleStateAgeIdRead", buffers.StateAgeIdBuffer);
+
+            compute.SetBuffer(kernel, "_ParticleAffineC0Read", buffers.AffineC0Buffer);
+            compute.SetBuffer(kernel, "_ParticleAffineC1Read", buffers.AffineC1Buffer);
+            compute.SetBuffer(kernel, "_ParticleAffineC2Read", buffers.AffineC2Buffer);
+
+            compute.SetBuffer(kernel, "_ParticleVolumeJ", buffers.VolumeJBuffer);
+
+            compute.SetBuffer(kernel, "_ParticleF0", buffers.DeformationF0Buffer);
+            compute.SetBuffer(kernel, "_ParticleF1", buffers.DeformationF1Buffer);
+            compute.SetBuffer(kernel, "_ParticleF2", buffers.DeformationF2Buffer);
+            compute.SetBuffer(
+                kernel,
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_AdaptiveParticlePriorityRead",
+                _adaptiveParticlePriorityBuffer
+            );
+
+            BindTileOrderedParticleLookup(compute, kernel);
+        }
+
+        private void BindTileOrderedParticleLookup(
+            ComputeShader compute,
+            int kernel)
+        {
+            if (!_useTileOrderedParticlePipelineThisStep)
+                return;
+
+            compute.SetBuffer(
+                kernel,
+                "_MpmTileOrderedParticleIndicesRead",
+                _mpmTileOrderedParticleIndicesBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_MpmTileOrderedParticleMetaRead",
+                _mpmTileOrderedParticleMetaBuffer
             );
         }
 
@@ -999,6 +2405,490 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int Groups(int count)
         {
             return Mathf.CeilToInt(count / 256.0f);
+        }
+
+        private int Groups64(int count)
+        {
+            return Mathf.CeilToInt(count / 64.0f);
+        }
+
+        private int RunAdaptiveActivitySampling(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int particleCount)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            if (!config.enableAdaptiveMultiRate ||
+                _adaptiveParticlePriorityBuffer == null ||
+                _adaptiveActivitySummaryBuffer == null)
+            {
+                return 0;
+            }
+
+            int interval = Mathf.Clamp(
+                config.adaptiveActivitySampleInterval,
+                1,
+                32
+            );
+
+            if (_stepIndex % interval != 0)
+                return 0;
+
+            compute.SetBuffer(
+                _kernelClearAdaptiveActivity,
+                "_AdaptiveActivitySummary",
+                _adaptiveActivitySummaryBuffer
+            );
+            compute.Dispatch(_kernelClearAdaptiveActivity, 1, 1, 1);
+
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_ParticlePositionRadiusRead",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_ParticleVelocityMassRead",
+                buffers.VelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_ParticleStateAgeIdRead",
+                buffers.StateAgeIdBuffer
+            );
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_ParticleVolumeJRead",
+                buffers.VolumeJBuffer
+            );
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_AdaptiveParticlePriority",
+                _adaptiveParticlePriorityBuffer
+            );
+            compute.SetBuffer(
+                _kernelClassifyAdaptiveActivity,
+                "_AdaptiveActivitySummary",
+                _adaptiveActivitySummaryBuffer
+            );
+            compute.Dispatch(
+                _kernelClassifyAdaptiveActivity,
+                Groups(particleCount),
+                1,
+                1
+            );
+
+            if (!_adaptiveActivityReadbackPending)
+            {
+                _adaptiveActivityReadbackPending = true;
+                _adaptiveActivityRequestedStepIndex = _stepIndex + 1;
+                AsyncGPUReadback.Request(
+                    _adaptiveActivitySummaryBuffer,
+                    OnAdaptiveActivityReadback
+                );
+            }
+
+            return 2;
+        }
+
+        private void OnAdaptiveActivityReadback(
+            AsyncGPUReadbackRequest request)
+        {
+            _adaptiveActivityReadbackPending = false;
+
+            if (request.hasError || !IsInitialized)
+            {
+                _adaptiveActivityReady = false;
+                return;
+            }
+
+            var values = request.GetData<uint>();
+            if (values.Length < 7)
+            {
+                _adaptiveActivityReady = false;
+                return;
+            }
+
+            _adaptiveActiveParticleCount = (int)values[0];
+            _adaptivePriorityParticleCount = (int)values[1];
+            _adaptiveCalmParticleCount = (int)values[2];
+            _adaptiveAirParticleCount = (int)values[3];
+            _adaptiveAverageSpeed =
+                _adaptiveActiveParticleCount > 0
+                    ? values[4] /
+                      (1000.0f * _adaptiveActiveParticleCount)
+                    : 0.0f;
+            _adaptiveMaximumSpeed = values[5] / 1000.0f;
+            _adaptiveAverageJDeviation =
+                _adaptiveActiveParticleCount > 0
+                    ? values[6] /
+                      (1000.0f * _adaptiveActiveParticleCount)
+                    : 0.0f;
+            _adaptiveActivityStepIndex =
+                _adaptiveActivityRequestedStepIndex;
+            _adaptiveActivityReady = true;
+
+            _stats.gpuAdaptiveActivityReady = true;
+            _stats.gpuAdaptiveActivityStepIndex =
+                _adaptiveActivityStepIndex;
+            _stats.gpuAdaptivePriorityParticleCount =
+                _adaptivePriorityParticleCount;
+            _stats.gpuAdaptiveCalmInteriorParticleCount =
+                _adaptiveCalmParticleCount;
+            _stats.gpuAdaptiveAirParticleCount =
+                _adaptiveAirParticleCount;
+            _stats.gpuAdaptivePriorityParticleFraction =
+                _adaptiveActiveParticleCount > 0
+                    ? (float)_adaptivePriorityParticleCount /
+                      _adaptiveActiveParticleCount
+                    : 0.0f;
+            _stats.gpuAdaptiveAverageParticleSpeed =
+                _adaptiveAverageSpeed;
+            _stats.gpuAdaptiveMaximumParticleSpeed =
+                _adaptiveMaximumSpeed;
+            _stats.gpuAdaptiveAverageJDeviation =
+                _adaptiveAverageJDeviation;
+        }
+
+        private float CompleteGpuStageProfileSegment(bool restart = true)
+        {
+            AsyncGPUReadbackRequest request =
+                AsyncGPUReadback.Request(
+                    _diagnosticsBuffer,
+                    sizeof(uint),
+                    0
+                );
+            request.WaitForCompletion();
+
+            _gpuStageProfileWatch.Stop();
+            float milliseconds =
+                (float)_gpuStageProfileWatch.Elapsed.TotalMilliseconds;
+
+            if (restart)
+                _gpuStageProfileWatch.Restart();
+
+            return milliseconds;
+        }
+
+        private void DispatchParticleKernel(
+            ComputeShader compute,
+            int kernel,
+            int particleCount,
+            bool tileOrdered)
+        {
+            if (tileOrdered)
+            {
+                compute.DispatchIndirect(
+                    kernel,
+                    _mpmTileOrderedParticleDispatchArgsBuffer,
+                    0
+                );
+                return;
+            }
+
+            compute.Dispatch(kernel, Groups(particleCount), 1, 1);
+        }
+
+        private bool ShouldRunAirborneAdvection(GpuMpmSolverConfig config)
+        {
+            if (!config.enableAirborneParticleAdvection)
+                return false;
+
+            bool canCreateAirDomainParticles =
+                config.enableBottomHoleOpening ||
+                config.topBoundaryMode == GpuBucketTopMode.MarkSpilled;
+
+            if (canCreateAirDomainParticles)
+                _mayHaveAirDomainParticles = true;
+
+            if (_stats.gpuJetParticleCount > 0 ||
+                _stats.gpuAirborneParticleCount > 0)
+            {
+                _mayHaveAirDomainParticles = true;
+            }
+
+            return !config.enableSmartAirborneDispatch ||
+                   canCreateAirDomainParticles ||
+                   _mayHaveAirDomainParticles;
+        }
+
+        private bool ShouldRunPostBucketCollision(GpuMpmSolverConfig config)
+        {
+            if (!config.enablePostG2PBucketCollision)
+                return false;
+
+            if (!config.enableAdaptivePostG2PBucketCollision)
+                return true;
+
+            return config.enableBottomHoleOpening ||
+                   config.topBoundaryMode == GpuBucketTopMode.MarkSpilled;
+        }
+
+        private int ResolveAdaptiveProjectionInterval(
+            FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            int activeInterval = Mathf.Max(
+                1,
+                config.projectionSubstepInterval
+            );
+
+            _effectiveProjectionInterval = activeInterval;
+
+            if (!config.enableAdaptiveMultiRate ||
+                !config.enableAdaptiveProjectionCadence ||
+                !_adaptiveActivityReady)
+            {
+                _adaptiveProjectionCalmCounter = 0;
+                _adaptiveProjectionCalmMode = false;
+                return activeInterval;
+            }
+
+            float bucketLinearSpeed = 0.0f;
+            float bucketAngularSpeed = 0.0f;
+            if (context.BucketSystem != null &&
+                context.BucketSystem.IsInitialized)
+            {
+                BucketState bucketState = context.BucketSystem.State;
+                bucketLinearSpeed = math.length(bucketState.velocity);
+                bucketAngularSpeed =
+                    math.length(bucketState.angularVelocity);
+            }
+
+            float priorityFraction =
+                _adaptiveActiveParticleCount > 0
+                    ? (float)_adaptivePriorityParticleCount /
+                      _adaptiveActiveParticleCount
+                    : 1.0f;
+            bool wasCalm = _adaptiveProjectionCalmMode;
+
+            bool urgent =
+                bucketLinearSpeed >=
+                    Mathf.Max(
+                        0.0f,
+                        config.adaptiveProjectionBucketLinearSpeed
+                    ) ||
+                bucketAngularSpeed >=
+                    Mathf.Max(
+                        0.0f,
+                        config.adaptiveProjectionBucketAngularSpeed
+                    ) ||
+                config.enableBottomHoleOpening ||
+                _adaptiveAirParticleCount > 0;
+
+            bool calmCandidate =
+                !urgent &&
+                _adaptiveAverageSpeed <=
+                    Mathf.Max(
+                        0.0f,
+                        config.adaptiveProjectionCalmAverageSpeed
+                    ) &&
+                priorityFraction <=
+                    Mathf.Clamp01(
+                        config.adaptiveProjectionCalmPriorityFraction
+                    ) &&
+                _adaptiveAverageJDeviation <=
+                    Mathf.Clamp01(
+                        config.adaptiveProjectionMaxAverageJDeviation
+                    );
+
+            if (calmCandidate)
+            {
+                _adaptiveProjectionCalmCounter++;
+            }
+            else
+            {
+                _adaptiveProjectionCalmCounter = 0;
+                _adaptiveProjectionCalmMode = false;
+            }
+
+            if (_adaptiveProjectionCalmCounter >=
+                Mathf.Max(
+                    1,
+                    config.adaptiveProjectionCalmDelaySubsteps
+                ))
+            {
+                _adaptiveProjectionCalmMode = true;
+            }
+
+            if (_adaptiveProjectionCalmMode)
+            {
+                _effectiveProjectionInterval = Mathf.Clamp(
+                    config.calmProjectionSubstepInterval,
+                    activeInterval,
+                    8
+                );
+                _adaptiveProjectionCalmSubstepCount++;
+            }
+
+            if (!wasCalm && _adaptiveProjectionCalmMode)
+                _adaptiveProjectionCalmEntryCount++;
+            else if (wasCalm && !_adaptiveProjectionCalmMode)
+                _adaptiveProjectionCalmExitCount++;
+
+            return _effectiveProjectionInterval;
+        }
+
+        private bool ShouldRunProjectionThisStep(
+            GpuMpmSolverConfig config,
+            int effectiveInterval)
+        {
+            if (!config.enableAdaptiveMultiRate ||
+                !config.enableAdaptiveProjectionCadence)
+            {
+                return
+                    _stepIndex == 0 ||
+                    (_stepIndex + 1) %
+                    Mathf.Max(1, effectiveInterval) == 0;
+            }
+
+            if (_stepIndex <= 1)
+                return true;
+
+            int completedStep = _stepIndex + 1;
+            return
+                completedStep - _lastProjectionCompletedStep >=
+                Mathf.Max(1, effectiveInterval);
+        }
+
+        private void UpdateMpmTileDispatchMode(FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+
+            bool supportParticleListsRequested =
+                config.enableMpmParticleTileLists;
+            bool particleListsRequested =
+                supportParticleListsRequested ||
+                config.enableTiledP2G ||
+                config.enableTileOrderedParticlePipeline ||
+                config.enableHybridTiledP2G;
+
+            _useMpmTileOccupancyThisStep =
+                (config.enableMpmTileOccupancy ||
+                 config.enableTiledMpmGridDispatch ||
+                 particleListsRequested) &&
+                _mpmTileFlagsBuffer != null &&
+                _mpmActiveTileIndicesBuffer != null &&
+                _mpmTileDispatchArgsBuffer != null &&
+                _mpmTileCount > 0;
+
+            _useMpmParticleTileListsThisStep =
+                _useMpmTileOccupancyThisStep &&
+                particleListsRequested &&
+                _mpmTileParticleCountsBuffer != null &&
+                _mpmTileParticleWriteCountsBuffer != null &&
+                _mpmTileParticleOffsetsBuffer != null &&
+                _mpmTileParticleIndicesBuffer != null &&
+                _mpmTileParticleMetaBuffer != null &&
+                _mpmTileOwnerParticleCountsBuffer != null &&
+                _mpmTileOwnerParticleWriteCountsBuffer != null &&
+                _mpmTileOwnerParticleOffsetsBuffer != null &&
+                _mpmTileOrderedParticleIndicesBuffer != null &&
+                _mpmTileOrderedParticleDispatchArgsBuffer != null &&
+                _mpmTileOrderedParticleMetaBuffer != null &&
+                _mpmTileParticleListCapacity > 0;
+
+            _buildMpmSupportParticleTileListsThisStep =
+                _useMpmParticleTileListsThisStep &&
+                supportParticleListsRequested;
+
+            _useTiledP2GThisStep =
+                _useMpmParticleTileListsThisStep &&
+                (config.enableTiledP2G ||
+                 config.enableTileOrderedParticlePipeline);
+
+            _useTileOrderedParticlePipelineThisStep =
+                _useTiledP2GThisStep &&
+                config.enableTileOrderedParticlePipeline;
+
+            _useHybridTiledP2GThisStep =
+                _useMpmParticleTileListsThisStep &&
+                config.enableHybridTiledP2G;
+
+            _useTiledMpmGridDispatchThisStep =
+                _useMpmTileOccupancyThisStep &&
+                (config.enableTiledMpmGridDispatch ||
+                 _useTiledP2GThisStep ||
+                 _useHybridTiledP2GThisStep) &&
+                !_useActiveMpmGridBoundsThisStep;
+        }
+
+        private int GridGroups(int count)
+        {
+            return Mathf.CeilToInt(count / 8.0f);
+        }
+
+        private Vector3Int GetMpmGridDispatchSize(FluidSolverContext context)
+        {
+            if (_useActiveMpmGridBoundsThisStep)
+                return _activeMpmGridSize;
+
+            return context.GpuMpmConfig.gridResolution;
+        }
+
+        private void DispatchMpmGridKernel(
+            ComputeShader compute,
+            int kernel,
+            FluidSolverContext context)
+        {
+            Vector3Int dispatchSize = GetMpmGridDispatchSize(context);
+
+            compute.Dispatch(
+                kernel,
+                GridGroups(Mathf.Max(dispatchSize.x, 1)),
+                GridGroups(Mathf.Max(dispatchSize.y, 1)),
+                GridGroups(Mathf.Max(dispatchSize.z, 1))
+            );
+        }
+
+        private void DispatchMpmActiveTileKernel(
+            ComputeShader compute,
+            int kernel)
+        {
+            compute.DispatchIndirect(kernel, _mpmTileDispatchArgsBuffer, 0);
+        }
+
+        private int GetMpmGridDispatchNodeCount(int gridNodeCount)
+        {
+            return _useActiveMpmGridBoundsThisStep
+                ? Mathf.Max(_activeMpmGridNodeCount, 0)
+                : gridNodeCount;
+        }
+
+        private int ProjectionGroups(int count)
+        {
+            return Mathf.CeilToInt(count / 8.0f);
+        }
+
+        private Vector3Int GetProjectionDispatchSize(FluidSolverContext context)
+        {
+            if (_useActiveProjectionBoundsThisStep)
+                return _activeProjectionSize;
+
+            return context.GpuMpmConfig.gridResolution;
+        }
+
+        private void DispatchProjectionKernel(
+            ComputeShader compute,
+            int kernel,
+            FluidSolverContext context)
+        {
+            Vector3Int dispatchSize = GetProjectionDispatchSize(context);
+
+            compute.Dispatch(
+                kernel,
+                ProjectionGroups(Mathf.Max(dispatchSize.x, 1)),
+                ProjectionGroups(Mathf.Max(dispatchSize.y, 1)),
+                ProjectionGroups(Mathf.Max(dispatchSize.z, 1))
+            );
+        }
+
+        private int GetProjectionDispatchNodeCount(int gridNodeCount)
+        {
+            return _useActiveProjectionBoundsThisStep
+                ? Mathf.Max(_activeProjectionNodeCount, 0)
+                : gridNodeCount;
         }
 
         private void UpdateRuntimeGridPlacement(FluidSolverContext context)
@@ -1051,6 +2941,301 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 requiredMax.z <= gridMax.z;
 
             _stats.gpuRequiredGridExtent = 2.0f * bucketBoundingRadius;
+        }
+
+        private void UpdateActiveMpmGridBounds(FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            Vector3Int resolution = config.gridResolution;
+            int gridNodeCount = config.GridNodeCount;
+
+            _activeMpmGridMin = Vector3Int.zero;
+            _activeMpmGridSize = resolution;
+            _activeMpmGridNodeCount = gridNodeCount;
+            _useActiveMpmGridBoundsThisStep = false;
+
+            if (!config.enableActiveMpmGridBounds ||
+                context.BucketSystem == null ||
+                !context.BucketSystem.IsInitialized ||
+                context.BucketSystem.Config == null)
+            {
+                return;
+            }
+
+            var bucket = context.BucketSystem;
+            var bucketConfig = bucket.Config;
+            var bucketState = bucket.State;
+
+            float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
+            float maxRadius = Mathf.Max(
+                bucketConfig.topRadiusMeters,
+                bucketConfig.bottomRadiusMeters
+            );
+
+            float padding =
+                Mathf.Max(config.activeMpmGridBoundsPaddingMeters, 0.0f) +
+                Mathf.Max(config.activeMpmGridBoundsPaddingCells, 0) *
+                Mathf.Max(config.cellSizeMeters, 1e-6f);
+
+            Matrix4x4 localToWorld = Matrix4x4.TRS(
+                bucketState.position,
+                bucketState.rotation,
+                Vector3.one
+            );
+
+            Vector3 localMin = new Vector3(
+                -maxRadius,
+                -halfHeight,
+                -maxRadius
+            );
+            Vector3 localMax = new Vector3(
+                maxRadius,
+                halfHeight,
+                maxRadius
+            );
+
+            Vector3 worldMin = new Vector3(
+                float.PositiveInfinity,
+                float.PositiveInfinity,
+                float.PositiveInfinity
+            );
+            Vector3 worldMax = new Vector3(
+                float.NegativeInfinity,
+                float.NegativeInfinity,
+                float.NegativeInfinity
+            );
+
+            for (int z = 0; z <= 1; z++)
+            {
+                for (int y = 0; y <= 1; y++)
+                {
+                    for (int x = 0; x <= 1; x++)
+                    {
+                        Vector3 localCorner = new Vector3(
+                            x == 0 ? localMin.x : localMax.x,
+                            y == 0 ? localMin.y : localMax.y,
+                            z == 0 ? localMin.z : localMax.z
+                        );
+
+                        Vector3 worldCorner =
+                            localToWorld.MultiplyPoint3x4(localCorner);
+
+                        worldMin = Vector3.Min(worldMin, worldCorner);
+                        worldMax = Vector3.Max(worldMax, worldCorner);
+                    }
+                }
+            }
+
+            worldMin -= Vector3.one * padding;
+            worldMax += Vector3.one * padding;
+
+            float invCellSize = 1.0f / Mathf.Max(config.cellSizeMeters, 1e-6f);
+            Vector3 minGrid = (worldMin - _runtimeGridOriginWorld) * invCellSize;
+            Vector3 maxGrid = (worldMax - _runtimeGridOriginWorld) * invCellSize;
+
+            Vector3Int minCell = new Vector3Int(
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.x), 0, resolution.x),
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.y), 0, resolution.y),
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.z), 0, resolution.z)
+            );
+
+            Vector3Int maxCellExclusive = new Vector3Int(
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.x) + 1, 0, resolution.x),
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.y) + 1, 0, resolution.y),
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.z) + 1, 0, resolution.z)
+            );
+
+            Vector3Int size = maxCellExclusive - minCell;
+
+            if (size.x <= 0 ||
+                size.y <= 0 ||
+                size.z <= 0)
+            {
+                return;
+            }
+
+            long activeNodeCountLong =
+                (long)size.x *
+                size.y *
+                size.z;
+
+            if (activeNodeCountLong <= 0 ||
+                activeNodeCountLong > int.MaxValue)
+            {
+                return;
+            }
+
+            int activeNodeCount = (int)activeNodeCountLong;
+            float activeFraction =
+                gridNodeCount > 0
+                    ? (float)activeNodeCount / gridNodeCount
+                    : 1.0f;
+
+            if (activeFraction >=
+                Mathf.Clamp(config.activeMpmGridMaxFullGridFraction, 0.1f, 1.0f))
+            {
+                return;
+            }
+
+            _activeMpmGridMin = minCell;
+            _activeMpmGridSize = size;
+            _activeMpmGridNodeCount = activeNodeCount;
+            _useActiveMpmGridBoundsThisStep = true;
+        }
+
+        private void UpdateActiveProjectionBounds(FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            Vector3Int resolution = config.gridResolution;
+            int gridNodeCount = config.GridNodeCount;
+
+            _activeProjectionMin = Vector3Int.zero;
+            _activeProjectionSize = resolution;
+            _activeProjectionNodeCount = gridNodeCount;
+            _useActiveProjectionBoundsThisStep = false;
+
+            if (!config.enableActiveProjectionBounds ||
+                !config.enableProjectionGridInfrastructure ||
+                context.BucketSystem == null ||
+                !context.BucketSystem.IsInitialized ||
+                context.BucketSystem.Config == null)
+            {
+                return;
+            }
+
+            var bucket = context.BucketSystem;
+            var bucketConfig = bucket.Config;
+            var bucketState = bucket.State;
+
+            float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
+            float maxRadius = Mathf.Max(
+                bucketConfig.topRadiusMeters,
+                bucketConfig.bottomRadiusMeters
+            );
+
+            float padding =
+                Mathf.Max(config.activeProjectionBoundsPaddingMeters, 0.0f) +
+                Mathf.Max(config.activeProjectionBoundsPaddingCells, 0) *
+                Mathf.Max(config.cellSizeMeters, 1e-6f);
+
+            Matrix4x4 localToWorld = Matrix4x4.TRS(
+                bucketState.position,
+                bucketState.rotation,
+                Vector3.one
+            );
+
+            Vector3 localMin = new Vector3(
+                -maxRadius,
+                -halfHeight,
+                -maxRadius
+            );
+            Vector3 localMax = new Vector3(
+                maxRadius,
+                halfHeight,
+                maxRadius
+            );
+
+            Vector3 worldMin = new Vector3(
+                float.PositiveInfinity,
+                float.PositiveInfinity,
+                float.PositiveInfinity
+            );
+            Vector3 worldMax = new Vector3(
+                float.NegativeInfinity,
+                float.NegativeInfinity,
+                float.NegativeInfinity
+            );
+
+            for (int z = 0; z <= 1; z++)
+            {
+                for (int y = 0; y <= 1; y++)
+                {
+                    for (int x = 0; x <= 1; x++)
+                    {
+                        Vector3 localCorner = new Vector3(
+                            x == 0 ? localMin.x : localMax.x,
+                            y == 0 ? localMin.y : localMax.y,
+                            z == 0 ? localMin.z : localMax.z
+                        );
+
+                        Vector3 worldCorner =
+                            localToWorld.MultiplyPoint3x4(localCorner);
+
+                        worldMin = Vector3.Min(worldMin, worldCorner);
+                        worldMax = Vector3.Max(worldMax, worldCorner);
+                    }
+                }
+            }
+
+            worldMin -= Vector3.one * padding;
+            worldMax += Vector3.one * padding;
+
+            float invCellSize = 1.0f / Mathf.Max(config.cellSizeMeters, 1e-6f);
+            Vector3 minGrid = (worldMin - _runtimeGridOriginWorld) * invCellSize;
+            Vector3 maxGrid = (worldMax - _runtimeGridOriginWorld) * invCellSize;
+
+            Vector3Int minCell = new Vector3Int(
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.x), 0, resolution.x),
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.y), 0, resolution.y),
+                Mathf.Clamp(Mathf.FloorToInt(minGrid.z), 0, resolution.z)
+            );
+
+            Vector3Int maxCellExclusive = new Vector3Int(
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.x) + 1, 0, resolution.x),
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.y) + 1, 0, resolution.y),
+                Mathf.Clamp(Mathf.CeilToInt(maxGrid.z) + 1, 0, resolution.z)
+            );
+
+            Vector3Int size = maxCellExclusive - minCell;
+
+            if (size.x <= 0 ||
+                size.y <= 0 ||
+                size.z <= 0)
+            {
+                return;
+            }
+
+            long activeNodeCountLong =
+                (long)size.x *
+                size.y *
+                size.z;
+
+            if (activeNodeCountLong <= 0 ||
+                activeNodeCountLong > int.MaxValue)
+            {
+                return;
+            }
+
+            int activeNodeCount = (int)activeNodeCountLong;
+            float activeFraction =
+                gridNodeCount > 0
+                    ? (float)activeNodeCount / gridNodeCount
+                    : 1.0f;
+
+            if (activeFraction >=
+                Mathf.Clamp(config.activeProjectionMaxFullGridFraction, 0.1f, 1.0f))
+            {
+                return;
+            }
+
+            _activeProjectionMin = minCell;
+            _activeProjectionSize = size;
+            _activeProjectionNodeCount = activeNodeCount;
+            _useActiveProjectionBoundsThisStep = true;
+        }
+
+        private void UpdateSparseProjectionPressureDispatchMode(
+            FluidSolverContext context)
+        {
+            _useSparseProjectionPressureDispatchThisStep =
+                context.GpuMpmConfig.enableSparseProjectionPressureDispatch &&
+                _projectionFluidCellIndicesBuffer != null &&
+                _projectionFluidCellMetaBuffer != null &&
+                _projectionFluidCellDispatchArgsBuffer != null &&
+                _kernelClearProjectionFluidCellList >= 0 &&
+                _kernelBuildProjectionFluidCellDispatchArgs >= 0 &&
+                _kernelJacobiProjectionPressureSparse >= 0 &&
+                _kernelRedBlackSorProjectionPressureSparse >= 0;
         }
 
         /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// /// /// 
@@ -1287,16 +3472,24 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         private void BindBucketCollision(ComputeShader compute, FluidSolverContext context)
         {
+            BindBucketCollision(compute, context, _kernelBucketCollision);
+        }
+
+        private void BindBucketCollision(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int kernel)
+        {
             GpuFluidBufferSet buffers = context.GpuBufferSet;
 
             compute.SetBuffer(
-                _kernelBucketCollision,
+                kernel,
                 "_ParticlePositionRadius",
                 buffers.PositionRadiusBuffer
             );
 
             compute.SetBuffer(
-                _kernelBucketCollision,
+                kernel,
                 "_ParticleVelocityMass",
                 buffers.VelocityMassBuffer
             );
@@ -1308,18 +3501,19 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 //            );
 
             compute.SetBuffer(
-                _kernelBucketCollision,
+                kernel,
                 "_ParticleStateAgeId",
                 buffers.StateAgeIdBuffer
             );
 
             compute.SetBuffer(
-                _kernelBucketCollision,
+                kernel,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
             );
 
-            BindBucketHoleBuffers(compute, _kernelBucketCollision);
+            BindBucketHoleBuffers(compute, kernel);
+            BindTileOrderedParticleLookup(compute, kernel);
         }
 
         private void BindBucketHoleBuffers(ComputeShader compute, int kernel)
@@ -1384,6 +3578,30 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
 
             compute.SetInt(
+                "_EnableActiveProjectionBounds",
+                _useActiveProjectionBoundsThisStep ? 1 : 0
+            );
+
+            compute.SetInts(
+                "_ActiveProjectionMin",
+                _activeProjectionMin.x,
+                _activeProjectionMin.y,
+                _activeProjectionMin.z
+            );
+
+            compute.SetInts(
+                "_ActiveProjectionSize",
+                _activeProjectionSize.x,
+                _activeProjectionSize.y,
+                _activeProjectionSize.z
+            );
+
+            compute.SetInt(
+                "_ActiveProjectionNodeCount",
+                GetProjectionDispatchNodeCount(context.GpuMpmConfig.GridNodeCount)
+            );
+
+            compute.SetInt(
                 "_EnableProjectionDivergence",
                 context.GpuMpmConfig.enableProjectionDivergenceComputation ? 1 : 0
             );
@@ -1416,6 +3634,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetFloat(
                 "_ProjectionPressureRelaxation",
                 context.GpuMpmConfig.pressureJacobiRelaxation
+            );
+
+            compute.SetFloat(
+                "_ProjectionPressureSorOmega",
+                context.GpuMpmConfig.pressureRedBlackSorOmega
             );
 
             compute.SetFloat(
@@ -1521,39 +3744,44 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             BindBucketHoleBuffers(compute, _kernelMarkBucketProjectionSolids);
         }
 
-        private void BindMarkProjectionFluidCells(ComputeShader compute, FluidSolverContext context)
+        private void BindMarkProjectionFluidCells(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int kernel)
         {
             GpuFluidBufferSet buffers = context.GpuBufferSet;
 
             compute.SetBuffer(
-                _kernelMarkProjectionFluidCells,
+                kernel,
                 "_ParticlePositionRadiusRead",
                 buffers.PositionRadiusBuffer
             );
 
             compute.SetBuffer(
-                _kernelMarkProjectionFluidCells,
+                kernel,
                 "_ParticleVelocityMassRead",
                 buffers.VelocityMassBuffer
             );
 
             compute.SetBuffer(
-                _kernelMarkProjectionFluidCells,
+                kernel,
                 "_ParticleStateAgeIdRead",
                 buffers.StateAgeIdBuffer
             );
 
             compute.SetBuffer(
-                _kernelMarkProjectionFluidCells,
+                kernel,
                 "_ProjectionCellType",
                 _projectionCellTypeBuffer
             );
 
             compute.SetBuffer(
-                _kernelMarkProjectionFluidCells,
+                kernel,
                 "_ProjectionCellMassInt",
                 _projectionCellMassIntBuffer
             );
+
+            BindTileOrderedParticleLookup(compute, kernel);
         }
 
         private void BindFinalizeProjectionGrid(ComputeShader compute)
@@ -1565,6 +3793,46 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetBuffer(_kernelFinalizeProjectionGrid, "_ProjectionPressure", _projectionPressureBuffer);
             compute.SetBuffer(_kernelFinalizeProjectionGrid, "_ProjectionPressureTemp", _projectionPressureTempBuffer);
             compute.SetBuffer(_kernelFinalizeProjectionGrid, "_ProjectionDivergence", _projectionDivergenceBuffer);
+            compute.SetBuffer(
+                _kernelFinalizeProjectionGrid,
+                "_ProjectionFluidCellIndices",
+                _projectionFluidCellIndicesBuffer
+            );
+            compute.SetBuffer(
+                _kernelFinalizeProjectionGrid,
+                "_ProjectionFluidCellMeta",
+                _projectionFluidCellMetaBuffer
+            );
+        }
+
+        private void BindClearProjectionFluidCellList(
+            ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelClearProjectionFluidCellList,
+                "_ProjectionFluidCellMeta",
+                _projectionFluidCellMetaBuffer
+            );
+            compute.SetBuffer(
+                _kernelClearProjectionFluidCellList,
+                "_ProjectionFluidCellDispatchArgs",
+                _projectionFluidCellDispatchArgsBuffer
+            );
+        }
+
+        private void BindBuildProjectionFluidCellDispatchArgs(
+            ComputeShader compute)
+        {
+            compute.SetBuffer(
+                _kernelBuildProjectionFluidCellDispatchArgs,
+                "_ProjectionFluidCellMeta",
+                _projectionFluidCellMetaBuffer
+            );
+            compute.SetBuffer(
+                _kernelBuildProjectionFluidCellDispatchArgs,
+                "_ProjectionFluidCellDispatchArgs",
+                _projectionFluidCellDispatchArgsBuffer
+            );
         }
 
         private int RunProjectionGridInfrastructure(
@@ -1576,33 +3844,77 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (!context.GpuMpmConfig.enableProjectionGridInfrastructure)
                 return 0;
 
+            int projectionNodeCount = GetProjectionDispatchNodeCount(gridNodeCount);
+
+            if (projectionNodeCount <= 0)
+                return 0;
+
             BindClearProjectionGrid(compute);
-            compute.Dispatch(_kernelClearProjectionGrid, Groups(gridNodeCount), 1, 1);
+            DispatchProjectionKernel(compute, _kernelClearProjectionGrid, context);
 
             if (context.GpuMpmConfig.enableBucketProjectionSolidCells)
             {
                 BindMarkBucketProjectionSolids(compute);
-                compute.Dispatch(_kernelMarkBucketProjectionSolids, Groups(gridNodeCount), 1, 1);
+                DispatchProjectionKernel(compute, _kernelMarkBucketProjectionSolids, context);
             }
 
-            BindMarkProjectionFluidCells(compute, context);
-            compute.Dispatch(_kernelMarkProjectionFluidCells, Groups(particleCount), 1, 1);
+            int markFluidKernel =
+                _useTileOrderedParticlePipelineThisStep
+                    ? _kernelMarkProjectionFluidCellsTileOrdered
+                    : _kernelMarkProjectionFluidCells;
+            BindMarkProjectionFluidCells(
+                compute,
+                context,
+                markFluidKernel
+            );
+            DispatchParticleKernel(
+                compute,
+                markFluidKernel,
+                particleCount,
+                _useTileOrderedParticlePipelineThisStep
+            );
+
+            int sparseListDispatches = 0;
+            if (_useSparseProjectionPressureDispatchThisStep)
+            {
+                BindClearProjectionFluidCellList(compute);
+                compute.Dispatch(
+                    _kernelClearProjectionFluidCellList,
+                    1,
+                    1,
+                    1
+                );
+                sparseListDispatches++;
+            }
 
             BindFinalizeProjectionGrid(compute);
-            compute.Dispatch(_kernelFinalizeProjectionGrid, Groups(gridNodeCount), 1, 1);
+            DispatchProjectionKernel(compute, _kernelFinalizeProjectionGrid, context);
 
-            int dispatches = context.GpuMpmConfig.enableBucketProjectionSolidCells ? 4 : 3;
+            if (_useSparseProjectionPressureDispatchThisStep)
+            {
+                BindBuildProjectionFluidCellDispatchArgs(compute);
+                compute.Dispatch(
+                    _kernelBuildProjectionFluidCellDispatchArgs,
+                    1,
+                    1,
+                    1
+                );
+                sparseListDispatches++;
+            }
+
+            int dispatches =
+                (context.GpuMpmConfig.enableBucketProjectionSolidCells ? 4 : 3) +
+                sparseListDispatches;
 
             if (context.GpuMpmConfig.enableMovingBucketProjectionCoupling &&
                 context.GpuMpmConfig.applyMovingBucketGridBoundaryVelocity)
             {
                 BindApplyMovingBucketProjectionBoundaryVelocity(compute);
 
-                compute.Dispatch(
+                DispatchProjectionKernel(
+                    compute,
                     _kernelApplyMovingBucketProjectionBoundaryVelocity,
-                    Groups(gridNodeCount),
-                    1,
-                    1
+                    context
                 );
 
                 dispatches++;
@@ -1612,11 +3924,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.useStaggeredFaceProjection)
             {
                 BindBuildProjectionFaceVelocities(compute);
-                compute.Dispatch(
+                DispatchProjectionKernel(
+                    compute,
                     _kernelBuildProjectionFaceVelocities,
-                    Groups(gridNodeCount),
-                    1,
-                    1
+                    context
                 );
                 dispatches++;
             }
@@ -1627,7 +3938,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     compute,
                     _projectionDivergenceBuffer
                 );
-                compute.Dispatch(_kernelComputeProjectionDivergence, Groups(gridNodeCount), 1, 1);
+                DispatchProjectionKernel(
+                    compute,
+                    _kernelComputeProjectionDivergence,
+                    context
+                );
                 dispatches++;
 
                 if (context.GpuMpmConfig.enableGpuDiagnostics)
@@ -1637,21 +3952,20 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                         _projectionDivergenceBuffer,
                         0
                     );
-                    compute.Dispatch(
+                    DispatchProjectionKernel(
+                        compute,
                         _kernelCollectProjectionDiagnostics,
-                        Groups(gridNodeCount),
-                        1,
-                        1
+                        context
                     );
                     dispatches++;
                 }
             }
 
-            int pressureDispatches = RunJacobiPressureSolve(compute, context, gridNodeCount);
+            int pressureDispatches = RunProjectionPressureSolve(compute, context, projectionNodeCount);
 
             dispatches += pressureDispatches;
 
-            int pressureGradientDispatches = RunPressureGradientSubtraction(compute, context, gridNodeCount);
+            int pressureGradientDispatches = RunPressureGradientSubtraction(compute, context, projectionNodeCount);
 
             dispatches += pressureGradientDispatches;
 
@@ -1662,11 +3976,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     compute,
                     _projectionDivergenceAfterBuffer
                 );
-                compute.Dispatch(
+                DispatchProjectionKernel(
+                    compute,
                     _kernelComputeProjectionDivergence,
-                    Groups(gridNodeCount),
-                    1,
-                    1
+                    context
                 );
 
                 BindCollectProjectionDiagnostics(
@@ -1674,11 +3987,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     _projectionDivergenceAfterBuffer,
                     1
                 );
-                compute.Dispatch(
+                DispatchProjectionKernel(
+                    compute,
                     _kernelCollectProjectionDiagnostics,
-                    Groups(gridNodeCount),
-                    1,
-                    1
+                    context
                 );
 
                 dispatches += 2;
@@ -1770,32 +4082,100 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         private void BindJacobiProjectionPressure(
             ComputeShader compute,
+            int kernel,
             GraphicsBuffer pressureReadBuffer,
             GraphicsBuffer pressureWriteBuffer)
         {
             compute.SetBuffer(
-                _kernelJacobiProjectionPressure,
+                kernel,
                 "_ProjectionCellTypeRead",
                 _projectionCellTypeBuffer
             );
 
             compute.SetBuffer(
-                _kernelJacobiProjectionPressure,
+                kernel,
                 "_ProjectionDivergenceRead",
                 _projectionDivergenceBuffer
             );
 
             compute.SetBuffer(
-                _kernelJacobiProjectionPressure,
+                kernel,
                 "_ProjectionPressureRead",
                 pressureReadBuffer
             );
 
             compute.SetBuffer(
-                _kernelJacobiProjectionPressure,
+                kernel,
                 "_ProjectionPressureWrite",
                 pressureWriteBuffer
             );
+
+            BindSparseProjectionFluidCellLookup(compute, kernel);
+        }
+
+        private void BindRedBlackSorProjectionPressure(
+            ComputeShader compute,
+            int kernel,
+            int color)
+        {
+            compute.SetInt("_ProjectionPressureSolveColor", color);
+
+            compute.SetBuffer(
+                kernel,
+                "_ProjectionCellTypeRead",
+                _projectionCellTypeBuffer
+            );
+
+            compute.SetBuffer(
+                kernel,
+                "_ProjectionDivergenceRead",
+                _projectionDivergenceBuffer
+            );
+
+            compute.SetBuffer(
+                kernel,
+                "_ProjectionPressure",
+                _projectionPressureBuffer
+            );
+
+            BindSparseProjectionFluidCellLookup(compute, kernel);
+        }
+
+        private void BindSparseProjectionFluidCellLookup(
+            ComputeShader compute,
+            int kernel)
+        {
+            if (!_useSparseProjectionPressureDispatchThisStep)
+                return;
+
+            compute.SetBuffer(
+                kernel,
+                "_ProjectionFluidCellIndicesRead",
+                _projectionFluidCellIndicesBuffer
+            );
+            compute.SetBuffer(
+                kernel,
+                "_ProjectionFluidCellMetaRead",
+                _projectionFluidCellMetaBuffer
+            );
+        }
+
+        private void DispatchProjectionPressureKernel(
+            ComputeShader compute,
+            int kernel,
+            FluidSolverContext context)
+        {
+            if (_useSparseProjectionPressureDispatchThisStep)
+            {
+                compute.DispatchIndirect(
+                    kernel,
+                    _projectionFluidCellDispatchArgsBuffer,
+                    0
+                );
+                return;
+            }
+
+            DispatchProjectionKernel(compute, kernel, context);
         }
 
         private void SwapProjectionPressureBuffers()
@@ -1808,6 +4188,20 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _projectionPressureTempBuffer,
                 _projectionPressureBuffer
             );
+        }
+
+        private int RunProjectionPressureSolve(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int gridNodeCount)
+        {
+            if (context.GpuMpmConfig.pressureSolveMode ==
+                ProjectionPressureSolveMode.RedBlackSor)
+            {
+                return RunRedBlackSorPressureSolve(compute, context, gridNodeCount);
+            }
+
+            return RunJacobiPressureSolve(compute, context, gridNodeCount);
         }
 
         private int RunJacobiPressureSolve(
@@ -1831,23 +4225,74 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             for (int i = 0; i < iterations; i++)
             {
+                int kernel = _useSparseProjectionPressureDispatchThisStep
+                    ? _kernelJacobiProjectionPressureSparse
+                    : _kernelJacobiProjectionPressure;
+
                 BindJacobiProjectionPressure(
                     compute,
+                    kernel,
                     _projectionPressureBuffer,
                     _projectionPressureTempBuffer
                 );
 
-                compute.Dispatch(
-                    _kernelJacobiProjectionPressure,
-                    Groups(gridNodeCount),
-                    1,
-                    1
+                DispatchProjectionPressureKernel(
+                    compute,
+                    kernel,
+                    context
                 );
 
                 SwapProjectionPressureBuffers();
             }
 
             return iterations;
+        }
+
+        private int RunRedBlackSorPressureSolve(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int gridNodeCount)
+        {
+            if (!context.GpuMpmConfig.enableProjectionGridInfrastructure)
+                return 0;
+
+            if (!context.GpuMpmConfig.enableProjectionDivergenceComputation)
+                return 0;
+
+            if (!context.GpuMpmConfig.enableJacobiPressureSolve)
+                return 0;
+
+            int iterations = Mathf.Max(
+                1,
+                context.GpuMpmConfig.pressureRedBlackSorIterations
+            );
+
+            int dispatches = 0;
+
+            for (int i = 0; i < iterations; i++)
+            {
+                int kernel = _useSparseProjectionPressureDispatchThisStep
+                    ? _kernelRedBlackSorProjectionPressureSparse
+                    : _kernelRedBlackSorProjectionPressure;
+
+                BindRedBlackSorProjectionPressure(compute, kernel, 0);
+                DispatchProjectionPressureKernel(
+                    compute,
+                    kernel,
+                    context
+                );
+                dispatches++;
+
+                BindRedBlackSorProjectionPressure(compute, kernel, 1);
+                DispatchProjectionPressureKernel(
+                    compute,
+                    kernel,
+                    context
+                );
+                dispatches++;
+            }
+
+            return dispatches;
         }
 
         private void BindSubtractProjectionPressureGradient(ComputeShader compute)
@@ -1915,22 +4360,20 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             BindSubtractProjectionPressureGradient(compute);
 
-            compute.Dispatch(
+            DispatchProjectionKernel(
+                compute,
                 _kernelSubtractProjectionPressureGradient,
-                Groups(gridNodeCount),
-                1,
-                1
+                context
             );
 
             if (!context.GpuMpmConfig.useStaggeredFaceProjection)
                 return 1;
 
             BindApplyProjectionFaceVelocitiesToGrid(compute);
-            compute.Dispatch(
+            DispatchProjectionKernel(
+                compute,
                 _kernelApplyProjectionFaceVelocitiesToGrid,
-                Groups(gridNodeCount),
-                1,
-                1
+                context
             );
 
             return 2;
@@ -2047,8 +4490,47 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 safeActiveParticles;
             _stats.gpuMaximumParticleSpeed =
                 values[DiagnosticSpeedMax] / DiagnosticsSpeedScale;
+            _stats.gpuMpmActiveTileCount =
+                values.Length > DiagnosticMpmActiveTiles
+                    ? (int)values[DiagnosticMpmActiveTiles]
+                    : 0;
+            if (values.Length > DiagnosticMpmTileCount &&
+                values[DiagnosticMpmTileCount] > 0)
+            {
+                _stats.gpuMpmTileCount =
+                    (int)values[DiagnosticMpmTileCount];
+            }
+            _stats.gpuMpmActiveTileFraction =
+                _stats.gpuMpmTileCount > 0
+                    ? (float)_stats.gpuMpmActiveTileCount /
+                      _stats.gpuMpmTileCount
+                    : 0.0f;
+            _stats.gpuMpmTileParticleReferenceCount =
+                values.Length > DiagnosticMpmTileParticleRefs
+                    ? (int)values[DiagnosticMpmTileParticleRefs]
+                    : 0;
+            _stats.gpuMpmTileMaxParticleReferences =
+                values.Length > DiagnosticMpmTileMaxParticleRefs
+                    ? (int)values[DiagnosticMpmTileMaxParticleRefs]
+                    : 0;
+            _stats.gpuMpmTileParticleListOverflowCount =
+                values.Length > DiagnosticMpmTileParticleListOverflow
+                    ? (int)values[DiagnosticMpmTileParticleListOverflow]
+                    : 0;
+            if (values.Length > DiagnosticMpmTileParticleListCapacity &&
+                values[DiagnosticMpmTileParticleListCapacity] > 0)
+            {
+                _stats.gpuMpmTileParticleListCapacity =
+                    (int)values[DiagnosticMpmTileParticleListCapacity];
+            }
 
             _stats.projectionFluidCellCount = fluidCells;
+            _stats.projectionSparsePressureCellCount = fluidCells;
+            _stats.projectionSparsePressureCellFraction =
+                _stats.projectionActiveNodeCount > 0
+                    ? (float)fluidCells /
+                      _stats.projectionActiveNodeCount
+                    : 0.0f;
             _stats.projectionSolidCellCount = (int)values[6];
             _stats.projectionAirCellCount = (int)values[7];
 

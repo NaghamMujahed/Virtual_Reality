@@ -16,9 +16,12 @@ MonoBehaviour:
   maxRenderedParticles: 200000
   renderStride: 1
   uploadEveryNFrames: 1
-  visualMode: 1
-  visualRadiusScale: 1.18
+  visualMode: 0
+  visualRadiusScale: 0.7
   splatNormalStrength: 0.85
+  splatEdgeSoftness: 0.22
+  paintSpecularStrength: 0.18
+  paintFresnelStrength: 0.1
   usePerParticleColor: 1
   fallbackColor: {r: 0.1, g: 0.35, b: 1, a: 1}
   worldBoundsCenter: {x: 0, y: 0, z: 0}

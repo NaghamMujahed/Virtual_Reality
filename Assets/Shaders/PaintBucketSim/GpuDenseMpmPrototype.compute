@@ -1,27 +1,48 @@
-﻿#pragma kernel KClearGrid
+#pragma kernel KClearGrid
 #pragma kernel KClearMpmDiagnostics
+#pragma kernel KClearAdaptiveActivity
+#pragma kernel KClassifyAdaptiveActivity
 #pragma kernel KP2G
 #pragma kernel KGridUpdate
+#pragma kernel KClearMpmTileData
+#pragma kernel KClearMpmTileOrderedData
+#pragma kernel KMarkMpmActiveTiles
+#pragma kernel KBuildMpmTileParticleOffsets
+#pragma kernel KBuildMpmTileOwnerOffsets
+#pragma kernel KFillMpmTileParticleLists
+#pragma kernel KClearGridActiveTiles
+#pragma kernel KGridUpdateActiveTiles
+#pragma kernel KP2GTileOrdered
+#pragma kernel KP2GHybridTiled
 // Changes after G6.A 
 #pragma kernel KG2PVelocityApic
+#pragma kernel KG2PVelocityApicTileOrdered
 #pragma kernel KUpdateDeformation
+#pragma kernel KUpdateDeformationTileOrdered
 // End Changes after G6.A 
 
 // Changes after G8.A 
 #pragma kernel KBucketCollision
+#pragma kernel KBucketCollisionTileOrdered
 // End Changes after G8.A 
 #pragma kernel KStepAirborneParticles
 
 #pragma kernel KClearProjectionGrid
 #pragma kernel KMarkBucketProjectionSolids
 #pragma kernel KMarkProjectionFluidCells
+#pragma kernel KMarkProjectionFluidCellsTileOrdered
 #pragma kernel KFinalizeProjectionGrid
+#pragma kernel KClearProjectionFluidCellList
+#pragma kernel KBuildProjectionFluidCellDispatchArgs
 #pragma kernel KApplyMovingBucketProjectionBoundaryVelocity
 #pragma kernel KBuildProjectionFaceVelocities
 
 #pragma kernel KComputeProjectionDivergence
 
 #pragma kernel KJacobiProjectionPressure
+#pragma kernel KJacobiProjectionPressureSparse
+#pragma kernel KRedBlackSorProjectionPressure
+#pragma kernel KRedBlackSorProjectionPressureSparse
 #pragma kernel KSubtractProjectionPressureGradient
 #pragma kernel KApplyProjectionFaceVelocitiesToGrid
 #pragma kernel KCollectProjectionDiagnostics
@@ -56,6 +77,28 @@ RWStructuredBuffer<float4> _ParticleF2;
 RWStructuredBuffer<int4> _GridAccumInt;
 RWStructuredBuffer<float4> _GridVelocityMass;
 StructuredBuffer<float4> _GridVelocityMassRead;
+RWStructuredBuffer<uint> _MpmTileFlags;
+RWStructuredBuffer<uint> _MpmActiveTileIndices;
+RWStructuredBuffer<uint> _MpmTileDispatchArgs;
+RWStructuredBuffer<uint> _MpmTileParticleCounts;
+RWStructuredBuffer<uint> _MpmTileParticleWriteCounts;
+RWStructuredBuffer<uint> _MpmTileParticleOffsets;
+RWStructuredBuffer<uint> _MpmTileParticleIndices;
+RWStructuredBuffer<uint> _MpmTileParticleMeta;
+RWStructuredBuffer<uint> _MpmTileOwnerParticleCounts;
+RWStructuredBuffer<uint> _MpmTileOwnerParticleWriteCounts;
+RWStructuredBuffer<uint> _MpmTileOwnerParticleOffsets;
+RWStructuredBuffer<uint> _MpmTileOrderedParticleIndices;
+RWStructuredBuffer<uint> _MpmTileOrderedParticleDispatchArgs;
+RWStructuredBuffer<uint> _MpmTileOrderedParticleMeta;
+StructuredBuffer<uint> _MpmActiveTileIndicesRead;
+StructuredBuffer<uint> _MpmTileParticleCountsRead;
+StructuredBuffer<uint> _MpmTileParticleOffsetsRead;
+StructuredBuffer<uint> _MpmTileParticleIndicesRead;
+StructuredBuffer<uint> _MpmTileOrderedParticleIndicesRead;
+StructuredBuffer<uint> _MpmTileOrderedParticleMetaRead;
+StructuredBuffer<uint> _MpmTileOwnerParticleCountsRead;
+StructuredBuffer<uint> _MpmTileOwnerParticleOffsetsRead;
 
 StructuredBuffer<float4> _ParticlePositionRadiusRead;
 StructuredBuffer<float4> _ParticleVelocityMassRead;
@@ -69,6 +112,9 @@ RWStructuredBuffer<float> _ProjectionPressureTemp;
 RWStructuredBuffer<float> _ProjectionDivergence;
 RWStructuredBuffer<float> _ProjectionDivergenceAfter;
 RWStructuredBuffer<float4> _ProjectionFaceVelocity;
+RWStructuredBuffer<uint> _ProjectionFluidCellIndices;
+RWStructuredBuffer<uint> _ProjectionFluidCellMeta;
+RWStructuredBuffer<uint> _ProjectionFluidCellDispatchArgs;
 
 StructuredBuffer<int> _ProjectionCellTypeRead;
 StructuredBuffer<float4> _ProjectionCellDataRead;
@@ -76,8 +122,13 @@ StructuredBuffer<float4> _ProjectionFaceVelocityRead;
 
 StructuredBuffer<float> _ProjectionDivergenceRead;
 StructuredBuffer<float> _ProjectionPressureRead;
+StructuredBuffer<uint> _ProjectionFluidCellIndicesRead;
+StructuredBuffer<uint> _ProjectionFluidCellMetaRead;
 RWStructuredBuffer<float> _ProjectionPressureWrite;
 RWStructuredBuffer<uint> _MpmDiagnostics;
+RWStructuredBuffer<uint> _AdaptiveParticlePriority;
+RWStructuredBuffer<uint> _AdaptiveActivitySummary;
+StructuredBuffer<uint> _AdaptiveParticlePriorityRead;
 
 // GPU bucket holes:
 // Data0: xyz = local center, w = half extent X / radius X
@@ -96,6 +147,28 @@ int _GridNodeCount;
 
 int3 _GridResolution;
 float3 _GridOrigin;
+int _EnableActiveMpmGridBounds;
+int3 _ActiveMpmGridMin;
+int3 _ActiveMpmGridSize;
+int _ActiveMpmGridNodeCount;
+int _EnableMpmTileOccupancy;
+int _EnableTiledMpmGridDispatch;
+int _EnableMpmParticleTileLists;
+int _EnableMpmSupportParticleTileLists;
+int _EnableTiledP2G;
+int _EnableSparseProjectionPressureDispatch;
+int _EnableAdaptiveMultiRate;
+int _AdaptiveActivitySampleStep;
+int _CalmInteriorDeformationInterval;
+int _CalmInteriorDeformationUpdateThisStep;
+float _AdaptivePriorityParticleSpeed;
+float _AdaptivePriorityBoundaryBand;
+float _AdaptivePriorityTopFraction;
+int3 _MpmTileResolution;
+int _MpmTileCount;
+int _MpmTileSizeCells;
+int _MpmTileSizeShift;
+int _MpmTileParticleListCapacity;
 float _CellSize;
 float _InvCellSize;
 
@@ -141,6 +214,11 @@ float _YieldStress;
 float _MaxYieldViscosityContribution;
 float _MaxEffectiveViscosity;
 float _RheologyStrength;
+int _EnableFreeSurfacePolish;
+float _FreeSurfaceGradientScale;
+float _FreeSurfaceNormalDampingPerSecond;
+float _FreeSurfaceCohesionAcceleration;
+float _MaxFreeSurfaceVelocityCorrection;
 //      End Changes G7      //
 
 //      Changes G8.A      //
@@ -205,6 +283,10 @@ float _ProjectionMinFluidCellMass;
 
 int _EnableBucketProjectionSolidCells;
 int _ProjectionTopOpen;
+int _EnableActiveProjectionBounds;
+int3 _ActiveProjectionMin;
+int3 _ActiveProjectionSize;
+int _ActiveProjectionNodeCount;
 
 int _EnableProjectionDivergence;
 float _ProjectionDivergenceScale;
@@ -215,6 +297,8 @@ int _EnableJacobiPressureSolve;
 
 float _ProjectionPressureRhsScale;
 float _ProjectionPressureRelaxation;
+float _ProjectionPressureSorOmega;
+int _ProjectionPressureSolveColor;
 float _MaxProjectionPressure;
 
 int _ProjectionAirPressureZero;
@@ -267,7 +351,17 @@ static const uint DIAG_LOCAL_Y_MIN = 23;
 static const uint DIAG_LOCAL_Y_MAX = 24;
 static const uint DIAG_SPEED_SUM = 25;
 static const uint DIAG_SPEED_MAX = 26;
-static const uint MPM_DIAGNOSTIC_COUNT = 27;
+static const uint DIAG_MPM_ACTIVE_TILES = 27;
+static const uint DIAG_MPM_TILE_COUNT = 28;
+static const uint DIAG_MPM_TILE_MARKS = 29;
+static const uint DIAG_MPM_TILE_PARTICLE_REFS = 30;
+static const uint DIAG_MPM_TILE_MAX_PARTICLE_REFS = 31;
+static const uint DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW = 32;
+static const uint DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY = 33;
+static const uint MPM_DIAGNOSTIC_COUNT = 34;
+static const uint MPM_TILE_THREAD_DIM = 8u;
+static const uint MPM_TILE_CELL_COUNT = 512u;
+static const uint MPM_TILE_P2G_THREAD_COUNT = 256u;
 static const float DIAG_DIVERGENCE_FIXED_SCALE = 100.0;
 static const float DIAG_PRESSURE_FIXED_SCALE = 1000000.0;
 static const float DIAG_J_FIXED_SCALE = 10000.0;
@@ -302,6 +396,177 @@ int3 UnflattenGridIndex(uint index)
     return int3((int)x, (int)y, (int)z);
 }
 
+uint FlattenMpmTileIndex(uint3 tile)
+{
+    return tile.x +
+           tile.y * (uint)_MpmTileResolution.x +
+           tile.z *
+           (uint)_MpmTileResolution.x *
+           (uint)_MpmTileResolution.y;
+}
+
+uint3 UnflattenMpmTileIndex(uint tileIndex)
+{
+    uint resolutionX = (uint)_MpmTileResolution.x;
+    uint resolutionY = (uint)_MpmTileResolution.y;
+    uint xy = resolutionX * resolutionY;
+
+    uint z = tileIndex / xy;
+    uint rem = tileIndex - z * xy;
+    uint y = rem / resolutionX;
+    uint x = rem - y * resolutionX;
+
+    return uint3(x, y, z);
+}
+
+bool TryGetMpmTileForCell(int3 cell, out uint tileIndex)
+{
+    tileIndex = 0u;
+
+    if (cell.x < 0 ||
+        cell.y < 0 ||
+        cell.z < 0 ||
+        cell.x >= _GridResolution.x ||
+        cell.y >= _GridResolution.y ||
+        cell.z >= _GridResolution.z)
+    {
+        return false;
+    }
+
+    uint3 tile = uint3(
+        (uint)cell.x >> (uint)_MpmTileSizeShift,
+        (uint)cell.y >> (uint)_MpmTileSizeShift,
+        (uint)cell.z >> (uint)_MpmTileSizeShift
+    );
+
+    if (tile.x >= (uint)_MpmTileResolution.x ||
+        tile.y >= (uint)_MpmTileResolution.y ||
+        tile.z >= (uint)_MpmTileResolution.z)
+    {
+        return false;
+    }
+
+    tileIndex = FlattenMpmTileIndex(tile);
+    return tileIndex < (uint)_MpmTileCount;
+}
+
+bool TryGetMpmTileForCoord(uint3 tile, out uint tileIndex)
+{
+    tileIndex = 0u;
+
+    if (tile.x >= (uint)_MpmTileResolution.x ||
+        tile.y >= (uint)_MpmTileResolution.y ||
+        tile.z >= (uint)_MpmTileResolution.z)
+    {
+        return false;
+    }
+
+    tileIndex = FlattenMpmTileIndex(tile);
+    return tileIndex < (uint)_MpmTileCount;
+}
+
+uint MpmTileThreadLinearIndex(uint3 localId)
+{
+    return localId.x +
+           localId.y * MPM_TILE_THREAD_DIM +
+           localId.z * MPM_TILE_THREAD_DIM * MPM_TILE_THREAD_DIM;
+}
+
+uint MpmTileLocalCellIndex(int3 localCell)
+{
+    return (uint)localCell.x +
+           (uint)localCell.y * (uint)_MpmTileSizeCells +
+           (uint)localCell.z *
+           (uint)_MpmTileSizeCells *
+           (uint)_MpmTileSizeCells;
+}
+
+bool TryGetMpmSupportTileRange(
+    int3 baseCell,
+    out uint3 minTile,
+    out uint3 maxTile)
+{
+    int3 minCell = baseCell;
+    int3 maxCell = baseCell + int3(2, 2, 2);
+
+    minCell = max(minCell, int3(0, 0, 0));
+    maxCell = min(maxCell, _GridResolution - int3(1, 1, 1));
+
+    if (_EnableActiveMpmGridBounds != 0)
+    {
+        int3 activeMax =
+            _ActiveMpmGridMin +
+            _ActiveMpmGridSize -
+            int3(1, 1, 1);
+
+        minCell = max(minCell, _ActiveMpmGridMin);
+        maxCell = min(maxCell, activeMax);
+    }
+
+    if (minCell.x > maxCell.x ||
+        minCell.y > maxCell.y ||
+        minCell.z > maxCell.z)
+    {
+        minTile = uint3(0, 0, 0);
+        maxTile = uint3(0, 0, 0);
+        return false;
+    }
+
+    minTile = uint3(
+        (uint)minCell.x >> (uint)_MpmTileSizeShift,
+        (uint)minCell.y >> (uint)_MpmTileSizeShift,
+        (uint)minCell.z >> (uint)_MpmTileSizeShift
+    );
+
+    maxTile = uint3(
+        (uint)maxCell.x >> (uint)_MpmTileSizeShift,
+        (uint)maxCell.y >> (uint)_MpmTileSizeShift,
+        (uint)maxCell.z >> (uint)_MpmTileSizeShift
+    );
+
+    return true;
+}
+
+bool TryGetMpmActiveTileCell(
+    uint activeTileListIndex,
+    uint3 localId,
+    out int gridIndex,
+    out int3 cell)
+{
+    gridIndex = 0;
+    cell = int3(0, 0, 0);
+
+    if (localId.x >= (uint)_MpmTileSizeCells ||
+        localId.y >= (uint)_MpmTileSizeCells ||
+        localId.z >= (uint)_MpmTileSizeCells)
+    {
+        return false;
+    }
+
+    if (activeTileListIndex >= (uint)_MpmTileCount)
+        return false;
+
+    uint tileIndex = _MpmActiveTileIndices[activeTileListIndex];
+    if (tileIndex >= (uint)_MpmTileCount)
+        return false;
+
+    uint3 tile = UnflattenMpmTileIndex(tileIndex);
+    uint3 gridCell =
+        tile * (uint)_MpmTileSizeCells +
+        uint3(localId.x, localId.y, localId.z);
+
+    if (gridCell.x >= (uint)_GridResolution.x ||
+        gridCell.y >= (uint)_GridResolution.y ||
+        gridCell.z >= (uint)_GridResolution.z)
+    {
+        return false;
+    }
+
+    cell = int3((int)gridCell.x, (int)gridCell.y, (int)gridCell.z);
+    gridIndex = FlattenGridIndex(cell);
+    return true;
+}
+
 bool IsValidCell(int3 c)
 {
     return c.x >= 0 && c.y >= 0 && c.z >= 0 &&
@@ -310,10 +575,144 @@ bool IsValidCell(int3 c)
            c.z < _GridResolution.z;
 }
 
+bool IsInsideActiveMpmGridBounds(int3 cell)
+{
+    if (_EnableActiveMpmGridBounds == 0)
+        return true;
+
+    return
+        cell.x >= _ActiveMpmGridMin.x &&
+        cell.y >= _ActiveMpmGridMin.y &&
+        cell.z >= _ActiveMpmGridMin.z &&
+        cell.x < _ActiveMpmGridMin.x + _ActiveMpmGridSize.x &&
+        cell.y < _ActiveMpmGridMin.y + _ActiveMpmGridSize.y &&
+        cell.z < _ActiveMpmGridMin.z + _ActiveMpmGridSize.z;
+}
+
+bool TryGetMpmGridDispatchCell(
+    uint3 dispatchId,
+    out int gridIndex,
+    out int3 cell)
+{
+    gridIndex = 0;
+    cell = int3(0, 0, 0);
+
+    if (_EnableActiveMpmGridBounds == 0)
+    {
+        if (dispatchId.x >= (uint)_GridResolution.x ||
+            dispatchId.y >= (uint)_GridResolution.y ||
+            dispatchId.z >= (uint)_GridResolution.z)
+        {
+            return false;
+        }
+
+        cell = int3(
+            (int)dispatchId.x,
+            (int)dispatchId.y,
+            (int)dispatchId.z
+        );
+        gridIndex = FlattenGridIndex(cell);
+        return true;
+    }
+
+    if (dispatchId.x >= (uint)_ActiveMpmGridSize.x ||
+        dispatchId.y >= (uint)_ActiveMpmGridSize.y ||
+        dispatchId.z >= (uint)_ActiveMpmGridSize.z)
+    {
+        return false;
+    }
+
+    cell =
+        _ActiveMpmGridMin +
+        int3(
+            (int)dispatchId.x,
+            (int)dispatchId.y,
+            (int)dispatchId.z
+        );
+
+    if (!IsValidCell(cell))
+        return false;
+
+    gridIndex = FlattenGridIndex(cell);
+    return true;
+}
+
+bool IsInsideActiveProjectionBounds(int3 cell)
+{
+    if (_EnableActiveProjectionBounds == 0)
+        return true;
+
+    return
+        cell.x >= _ActiveProjectionMin.x &&
+        cell.y >= _ActiveProjectionMin.y &&
+        cell.z >= _ActiveProjectionMin.z &&
+        cell.x < _ActiveProjectionMin.x + _ActiveProjectionSize.x &&
+        cell.y < _ActiveProjectionMin.y + _ActiveProjectionSize.y &&
+        cell.z < _ActiveProjectionMin.z + _ActiveProjectionSize.z;
+}
+
+bool TryGetProjectionDispatchCell(
+    uint3 dispatchId,
+    out int gridIndex,
+    out int3 cell)
+{
+    gridIndex = 0;
+    cell = int3(0, 0, 0);
+
+    if (_EnableActiveProjectionBounds == 0)
+    {
+        if (dispatchId.x >= (uint)_GridResolution.x ||
+            dispatchId.y >= (uint)_GridResolution.y ||
+            dispatchId.z >= (uint)_GridResolution.z)
+        {
+            return false;
+        }
+
+        cell = int3(
+            (int)dispatchId.x,
+            (int)dispatchId.y,
+            (int)dispatchId.z
+        );
+        gridIndex = FlattenGridIndex(cell);
+        return true;
+    }
+
+    if (dispatchId.x >= (uint)_ActiveProjectionSize.x ||
+        dispatchId.y >= (uint)_ActiveProjectionSize.y ||
+        dispatchId.z >= (uint)_ActiveProjectionSize.z)
+    {
+        return false;
+    }
+
+    cell =
+        _ActiveProjectionMin +
+        int3(
+            (int)dispatchId.x,
+            (int)dispatchId.y,
+            (int)dispatchId.z
+        );
+
+    if (!IsValidCell(cell))
+        return false;
+
+    gridIndex = FlattenGridIndex(cell);
+    return true;
+}
+
+bool IsProjectionReadableCell(int3 cell)
+{
+    return IsValidCell(cell) &&
+           IsInsideActiveMpmGridBounds(cell) &&
+           IsInsideActiveProjectionBounds(cell);
+}
+
 int GetProjectionCellTypeSafe(int3 cell)
 {
     if (!IsValidCell(cell))
         return PROJECTION_SOLID;
+
+    if (!IsInsideActiveProjectionBounds(cell))
+        return PROJECTION_AIR;
 
     int index = FlattenGridIndex(cell);
     return _ProjectionCellTypeRead[index];
@@ -321,7 +720,7 @@ int GetProjectionCellTypeSafe(int3 cell)
 
 float3 GetProjectionVelocitySafe(int3 cell, float3 centerVelocity)
 {
-    if (!IsValidCell(cell))
+    if (!IsProjectionReadableCell(cell))
         return centerVelocity;
 
     int index = FlattenGridIndex(cell);
@@ -358,12 +757,22 @@ void AccumulateJacobiNeighborPressure(
     inout float pressureSum,
     inout float diagonalCount)
 {
-    // Out of grid behaves like solid wall.
     if (!IsValidCell(neighborCell))
     {
         if (_ProjectionSolidPressureNeumann != 0)
         {
             pressureSum += centerPressure;
+            diagonalCount += 1.0;
+        }
+
+        return;
+    }
+
+    if (!IsInsideActiveProjectionBounds(neighborCell))
+    {
+        if (_ProjectionAirPressureZero != 0)
+        {
+            pressureSum += 0.0;
             diagonalCount += 1.0;
         }
 
@@ -376,6 +785,70 @@ void AccumulateJacobiNeighborPressure(
     if (neighborType == PROJECTION_FLUID)
     {
         pressureSum += _ProjectionPressureRead[neighborIndex];
+        diagonalCount += 1.0;
+        return;
+    }
+
+    if (neighborType == PROJECTION_AIR)
+    {
+        // Free surface: pressure = 0.
+        if (_ProjectionAirPressureZero != 0)
+        {
+            pressureSum += 0.0;
+            diagonalCount += 1.0;
+        }
+
+        return;
+    }
+
+    if (neighborType == PROJECTION_SOLID)
+    {
+        // Solid wall: zero pressure gradient approximation.
+        if (_ProjectionSolidPressureNeumann != 0)
+        {
+            pressureSum += centerPressure;
+            diagonalCount += 1.0;
+        }
+
+        return;
+    }
+}
+
+void AccumulateSorNeighborPressure(
+    int3 neighborCell,
+    float centerPressure,
+    inout float pressureSum,
+    inout float diagonalCount)
+{
+    // Out of grid behaves like solid wall.
+    if (!IsValidCell(neighborCell))
+    {
+        if (_ProjectionSolidPressureNeumann != 0)
+        {
+            pressureSum += centerPressure;
+            diagonalCount += 1.0;
+        }
+
+        return;
+    }
+
+    if (!IsInsideActiveProjectionBounds(neighborCell))
+    {
+        if (_ProjectionAirPressureZero != 0)
+        {
+            pressureSum += 0.0;
+            diagonalCount += 1.0;
+        }
+
+        return;
+    }
+
+    int neighborIndex = FlattenGridIndex(neighborCell);
+    int neighborType = _ProjectionCellTypeRead[neighborIndex];
+
+    if (neighborType == PROJECTION_FLUID)
+    {
+        pressureSum += _ProjectionPressure[neighborIndex];
         diagonalCount += 1.0;
         return;
     }
@@ -430,6 +903,14 @@ float GetPressureForGradient(int3 neighborCell, float centerPressure)
             return centerPressure;
 
         return 0.0;
+    }
+
+    if (!IsInsideActiveProjectionBounds(neighborCell))
+    {
+        if (_ProjectionAirPressureZero != 0)
+            return 0.0;
+
+        return centerPressure;
     }
 
     int neighborIndex = FlattenGridIndex(neighborCell);
@@ -744,12 +1225,26 @@ void BuildStressRows(
 //    );
 //}
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KClearGrid(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
+    int index;
+    int3 cell;
+    if (!TryGetMpmGridDispatchCell(id, index, cell))
+        return;
 
-    if (index >= (uint)_GridNodeCount)
+    _GridAccumInt[index] = int4(0, 0, 0, 0);
+    _GridVelocityMass[index] = float4(0, 0, 0, 0);
+}
+
+[numthreads(8, 8, 8)]
+void KClearGridActiveTiles(
+    uint3 groupId : SV_GroupID,
+    uint3 localId : SV_GroupThreadID)
+{
+    int index;
+    int3 cell;
+    if (!TryGetMpmActiveTileCell(groupId.x, localId, index, cell))
         return;
 
     _GridAccumInt[index] = int4(0, 0, 0, 0);
@@ -768,6 +1263,354 @@ bool IsFiniteFloat(float value)
 }
 
 [numthreads(64, 1, 1)]
+void KClearMpmTileData(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index < (uint)_MpmTileCount)
+    {
+        _MpmTileFlags[index] = 0u;
+        _MpmActiveTileIndices[index] = 0u;
+        _MpmTileParticleCounts[index] = 0u;
+        _MpmTileParticleWriteCounts[index] = 0u;
+        _MpmTileParticleOffsets[index] = 0u;
+    }
+
+    if (index < 3u)
+    {
+        _MpmTileDispatchArgs[index] = index == 0u ? 0u : 1u;
+    }
+
+    if (index < 4u)
+    {
+        _MpmTileParticleMeta[index] = 0u;
+    }
+
+    if (index == 0u && _EnableGpuDiagnostics != 0)
+    {
+        _MpmDiagnostics[DIAG_MPM_TILE_COUNT] = (uint)_MpmTileCount;
+        _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY] =
+            (uint)max(_MpmTileParticleListCapacity, 0);
+    }
+}
+
+[numthreads(64, 1, 1)]
+void KClearMpmTileOrderedData(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index < (uint)_MpmTileCount)
+    {
+        _MpmTileOwnerParticleCounts[index] = 0u;
+        _MpmTileOwnerParticleWriteCounts[index] = 0u;
+        _MpmTileOwnerParticleOffsets[index] = 0u;
+    }
+
+    if (index < 3u)
+    {
+        _MpmTileOrderedParticleDispatchArgs[index] =
+            index == 0u ? 0u : 1u;
+    }
+
+    if (index < 4u)
+    {
+        _MpmTileOrderedParticleMeta[index] = 0u;
+    }
+}
+
+void MarkMpmTileIndex(uint tileIndex)
+{
+    if (tileIndex >= (uint)_MpmTileCount)
+        return;
+
+    uint oldValue;
+    InterlockedCompareExchange(
+        _MpmTileFlags[tileIndex],
+        0u,
+        1u,
+        oldValue
+    );
+
+    if (oldValue != 0u)
+        return;
+
+    uint activeTileIndex;
+    InterlockedAdd(_MpmTileDispatchArgs[0], 1u, activeTileIndex);
+
+    if (activeTileIndex >= (uint)_MpmTileCount)
+        return;
+
+    _MpmActiveTileIndices[activeTileIndex] = tileIndex;
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        InterlockedAdd(_MpmDiagnostics[DIAG_MPM_ACTIVE_TILES], 1u);
+    }
+}
+
+void MarkMpmTileForCell(int3 cell)
+{
+    uint tileIndex;
+    if (!TryGetMpmTileForCell(cell, tileIndex))
+        return;
+
+    MarkMpmTileIndex(tileIndex);
+}
+
+[numthreads(256, 1, 1)]
+void KMarkMpmActiveTiles(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount ||
+        (_EnableMpmTileOccupancy == 0 &&
+         _EnableMpmParticleTileLists == 0))
+    {
+        return;
+    }
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 p = _ParticlePositionRadiusRead[particleIndex].xyz;
+    if (!IsFiniteFloat3(p))
+    {
+        if (_EnableTiledP2G != 0 && _EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+
+        return;
+    }
+
+    float3 gridPos = WorldToGrid(p);
+    int3 baseCell = (int3)floor(gridPos - 0.5);
+
+    uint3 minTile;
+    uint3 maxTile;
+    if (!TryGetMpmSupportTileRange(baseCell, minTile, maxTile))
+    {
+        if (_EnableTiledP2G != 0 && _EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_OUTSIDE_GRID], 1);
+
+        return;
+    }
+
+    if (_EnableMpmParticleTileLists != 0)
+    {
+        uint ownerTileIndex;
+        if (TryGetMpmTileForCoord(minTile, ownerTileIndex))
+        {
+            InterlockedAdd(
+                _MpmTileOwnerParticleCounts[ownerTileIndex],
+                1u
+            );
+        }
+    }
+
+    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
+    {
+        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
+        {
+            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
+            {
+                uint tileIndex;
+                if (!TryGetMpmTileForCoord(uint3(tx, ty, tz), tileIndex))
+                    continue;
+
+                MarkMpmTileIndex(tileIndex);
+
+                if (_EnableMpmSupportParticleTileLists != 0)
+                {
+                    uint previousCount;
+                    InterlockedAdd(
+                        _MpmTileParticleCounts[tileIndex],
+                        1u,
+                        previousCount
+                    );
+
+                    uint newCount = previousCount + 1u;
+
+                    if (_EnableGpuDiagnostics != 0)
+                    {
+                        InterlockedAdd(
+                            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_REFS],
+                            1u
+                        );
+                        InterlockedMax(
+                            _MpmDiagnostics[DIAG_MPM_TILE_MAX_PARTICLE_REFS],
+                            newCount
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        InterlockedAdd(_MpmDiagnostics[DIAG_MPM_TILE_MARKS], 1u);
+    }
+}
+
+[numthreads(1, 1, 1)]
+void KBuildMpmTileParticleOffsets(uint3 id : SV_DispatchThreadID)
+{
+    if (_EnableMpmSupportParticleTileLists == 0)
+        return;
+
+    uint running = 0u;
+    uint maxRefsPerTile = 0u;
+    uint capacity = (uint)max(_MpmTileParticleListCapacity, 0);
+
+    for (uint tileIndex = 0u; tileIndex < (uint)_MpmTileCount; tileIndex++)
+    {
+        uint count = _MpmTileParticleCounts[tileIndex];
+
+        _MpmTileParticleOffsets[tileIndex] = running;
+        _MpmTileParticleWriteCounts[tileIndex] = 0u;
+
+        running += count;
+        maxRefsPerTile = max(maxRefsPerTile, count);
+    }
+
+    _MpmTileParticleMeta[0] = running;
+    _MpmTileParticleMeta[1] = maxRefsPerTile;
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        _MpmDiagnostics[DIAG_MPM_TILE_MAX_PARTICLE_REFS] = maxRefsPerTile;
+
+        if (running > capacity)
+        {
+            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW] =
+                running - capacity;
+        }
+
+        _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY] = capacity;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void KBuildMpmTileOwnerOffsets(uint3 id : SV_DispatchThreadID)
+{
+    if (_EnableMpmParticleTileLists == 0)
+        return;
+
+    uint ownerRunning = 0u;
+
+    for (uint tileIndex = 0u; tileIndex < (uint)_MpmTileCount; tileIndex++)
+    {
+        uint ownerCount = _MpmTileOwnerParticleCounts[tileIndex];
+
+        _MpmTileOwnerParticleOffsets[tileIndex] = ownerRunning;
+        _MpmTileOwnerParticleWriteCounts[tileIndex] = 0u;
+        ownerRunning += ownerCount;
+    }
+
+    _MpmTileOrderedParticleMeta[0] = ownerRunning;
+    _MpmTileOrderedParticleDispatchArgs[0] =
+        (ownerRunning + 255u) >> 8u;
+    _MpmTileOrderedParticleDispatchArgs[1] = 1u;
+    _MpmTileOrderedParticleDispatchArgs[2] = 1u;
+}
+
+[numthreads(256, 1, 1)]
+void KFillMpmTileParticleLists(uint3 id : SV_DispatchThreadID)
+{
+    if (_EnableMpmParticleTileLists == 0)
+        return;
+
+    uint particleIndex = id.x;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    float3 p = _ParticlePositionRadiusRead[particleIndex].xyz;
+    if (!IsFiniteFloat3(p))
+        return;
+
+    float3 gridPos = WorldToGrid(p);
+    int3 baseCell = (int3)floor(gridPos - 0.5);
+
+    uint3 minTile;
+    uint3 maxTile;
+    if (!TryGetMpmSupportTileRange(baseCell, minTile, maxTile))
+        return;
+
+    uint ownerTileIndex;
+    if (TryGetMpmTileForCoord(minTile, ownerTileIndex))
+    {
+        uint ownerLocalSlot;
+        InterlockedAdd(
+            _MpmTileOwnerParticleWriteCounts[ownerTileIndex],
+            1u,
+            ownerLocalSlot
+        );
+
+        uint orderedIndex =
+            _MpmTileOwnerParticleOffsets[ownerTileIndex] +
+            ownerLocalSlot;
+
+        if (orderedIndex < (uint)_ParticleCount)
+        {
+            _MpmTileOrderedParticleIndices[orderedIndex] = particleIndex;
+        }
+    }
+
+    if (_EnableMpmSupportParticleTileLists == 0)
+        return;
+
+    uint capacity = (uint)max(_MpmTileParticleListCapacity, 0);
+
+    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
+    {
+        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
+        {
+            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
+            {
+                uint tileIndex;
+                if (!TryGetMpmTileForCoord(uint3(tx, ty, tz), tileIndex))
+                    continue;
+
+                uint localSlot;
+                InterlockedAdd(
+                    _MpmTileParticleWriteCounts[tileIndex],
+                    1u,
+                    localSlot
+                );
+
+                uint listIndex =
+                    _MpmTileParticleOffsets[tileIndex] +
+                    localSlot;
+
+                if (listIndex >= capacity)
+                {
+                    if (_EnableGpuDiagnostics != 0)
+                    {
+                        InterlockedAdd(
+                            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW],
+                            1u
+                        );
+                    }
+
+                    continue;
+                }
+
+                _MpmTileParticleIndices[listIndex] = particleIndex;
+            }
+        }
+    }
+}
+
+[numthreads(64, 1, 1)]
 void KClearMpmDiagnostics(uint3 id : SV_DispatchThreadID)
 {
     uint index = id.x;
@@ -781,11 +1624,8 @@ void KClearMpmDiagnostics(uint3 id : SV_DispatchThreadID)
             : 0u;
 }
 
-[numthreads(256, 1, 1)]
-void KP2G(uint3 id : SV_DispatchThreadID)
+void RunP2GParticle(uint particleIndex)
 {
-    uint particleIndex = id.x;
-
     if (particleIndex >= (uint)_ParticleCount)
         return;
 
@@ -894,6 +1734,9 @@ void KP2G(uint3 id : SV_DispatchThreadID)
                 if (!IsValidCell(node))
                     continue;
 
+                if (!IsInsideActiveMpmGridBounds(node))
+                    continue;
+
 //                float wx = dx == 0 ? (1.0 - f.x) : f.x;
 //                float wy = dy == 0 ? (1.0 - f.y) : f.y;
 //                float wz = dz == 0 ? (1.0 - f.z) : f.z;
@@ -931,7 +1774,7 @@ void KP2G(uint3 id : SV_DispatchThreadID)
                 if (_EnableMaterialStress != 0 && restVolume > 0.0)
                 {
                     //float3 gradW = WeightGradientWorld(f, dx, dy, dz);
-  
+
                     ////////  G6.B Changes   ////////
                     float3 gradW = QuadraticWeightGradientWorld(
                         wx, wy, wz,
@@ -975,11 +1818,347 @@ void KP2G(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(256, 1, 1)]
+void KP2G(uint3 id : SV_DispatchThreadID)
+{
+    RunP2GParticle(id.x);
+}
+
+bool TryGetMpmTileOrderedParticleIndex(
+    uint orderedIndex,
+    out uint particleIndex)
+{
+    uint orderedParticleCount = _MpmTileOrderedParticleMetaRead[0];
+
+    if (orderedIndex >= orderedParticleCount)
+    {
+        particleIndex = 0u;
+        return false;
+    }
+
+    particleIndex = _MpmTileOrderedParticleIndicesRead[orderedIndex];
+    return particleIndex < (uint)_ParticleCount;
+}
+
+[numthreads(256, 1, 1)]
+void KP2GTileOrdered(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex;
+    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
+        return;
+
+    RunP2GParticle(particleIndex);
+}
+
+groupshared int _TileP2GMass[512];
+groupshared int _TileP2GMomentumX[512];
+groupshared int _TileP2GMomentumY[512];
+groupshared int _TileP2GMomentumZ[512];
+
+void AccumulateP2GParticleHybridTile(
+    uint particleIndex,
+    int3 tileBaseCell)
+{
+    float4 pr = _ParticlePositionRadiusRead[particleIndex];
+    float4 vm = _ParticleVelocityMassRead[particleIndex];
+    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
+
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMpmActiveState(state))
+        return;
+
+    if (_EnableGpuDiagnostics != 0)
+        InterlockedAdd(_MpmDiagnostics[DIAG_ACTIVE_PARTICLES], 1);
+
+    float3 p = pr.xyz;
+    float3 v = vm.xyz;
+    float rawMass = vm.w;
+
+    if (!IsFiniteFloat3(p) ||
+        !IsFiniteFloat3(v) ||
+        !IsFiniteFloat(rawMass))
+    {
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+        return;
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        float3 localPForDiagnostics =
+            mul(_BucketWorldToLocal, float4(p, 1.0)).xyz;
+        float normalizedBucketY = saturate(
+            (localPForDiagnostics.y + 0.5 * _BucketHeight) /
+            max(_BucketHeight, 1e-6)
+        );
+        uint fixedLocalY = (uint)round(
+            normalizedBucketY * DIAG_HEIGHT_FIXED_SCALE
+        );
+        uint fixedSpeed = (uint)round(
+            min(length(v), 10.0) * DIAG_SPEED_FIXED_SCALE
+        );
+
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Y_SUM], fixedLocalY);
+        InterlockedMin(_MpmDiagnostics[DIAG_LOCAL_Y_MIN], fixedLocalY);
+        InterlockedMax(_MpmDiagnostics[DIAG_LOCAL_Y_MAX], fixedLocalY);
+        InterlockedAdd(_MpmDiagnostics[DIAG_SPEED_SUM], fixedSpeed);
+        InterlockedMax(_MpmDiagnostics[DIAG_SPEED_MAX], fixedSpeed);
+    }
+
+    float mass = max(rawMass, 1e-12);
+
+    float3 c0 = _ParticleAffineC0Read[particleIndex].xyz;
+    float3 c1 = _ParticleAffineC1Read[particleIndex].xyz;
+    float3 c2 = _ParticleAffineC2Read[particleIndex].xyz;
+
+    float4 volumeJ = _ParticleVolumeJRead[particleIndex];
+    float restVolume = max(volumeJ.x, 1e-12);
+    float J = clamp(volumeJ.y, _MinJ, _MaxJ);
+
+    float3 stress0 = float3(0, 0, 0);
+    float3 stress1 = float3(0, 0, 0);
+    float3 stress2 = float3(0, 0, 0);
+
+    if (_EnableMaterialStress != 0)
+    {
+        BuildStressRows(c0, c1, c2, J, stress0, stress1, stress2);
+    }
+
+    float3 gridPos = WorldToGrid(p);
+
+    int3 baseCell = (int3)floor(gridPos - 0.5);
+    float3 f = gridPos - (float3)baseCell;
+
+    float3 wx, wy, wz;
+    float3 dwx, dwy, dwz;
+
+    QuadraticBSplineWeights(f.x, wx, dwx);
+    QuadraticBSplineWeights(f.y, wy, dwy);
+    QuadraticBSplineWeights(f.z, wz, dwz);
+
+    int validNodeCount = 0;
+    float validSupportWeight = 0.0;
+
+    for (int dz = 0; dz <= 2; dz++)
+    {
+        for (int dy = 0; dy <= 2; dy++)
+        {
+            for (int dx = 0; dx <= 2; dx++)
+            {
+                int3 node = baseCell + int3(dx, dy, dz);
+
+                if (!IsValidCell(node))
+                    continue;
+
+                if (!IsInsideActiveMpmGridBounds(node))
+                    continue;
+
+                float wxi = GetV3(wx, dx);
+                float wyi = GetV3(wy, dy);
+                float wzi = GetV3(wz, dz);
+
+                float w = wxi * wyi * wzi;
+                validNodeCount++;
+                validSupportWeight += w;
+
+                float3 nodeWorld = GridToWorld((float3)node);
+                float3 dpos = nodeWorld - p;
+
+                float3 affineVelocity = ApplyAffineRows(c0, c1, c2, dpos);
+                float3 nodeContributionVelocity = v + affineVelocity;
+
+                float3 momentum = w * mass * nodeContributionVelocity;
+
+                if (_EnableMaterialStress != 0 && restVolume > 0.0)
+                {
+                    float3 gradW = QuadraticWeightGradientWorld(
+                        wx, wy, wz,
+                        dwx, dwy, dwz,
+                        dx, dy, dz
+                    );
+
+                    float3 stressForce =
+                        -_Dt *
+                        restVolume *
+                        MatVecRows(stress0, stress1, stress2, gradW) *
+                        _MaterialStressStrength;
+
+                    momentum += stressForce;
+                }
+
+                int mFixed = (int)round(w * mass * _MassFixedScale);
+
+                int pxFixed = (int)round(momentum.x * _MomentumFixedScale);
+                int pyFixed = (int)round(momentum.y * _MomentumFixedScale);
+                int pzFixed = (int)round(momentum.z * _MomentumFixedScale);
+
+                int3 localCell = node - tileBaseCell;
+                bool insideOwnerTile =
+                    all(localCell >= int3(0, 0, 0)) &&
+                    all(localCell < int3(
+                        _MpmTileSizeCells,
+                        _MpmTileSizeCells,
+                        _MpmTileSizeCells
+                    ));
+
+                if (insideOwnerTile)
+                {
+                    uint sharedIndex =
+                        MpmTileLocalCellIndex(localCell);
+                    InterlockedAdd(_TileP2GMass[sharedIndex], mFixed);
+                    InterlockedAdd(_TileP2GMomentumX[sharedIndex], pxFixed);
+                    InterlockedAdd(_TileP2GMomentumY[sharedIndex], pyFixed);
+                    InterlockedAdd(_TileP2GMomentumZ[sharedIndex], pzFixed);
+                }
+                else
+                {
+                    int nodeIndex = FlattenGridIndex(node);
+                    InterlockedAdd(_GridAccumInt[nodeIndex].x, mFixed);
+                    InterlockedAdd(_GridAccumInt[nodeIndex].y, pxFixed);
+                    InterlockedAdd(_GridAccumInt[nodeIndex].z, pyFixed);
+                    InterlockedAdd(_GridAccumInt[nodeIndex].w, pzFixed);
+                }
+            }
+        }
+    }
+
+    if (_EnableGpuDiagnostics != 0)
+    {
+        if (validNodeCount == 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_OUTSIDE_GRID], 1);
+        else if (validSupportWeight < 0.999)
+            InterlockedAdd(_MpmDiagnostics[DIAG_PARTIAL_GRID_SUPPORT], 1);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KP2GHybridTiled(
+    uint3 groupId : SV_GroupID,
+    uint3 localId : SV_GroupThreadID)
+{
+    uint threadLinear = localId.x;
+    uint tileSize = (uint)_MpmTileSizeCells;
+    uint tileCellCount = tileSize * tileSize * tileSize;
+
+    for (uint clearIndex = threadLinear;
+         clearIndex < tileCellCount;
+         clearIndex += MPM_TILE_P2G_THREAD_COUNT)
+    {
+        _TileP2GMass[clearIndex] = 0;
+        _TileP2GMomentumX[clearIndex] = 0;
+        _TileP2GMomentumY[clearIndex] = 0;
+        _TileP2GMomentumZ[clearIndex] = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    bool tileValid = groupId.x < (uint)_MpmTileCount;
+    uint tileIndex = 0u;
+    uint3 tileCoord = uint3(0, 0, 0);
+    int3 tileBaseCell = int3(0, 0, 0);
+    uint ownerParticleCount = 0u;
+    uint ownerParticleOffset = 0u;
+
+    if (tileValid)
+    {
+        tileIndex = _MpmActiveTileIndicesRead[groupId.x];
+        tileValid = tileIndex < (uint)_MpmTileCount;
+    }
+
+    if (tileValid)
+    {
+        tileCoord = UnflattenMpmTileIndex(tileIndex);
+        tileBaseCell = int3(
+            (int)(tileCoord.x * (uint)_MpmTileSizeCells),
+            (int)(tileCoord.y * (uint)_MpmTileSizeCells),
+            (int)(tileCoord.z * (uint)_MpmTileSizeCells)
+        );
+        ownerParticleCount =
+            _MpmTileOwnerParticleCountsRead[tileIndex];
+        ownerParticleOffset =
+            _MpmTileOwnerParticleOffsetsRead[tileIndex];
+    }
+
+    if (tileValid)
+    {
+        for (uint slot = threadLinear;
+             slot < ownerParticleCount;
+             slot += MPM_TILE_P2G_THREAD_COUNT)
+        {
+            uint listIndex = ownerParticleOffset + slot;
+
+            if (listIndex >= (uint)_ParticleCount)
+                continue;
+
+            uint particleIndex =
+                _MpmTileOrderedParticleIndicesRead[listIndex];
+
+            if (particleIndex >= (uint)_ParticleCount)
+                continue;
+
+            AccumulateP2GParticleHybridTile(
+                particleIndex,
+                tileBaseCell
+            );
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!tileValid)
+        return;
+
+    for (uint sharedIndex = threadLinear;
+         sharedIndex < tileCellCount;
+         sharedIndex += MPM_TILE_P2G_THREAD_COUNT)
+    {
+        uint layer = tileSize * tileSize;
+        uint localZ = sharedIndex / layer;
+        uint rem = sharedIndex - localZ * layer;
+        uint localY = rem / tileSize;
+        uint localX = rem - localY * tileSize;
+
+        uint3 gridCell =
+            tileCoord * tileSize +
+            uint3(localX, localY, localZ);
+
+        if (gridCell.x >= (uint)_GridResolution.x ||
+            gridCell.y >= (uint)_GridResolution.y ||
+            gridCell.z >= (uint)_GridResolution.z)
+        {
+            continue;
+        }
+
+        int3 cell = int3(
+            (int)gridCell.x,
+            (int)gridCell.y,
+            (int)gridCell.z
+        );
+
+        int nodeIndex = FlattenGridIndex(cell);
+
+        int mFixed = _TileP2GMass[sharedIndex];
+        int pxFixed = _TileP2GMomentumX[sharedIndex];
+        int pyFixed = _TileP2GMomentumY[sharedIndex];
+        int pzFixed = _TileP2GMomentumZ[sharedIndex];
+
+        if (mFixed != 0)
+            InterlockedAdd(_GridAccumInt[nodeIndex].x, mFixed);
+        if (pxFixed != 0)
+            InterlockedAdd(_GridAccumInt[nodeIndex].y, pxFixed);
+        if (pyFixed != 0)
+            InterlockedAdd(_GridAccumInt[nodeIndex].z, pyFixed);
+        if (pzFixed != 0)
+            InterlockedAdd(_GridAccumInt[nodeIndex].w, pzFixed);
+    }
+}
+
+[numthreads(8, 8, 8)]
 void KGridUpdate(uint3 id : SV_DispatchThreadID)
 {
-    uint nodeIndex = id.x;
-
-    if (nodeIndex >= (uint)_GridNodeCount)
+    int nodeIndex;
+    int3 cell;
+    if (!TryGetMpmGridDispatchCell(id, nodeIndex, cell))
         return;
 
     int4 accum = _GridAccumInt[nodeIndex];
@@ -1016,15 +2195,6 @@ void KGridUpdate(uint3 id : SV_DispatchThreadID)
         v *= damping;
     }
 
-    uint gx = (uint)_GridResolution.x;
-    uint gy = (uint)_GridResolution.y;
-    uint xy = gx * gy;
-
-    uint z = nodeIndex / xy;
-    uint rem = nodeIndex - z * xy;
-    uint y = rem / gx;
-    uint x = rem - y * gx;
-
     //if (_EnableBoxBoundary != 0)
     //{
     //    if (x <= 1u && v.x < 0) v.x = -v.x * _BoundaryDamping;
@@ -1044,11 +2214,57 @@ void KGridUpdate(uint3 id : SV_DispatchThreadID)
     _GridVelocityMass[nodeIndex] = float4(v, mass);
 }
 
-[numthreads(256, 1, 1)]
-void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
+[numthreads(8, 8, 8)]
+void KGridUpdateActiveTiles(
+    uint3 groupId : SV_GroupID,
+    uint3 localId : SV_GroupThreadID)
 {
-    uint particleIndex = id.x;
+    int nodeIndex;
+    int3 cell;
+    if (!TryGetMpmActiveTileCell(groupId.x, localId, nodeIndex, cell))
+        return;
 
+    int4 accum = _GridAccumInt[nodeIndex];
+
+    float mass = (float)accum.x / max((float)_MassFixedScale, 1.0);
+
+    if (mass <= 1e-8)
+    {
+        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    float3 momentum = float3(
+        (float)accum.y / max((float)_MomentumFixedScale, 1.0),
+        (float)accum.z / max((float)_MomentumFixedScale, 1.0),
+        (float)accum.w / max((float)_MomentumFixedScale, 1.0)
+    );
+
+    float3 v = momentum / mass;
+
+    if (!IsFiniteFloat3(v))
+    {
+        if (_EnableGpuDiagnostics != 0)
+            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
+        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, mass);
+        return;
+    }
+
+    v += _Gravity * _Dt;
+
+    if (_VelocityDampingPerSecond > 0.0)
+    {
+        float damping = exp(-_VelocityDampingPerSecond * _Dt);
+        v *= damping;
+    }
+
+    v = ClampSpeed(v);
+
+    _GridVelocityMass[nodeIndex] = float4(v, mass);
+}
+
+void RunG2PVelocityApicParticle(uint particleIndex)
+{
     if (particleIndex >= (uint)_ParticleCount)
         return;
 
@@ -1087,6 +2303,7 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
 
     float3 gridVelocity = float3(0, 0, 0);
     float weightSum = 0.0;
+    float3 gridMassGradient = float3(0, 0, 0);
 
     float3 b0 = float3(0, 0, 0);
     float3 b1 = float3(0, 0, 0);
@@ -1101,6 +2318,9 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
                 int3 node = baseCell + int3(dx, dy, dz);
 
                 if (!IsValidCell(node))
+                    continue;
+
+                if (!IsInsideActiveMpmGridBounds(node))
                     continue;
 
                 //float wx = dx == 0 ? (1.0 - f.x) : f.x;
@@ -1128,6 +2348,17 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
 
                 gridVelocity += w * nodeVelocity;
                 weightSum += w;
+
+                if (_EnableFreeSurfacePolish != 0)
+                {
+                    float3 gradW = QuadraticWeightGradientWorld(
+                        wx, wy, wz,
+                        dwx, dwy, dwz,
+                        dx, dy, dz
+                    );
+
+                    gridMassGradient += gv.w * gradW;
+                }
 
                 //if (_EnableApicTransfer != 0)
                 //{
@@ -1184,6 +2415,64 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
         _ParticleAffineC1[particleIndex] = float4(c1New, 0);
         _ParticleAffineC2[particleIndex] = float4(c2New, 0);
 
+    }
+
+    if (_EnableFreeSurfacePolish != 0)
+    {
+        float gradientMagnitude = length(gridMassGradient);
+
+        if (gradientMagnitude > 1e-8)
+        {
+            // Mass is higher inside the liquid and lower toward air.
+            // The outward free-surface normal therefore points opposite
+            // the mass gradient.
+            float3 outwardNormal = -gridMassGradient / gradientMagnitude;
+
+            float surfaceMask = saturate(
+                gradientMagnitude /
+                max(_FreeSurfaceGradientScale, 1e-8)
+            );
+
+            float3 totalCorrection = float3(0, 0, 0);
+
+            float outwardSpeed = dot(newV, outwardNormal);
+            if (outwardSpeed > 0.0 &&
+                _FreeSurfaceNormalDampingPerSecond > 0.0)
+            {
+                float damping =
+                    1.0 -
+                    exp(
+                        -_FreeSurfaceNormalDampingPerSecond *
+                        surfaceMask *
+                        _Dt
+                    );
+
+                totalCorrection -=
+                    outwardNormal *
+                    outwardSpeed *
+                    saturate(damping);
+            }
+
+            if (_FreeSurfaceCohesionAcceleration > 0.0)
+            {
+                totalCorrection -=
+                    outwardNormal *
+                    _FreeSurfaceCohesionAcceleration *
+                    surfaceMask *
+                    _Dt;
+            }
+
+            float maxCorrection =
+                max(_MaxFreeSurfaceVelocityCorrection, 0.0);
+
+            if (maxCorrection > 0.0)
+            {
+                totalCorrection =
+                    ClampVectorLength(totalCorrection, maxCorrection);
+            }
+
+            newV = ClampSpeed(newV + totalCorrection);
+        }
     }
 
     // Update deformation gradient: F_new = (I + dt * C) F_old
@@ -1243,6 +2532,22 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
     //_ParticleF2[particleIndex] = float4(f2New, 0);
 
     //_ParticleVolumeJ[particleIndex] = volumeJ;
+}
+
+[numthreads(256, 1, 1)]
+void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
+{
+    RunG2PVelocityApicParticle(id.x);
+}
+
+[numthreads(256, 1, 1)]
+void KG2PVelocityApicTileOrdered(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex;
+    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
+        return;
+
+    RunG2PVelocityApicParticle(particleIndex);
 }
 
 
@@ -1650,12 +2955,12 @@ float3 ApplyCollisionVelocityAgainstMovingWall(
 /// /// /// /// /// /// /// ///   End G8.B Changes  /// /// /// /// /// /// /// /// /// ///
 
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     _ProjectionCellType[index] = PROJECTION_AIR;
@@ -1674,12 +2979,12 @@ void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
     _ProjectionFaceVelocity[index] = float4(0, 0, 0, 0);
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -1688,8 +2993,6 @@ void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
     {
         return;
     }
-
-    int3 cell = UnflattenGridIndex(index);
 
     // Projection shares the node-centered MPM grid.
     float3 worldP = GridToWorld((float3)cell);
@@ -1716,11 +3019,8 @@ void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
     }
 }
 
-[numthreads(256, 1, 1)]
-void KMarkProjectionFluidCells(uint3 id : SV_DispatchThreadID)
+void RunMarkProjectionFluidCellsParticle(uint particleIndex)
 {
-    uint particleIndex = id.x;
-
     if (particleIndex >= (uint)_ParticleCount)
         return;
 
@@ -1762,6 +3062,12 @@ void KMarkProjectionFluidCells(uint3 id : SV_DispatchThreadID)
                 if (!IsValidCell(node))
                     continue;
 
+                if (!IsInsideActiveMpmGridBounds(node))
+                    continue;
+
+                if (!IsInsideActiveProjectionBounds(node))
+                    continue;
+
                 int index = FlattenGridIndex(node);
 
                 if (_ProjectionCellType[index] == PROJECTION_SOLID)
@@ -1788,11 +3094,36 @@ void KMarkProjectionFluidCells(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(256, 1, 1)]
+void KMarkProjectionFluidCells(uint3 id : SV_DispatchThreadID)
+{
+    RunMarkProjectionFluidCellsParticle(id.x);
+}
+
+[numthreads(256, 1, 1)]
+void KMarkProjectionFluidCellsTileOrdered(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex;
+    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
+        return;
+
+    RunMarkProjectionFluidCellsParticle(particleIndex);
+}
+
+[numthreads(1, 1, 1)]
+void KClearProjectionFluidCellList(uint3 id : SV_DispatchThreadID)
+{
+    _ProjectionFluidCellMeta[0] = 0u;
+    _ProjectionFluidCellDispatchArgs[0] = 0u;
+    _ProjectionFluidCellDispatchArgs[1] = 1u;
+    _ProjectionFluidCellDispatchArgs[2] = 1u;
+}
+
+[numthreads(8, 8, 8)]
 void KFinalizeProjectionGrid(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0)
@@ -1818,6 +3149,19 @@ void KFinalizeProjectionGrid(uint3 id : SV_DispatchThreadID)
 
         // x = mass, y = reserved density ratio, z = fluid flag, w = reserved
         _ProjectionCellData[index] = float4(mass, 0, 1, 0);
+
+        if (_EnableSparseProjectionPressureDispatch != 0)
+        {
+            uint fluidListIndex;
+            InterlockedAdd(
+                _ProjectionFluidCellMeta[0],
+                1u,
+                fluidListIndex
+            );
+
+            if (fluidListIndex < (uint)_GridNodeCount)
+                _ProjectionFluidCellIndices[fluidListIndex] = (uint)index;
+        }
     }
     else
     {
@@ -1828,13 +3172,23 @@ void KFinalizeProjectionGrid(uint3 id : SV_DispatchThreadID)
     }
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(1, 1, 1)]
+void KBuildProjectionFluidCellDispatchArgs(uint3 id : SV_DispatchThreadID)
+{
+    uint fluidCellCount = _ProjectionFluidCellMeta[0];
+    _ProjectionFluidCellDispatchArgs[0] =
+        (fluidCellCount + 255u) >> 8u;
+    _ProjectionFluidCellDispatchArgs[1] = 1u;
+    _ProjectionFluidCellDispatchArgs[2] = 1u;
+}
+
+[numthreads(8, 8, 8)]
 void KApplyMovingBucketProjectionBoundaryVelocity(
     uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -1843,6 +3197,9 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
     {
         return;
     }
+
+    if (!IsInsideActiveMpmGridBounds(cell))
+        return;
 
     float4 velocityMass = _GridVelocityMass[index];
 
@@ -1853,8 +3210,7 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
 
     if (cellType == PROJECTION_SOLID)
     {
-        int3 nodeCell = UnflattenGridIndex(index);
-        float3 nodeWorld = GridToWorld((float3)nodeCell);
+        float3 nodeWorld = GridToWorld((float3)cell);
         float3 wallVelocity = ComputeProjectionWallVelocityWorld(nodeWorld);
         _GridVelocityMass[index] = float4(ClampSpeed(wallVelocity), velocityMass.w);
         return;
@@ -1862,8 +3218,6 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
 
     if (cellType != PROJECTION_FLUID)
         return;
-
-    int3 cell = UnflattenGridIndex(index);
 
     float3 centerWorld =
         GridToWorld((float3)cell);
@@ -1900,6 +3254,10 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
         if (!IsValidCell(neighbor))
         {
             solidNeighbor = true;
+        }
+        else if (!IsInsideActiveProjectionBounds(neighbor))
+        {
+            solidNeighbor = false;
         }
         else
         {
@@ -1953,6 +3311,10 @@ float3 GetProjectionFaceVelocity(
         if (_UseMovingBucketVelocityInDivergence != 0)
             result = ComputeProjectionWallVelocityWorld(faceWorld);
     }
+    else if (!IsInsideActiveProjectionBounds(neighborCell))
+    {
+        result = centerVelocity;
+    }
     else
     {
         int neighborIndex = FlattenGridIndex(neighborCell);
@@ -2005,13 +3367,21 @@ float GetStaggeredFaceVelocityComponent(
     int axis)
 {
     float result = 0.0;
-    bool lowerValid = IsValidCell(lowerCell);
-    bool upperValid = IsValidCell(upperCell);
+    bool lowerInsideGrid = IsValidCell(lowerCell);
+    bool upperInsideGrid = IsValidCell(upperCell);
+    bool lowerValid = IsProjectionReadableCell(lowerCell);
+    bool upperValid = IsProjectionReadableCell(upperCell);
 
     int lowerType = PROJECTION_SOLID;
     int upperType = PROJECTION_SOLID;
     float lowerVelocity = 0.0;
     float upperVelocity = 0.0;
+
+    if (lowerInsideGrid && !lowerValid)
+        lowerType = PROJECTION_AIR;
+
+    if (upperInsideGrid && !upperValid)
+        upperType = PROJECTION_AIR;
 
     if (lowerValid)
     {
@@ -2077,12 +3447,12 @@ float GetStaggeredFaceVelocityComponent(
     return result;
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KBuildProjectionFaceVelocities(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -2091,8 +3461,6 @@ void KBuildProjectionFaceVelocities(uint3 id : SV_DispatchThreadID)
     {
         return;
     }
-
-    int3 cell = UnflattenGridIndex(index);
 
     float3 faceVelocity;
     faceVelocity.x = GetStaggeredFaceVelocityComponent(
@@ -2114,12 +3482,12 @@ void KBuildProjectionFaceVelocities(uint3 id : SV_DispatchThreadID)
     _ProjectionFaceVelocity[index] = float4(faceVelocity, 0.0);
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -2136,14 +3504,12 @@ void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    int3 cell = UnflattenGridIndex(index);
-
     if (_UseStaggeredFaceProjection != 0)
     {
         float3 positiveFaces =
             _ProjectionFaceVelocityRead[index].xyz;
 
-        float faceLeft = IsValidCell(cell + int3(-1, 0, 0))
+        float faceLeft = IsProjectionReadableCell(cell + int3(-1, 0, 0))
             ? _ProjectionFaceVelocityRead[
                 FlattenGridIndex(cell + int3(-1, 0, 0))
               ].x
@@ -2153,7 +3519,7 @@ void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
                 0
               );
 
-        float faceDown = IsValidCell(cell + int3(0, -1, 0))
+        float faceDown = IsProjectionReadableCell(cell + int3(0, -1, 0))
             ? _ProjectionFaceVelocityRead[
                 FlattenGridIndex(cell + int3(0, -1, 0))
               ].y
@@ -2163,7 +3529,7 @@ void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
                 1
               );
 
-        float faceBack = IsValidCell(cell + int3(0, 0, -1))
+        float faceBack = IsProjectionReadableCell(cell + int3(0, 0, -1))
             ? _ProjectionFaceVelocityRead[
                 FlattenGridIndex(cell + int3(0, 0, -1))
               ].z
@@ -2247,12 +3613,35 @@ void KComputeProjectionDivergence(uint3 id : SV_DispatchThreadID)
     _ProjectionDivergence[index] = divergence;
 }
 
-[numthreads(256, 1, 1)]
-void KJacobiProjectionPressure(uint3 id : SV_DispatchThreadID)
+bool TryGetSparseProjectionFluidCell(
+    uint listIndex,
+    out int index,
+    out int3 cell)
 {
-    uint index = id.x;
+    uint fluidCellCount = _ProjectionFluidCellMetaRead[0];
+    if (listIndex >= fluidCellCount)
+    {
+        index = 0;
+        cell = int3(0, 0, 0);
+        return false;
+    }
 
-    if (index >= (uint)_GridNodeCount)
+    uint gridIndex = _ProjectionFluidCellIndicesRead[listIndex];
+    if (gridIndex >= (uint)_GridNodeCount)
+    {
+        index = 0;
+        cell = int3(0, 0, 0);
+        return false;
+    }
+
+    index = (int)gridIndex;
+    cell = UnflattenGridIndex(gridIndex);
+    return true;
+}
+
+void RunJacobiProjectionPressureCell(int index, int3 cell)
+{
+    if (index < 0 || index >= _GridNodeCount)
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -2269,8 +3658,6 @@ void KJacobiProjectionPressure(uint3 id : SV_DispatchThreadID)
         _ProjectionPressureWrite[index] = 0.0;
         return;
     }
-
-    int3 cell = UnflattenGridIndex(index);
 
     float centerPressure = _ProjectionPressureRead[index];
 
@@ -2356,12 +3743,157 @@ void KJacobiProjectionPressure(uint3 id : SV_DispatchThreadID)
     _ProjectionPressureWrite[index] = relaxedPressure;
 }
 
+[numthreads(8, 8, 8)]
+void KJacobiProjectionPressure(uint3 id : SV_DispatchThreadID)
+{
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
+        return;
+
+    RunJacobiProjectionPressureCell(index, cell);
+}
+
 [numthreads(256, 1, 1)]
+void KJacobiProjectionPressureSparse(uint3 id : SV_DispatchThreadID)
+{
+    int index;
+    int3 cell;
+    if (!TryGetSparseProjectionFluidCell(id.x, index, cell))
+        return;
+
+    RunJacobiProjectionPressureCell(index, cell);
+}
+
+void RunRedBlackSorProjectionPressureCell(int index, int3 cell)
+{
+    if (index < 0 || index >= _GridNodeCount)
+        return;
+
+    if (_EnableProjectionGrid == 0 ||
+        _EnableProjectionDivergence == 0 ||
+        _EnableJacobiPressureSolve == 0)
+    {
+        return;
+    }
+
+    int cellType = _ProjectionCellTypeRead[index];
+
+    if (cellType != PROJECTION_FLUID)
+    {
+        _ProjectionPressure[index] = 0.0;
+        return;
+    }
+
+    int parity = (cell.x + cell.y + cell.z) & 1;
+
+    if (parity != (_ProjectionPressureSolveColor & 1))
+        return;
+
+    float centerPressure = _ProjectionPressure[index];
+
+    float pressureSum = 0.0;
+    float diagonalCount = 0.0;
+
+    AccumulateSorNeighborPressure(
+        cell + int3(-1, 0, 0),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    AccumulateSorNeighborPressure(
+        cell + int3(1, 0, 0),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    AccumulateSorNeighborPressure(
+        cell + int3(0, -1, 0),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    AccumulateSorNeighborPressure(
+        cell + int3(0, 1, 0),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    AccumulateSorNeighborPressure(
+        cell + int3(0, 0, -1),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    AccumulateSorNeighborPressure(
+        cell + int3(0, 0, 1),
+        centerPressure,
+        pressureSum,
+        diagonalCount
+    );
+
+    if (diagonalCount <= 1e-6)
+    {
+        _ProjectionPressure[index] = 0.0;
+        return;
+    }
+
+    float divergence = _ProjectionDivergenceRead[index];
+    float h2 = _CellSize * _CellSize;
+
+    float rhs =
+        divergence *
+        _ProjectionPressureRhsScale;
+
+    float gaussSeidelPressure =
+        (pressureSum - rhs * h2) /
+        max(diagonalCount, 1.0);
+
+    float sorPressure = lerp(
+        centerPressure,
+        gaussSeidelPressure,
+        clamp(_ProjectionPressureSorOmega, 0.05, 1.95)
+    );
+
+    sorPressure = ClampProjectionPressure(sorPressure);
+
+    _ProjectionPressure[index] = sorPressure;
+}
+
+[numthreads(8, 8, 8)]
+void KRedBlackSorProjectionPressure(uint3 id : SV_DispatchThreadID)
+{
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
+        return;
+
+    RunRedBlackSorProjectionPressureCell(index, cell);
+}
+
+[numthreads(256, 1, 1)]
+void KRedBlackSorProjectionPressureSparse(
+    uint3 id : SV_DispatchThreadID)
+{
+    int index;
+    int3 cell;
+    if (!TryGetSparseProjectionFluidCell(id.x, index, cell))
+        return;
+
+    RunRedBlackSorProjectionPressureCell(index, cell);
+}
+
+[numthreads(8, 8, 8)]
 void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -2376,7 +3908,6 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
 
     if (_UseStaggeredFaceProjection != 0)
     {
-        int3 cell = UnflattenGridIndex(index);
         float3 faceVelocity = _ProjectionFaceVelocity[index].xyz;
         float3 correction = float3(0, 0, 0);
         float sign = _InvertPressureGradientSign != 0 ? -1.0 : 1.0;
@@ -2391,11 +3922,15 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
         for (int axis = 0; axis < 3; axis++)
         {
             int3 upperCell = upperCells[axis];
-            bool upperValid = IsValidCell(upperCell);
+            bool upperValid = IsProjectionReadableCell(upperCell);
 
             int upperType = upperValid
                 ? _ProjectionCellTypeRead[FlattenGridIndex(upperCell)]
-                : PROJECTION_SOLID;
+                : (
+                    IsValidCell(upperCell)
+                        ? PROJECTION_AIR
+                        : PROJECTION_SOLID
+                  );
 
             bool lowerFluid = cellType == PROJECTION_FLUID;
             bool upperFluid = upperType == PROJECTION_FLUID;
@@ -2460,8 +3995,6 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
     if (velocityMass.w <= 1e-8)
         return;
 
-    int3 cell = UnflattenGridIndex(index);
-
     float centerPressure = _ProjectionPressureRead[index];
 
     float pL = GetPressureForGradient(
@@ -2523,12 +4056,12 @@ void KSubtractProjectionPressureGradient(uint3 id : SV_DispatchThreadID)
         float4(correctedVelocity, velocityMass.w);
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
     if (_EnableProjectionGrid == 0 ||
@@ -2540,13 +4073,15 @@ void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
         return;
     }
 
+    if (!IsInsideActiveMpmGridBounds(cell))
+        return;
+
     float4 velocityMass = _GridVelocityMass[index];
 
     if (velocityMass.w <= 1e-8)
         return;
 
     int cellType = _ProjectionCellTypeRead[index];
-    int3 cell = UnflattenGridIndex(index);
 
     if (cellType == PROJECTION_SOLID)
     {
@@ -2563,19 +4098,19 @@ void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
     float3 positiveFaces =
         _ProjectionFaceVelocityRead[index].xyz;
 
-    float faceLeft = IsValidCell(cell + int3(-1, 0, 0))
+    float faceLeft = IsProjectionReadableCell(cell + int3(-1, 0, 0))
         ? _ProjectionFaceVelocityRead[
             FlattenGridIndex(cell + int3(-1, 0, 0))
           ].x
         : positiveFaces.x;
 
-    float faceDown = IsValidCell(cell + int3(0, -1, 0))
+    float faceDown = IsProjectionReadableCell(cell + int3(0, -1, 0))
         ? _ProjectionFaceVelocityRead[
             FlattenGridIndex(cell + int3(0, -1, 0))
           ].y
         : positiveFaces.y;
 
-    float faceBack = IsValidCell(cell + int3(0, 0, -1))
+    float faceBack = IsProjectionReadableCell(cell + int3(0, 0, -1))
         ? _ProjectionFaceVelocityRead[
             FlattenGridIndex(cell + int3(0, 0, -1))
           ].z
@@ -2591,12 +4126,13 @@ void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
         float4(ClampSpeed(correctedVelocity), velocityMass.w);
 }
 
-[numthreads(256, 1, 1)]
+[numthreads(8, 8, 8)]
 void KCollectProjectionDiagnostics(uint3 id : SV_DispatchThreadID)
 {
-    uint index = id.x;
-
-    if (index >= (uint)_GridNodeCount || _EnableGpuDiagnostics == 0)
+    int index;
+    int3 cell;
+    if (!TryGetProjectionDispatchCell(id, index, cell) ||
+        _EnableGpuDiagnostics == 0)
         return;
 
     int cellType = _ProjectionCellTypeRead[index];
@@ -2654,12 +4190,171 @@ void KCollectProjectionDiagnostics(uint3 id : SV_DispatchThreadID)
     InterlockedMax(_MpmDiagnostics[DIAG_PRESSURE_MAX], fixedPressure);
 }
 
+groupshared uint _AdaptiveActiveCountGroup[256];
+groupshared uint _AdaptivePriorityCountGroup[256];
+groupshared uint _AdaptiveCalmCountGroup[256];
+groupshared uint _AdaptiveAirCountGroup[256];
+groupshared uint _AdaptiveSpeedSumGroup[256];
+groupshared uint _AdaptiveSpeedMaxGroup[256];
+groupshared uint _AdaptiveJDeviationSumGroup[256];
+
+[numthreads(1, 1, 1)]
+void KClearAdaptiveActivity(uint3 id : SV_DispatchThreadID)
+{
+    for (uint i = 0u; i < 7u; i++)
+        _AdaptiveActivitySummary[i] = 0u;
+}
 
 [numthreads(256, 1, 1)]
-void KBucketCollision(uint3 id : SV_DispatchThreadID)
+void KClassifyAdaptiveActivity(
+    uint3 id : SV_DispatchThreadID,
+    uint3 localId : SV_GroupThreadID)
 {
     uint particleIndex = id.x;
+    uint lane = localId.x;
 
+    uint activeCount = 0u;
+    uint priorityCount = 0u;
+    uint calmCount = 0u;
+    uint airCount = 0u;
+    uint speedFixed = 0u;
+    uint jDeviationFixed = 0u;
+
+    if (particleIndex < (uint)_ParticleCount)
+    {
+        int state = (int)round(
+            _ParticleStateAgeIdRead[particleIndex].x
+        );
+        bool active = IsMpmActiveState(state);
+        bool air =
+            state == 4 ||
+            state == 5 ||
+            state == 6 ||
+            state == 7;
+
+        if (active)
+        {
+            float3 p = _ParticlePositionRadiusRead[particleIndex].xyz;
+            float3 v = _ParticleVelocityMassRead[particleIndex].xyz;
+            float speed =
+                IsFiniteFloat3(v)
+                    ? min(length(v), max(_MaxParticleSpeed, 0.0))
+                    : max(_MaxParticleSpeed, 0.0);
+
+            float3 localP = TransformPoint(_BucketWorldToLocal, p);
+            float halfHeight = 0.5 * _BucketHeight;
+            float bottomY = -halfHeight;
+            float normalizedY = saturate(
+                (localP.y - bottomY) /
+                max(_BucketHeight, 1e-6)
+            );
+            float radialClearance =
+                BucketInnerRadiusAtY(localP.y) -
+                length(localP.xz);
+            float bottomClearance = localP.y - bottomY;
+
+            bool nearBoundary =
+                radialClearance <= _AdaptivePriorityBoundaryBand ||
+                bottomClearance <= _AdaptivePriorityBoundaryBand;
+            bool possibleSurface =
+                normalizedY >= _AdaptivePriorityTopFraction;
+            bool priority =
+                state != 1 ||
+                speed >= _AdaptivePriorityParticleSpeed ||
+                nearBoundary ||
+                possibleSurface;
+
+            _AdaptiveParticlePriority[particleIndex] =
+                priority ? 1u : 0u;
+
+            activeCount = 1u;
+            priorityCount = priority ? 1u : 0u;
+            calmCount = priority ? 0u : 1u;
+            speedFixed = (uint)round(speed * 1000.0);
+            float J = _ParticleVolumeJRead[particleIndex].y;
+            jDeviationFixed = (uint)round(
+                saturate(abs(J - 1.0)) * 1000.0
+            );
+        }
+        else
+        {
+            _AdaptiveParticlePriority[particleIndex] = 1u;
+        }
+
+        airCount = air ? 1u : 0u;
+    }
+
+    _AdaptiveActiveCountGroup[lane] = activeCount;
+    _AdaptivePriorityCountGroup[lane] = priorityCount;
+    _AdaptiveCalmCountGroup[lane] = calmCount;
+    _AdaptiveAirCountGroup[lane] = airCount;
+    _AdaptiveSpeedSumGroup[lane] = speedFixed;
+    _AdaptiveSpeedMaxGroup[lane] = speedFixed;
+    _AdaptiveJDeviationSumGroup[lane] = jDeviationFixed;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint stride = 128u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride)
+        {
+            _AdaptiveActiveCountGroup[lane] +=
+                _AdaptiveActiveCountGroup[lane + stride];
+            _AdaptivePriorityCountGroup[lane] +=
+                _AdaptivePriorityCountGroup[lane + stride];
+            _AdaptiveCalmCountGroup[lane] +=
+                _AdaptiveCalmCountGroup[lane + stride];
+            _AdaptiveAirCountGroup[lane] +=
+                _AdaptiveAirCountGroup[lane + stride];
+            _AdaptiveSpeedSumGroup[lane] +=
+                _AdaptiveSpeedSumGroup[lane + stride];
+            _AdaptiveSpeedMaxGroup[lane] = max(
+                _AdaptiveSpeedMaxGroup[lane],
+                _AdaptiveSpeedMaxGroup[lane + stride]
+            );
+            _AdaptiveJDeviationSumGroup[lane] +=
+                _AdaptiveJDeviationSumGroup[lane + stride];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (lane == 0u)
+    {
+        InterlockedAdd(
+            _AdaptiveActivitySummary[0],
+            _AdaptiveActiveCountGroup[0]
+        );
+        InterlockedAdd(
+            _AdaptiveActivitySummary[1],
+            _AdaptivePriorityCountGroup[0]
+        );
+        InterlockedAdd(
+            _AdaptiveActivitySummary[2],
+            _AdaptiveCalmCountGroup[0]
+        );
+        InterlockedAdd(
+            _AdaptiveActivitySummary[3],
+            _AdaptiveAirCountGroup[0]
+        );
+        InterlockedAdd(
+            _AdaptiveActivitySummary[4],
+            _AdaptiveSpeedSumGroup[0]
+        );
+        InterlockedMax(
+            _AdaptiveActivitySummary[5],
+            _AdaptiveSpeedMaxGroup[0]
+        );
+        InterlockedAdd(
+            _AdaptiveActivitySummary[6],
+            _AdaptiveJDeviationSumGroup[0]
+        );
+    }
+}
+
+
+void RunBucketCollisionParticle(uint particleIndex)
+{
     if (particleIndex >= (uint)_ParticleCount)
         return;
 
@@ -2693,7 +4388,8 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
     bool nearOpenHole = false;
     int nearestHoleIndex = -1;
 
-    if (_ClassifyBottomHoleRegion != 0)
+    if (_ClassifyBottomHoleRegion != 0 &&
+        _EnableBottomHoleOpening != 0)
     {
         nearOpenHole = IsInsideAnyOpenHoleRegionLocal(
             pLocal,
@@ -2861,13 +4557,26 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
     _ParticleStateAgeId[particleIndex] = stateAgeId;
 }
 
-/// /// /// /// /// /// /// /// End G8.A Changes  /// /// /// /// /// /// /// /// /// ///
+[numthreads(256, 1, 1)]
+void KBucketCollision(uint3 id : SV_DispatchThreadID)
+{
+    RunBucketCollisionParticle(id.x);
+}
 
 [numthreads(256, 1, 1)]
-void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
+void KBucketCollisionTileOrdered(uint3 id : SV_DispatchThreadID)
 {
-    uint particleIndex = id.x;
+    uint particleIndex;
+    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
+        return;
 
+    RunBucketCollisionParticle(particleIndex);
+}
+
+/// /// /// /// /// /// /// /// End G8.A Changes  /// /// /// /// /// /// /// /// /// ///
+
+void RunUpdateDeformationParticle(uint particleIndex)
+{
     if (particleIndex >= (uint)_ParticleCount)
         return;
 
@@ -2877,6 +4586,37 @@ void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
     if (!IsMpmActiveState(state))
         return;
 
+    bool calmInterior =
+        _EnableAdaptiveMultiRate != 0 &&
+        _AdaptiveParticlePriorityRead[particleIndex] == 0u;
+
+    if (calmInterior &&
+        _CalmInteriorDeformationUpdateThisStep == 0)
+    {
+        if (_EnableGpuDiagnostics != 0)
+        {
+            float storedJ = clamp(
+                _ParticleVolumeJ[particleIndex].y,
+                _MinJ,
+                _MaxJ
+            );
+            uint fixedJ = (uint)round(
+                max(storedJ, 0.0) *
+                DIAG_J_FIXED_SCALE
+            );
+            InterlockedAdd(_MpmDiagnostics[DIAG_J_SUM], fixedJ);
+            InterlockedMin(_MpmDiagnostics[DIAG_J_MIN], fixedJ);
+            InterlockedMax(_MpmDiagnostics[DIAG_J_MAX], fixedJ);
+        }
+
+        return;
+    }
+
+    float deformationDt =
+        calmInterior
+            ? _Dt * (float)max(_CalmInteriorDeformationInterval, 1)
+            : _Dt;
+
     float3 c0New = _ParticleAffineC0Read[particleIndex].xyz;
     float3 c1New = _ParticleAffineC1Read[particleIndex].xyz;
     float3 c2New = _ParticleAffineC2Read[particleIndex].xyz;
@@ -2885,9 +4625,9 @@ void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
     float3 f1Old = _ParticleF1[particleIndex].xyz;
     float3 f2Old = _ParticleF2[particleIndex].xyz;
 
-    float3 a0 = float3(1, 0, 0) + _Dt * c0New;
-    float3 a1 = float3(0, 1, 0) + _Dt * c1New;
-    float3 a2 = float3(0, 0, 1) + _Dt * c2New;
+    float3 a0 = float3(1, 0, 0) + deformationDt * c0New;
+    float3 a1 = float3(0, 1, 0) + deformationDt * c1New;
+    float3 a2 = float3(0, 0, 1) + deformationDt * c2New;
 
     float3 f0New = RowTimesMatrix(a0, f0Old, f1Old, f2Old);
     float3 f1New = RowTimesMatrix(a1, f0Old, f1Old, f2Old);
@@ -2944,6 +4684,22 @@ void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
     _ParticleF1[particleIndex] = float4(f1New, 0);
     _ParticleF2[particleIndex] = float4(f2New, 0);
     _ParticleVolumeJ[particleIndex] = volumeJ;
+}
+
+[numthreads(256, 1, 1)]
+void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
+{
+    RunUpdateDeformationParticle(id.x);
+}
+
+[numthreads(256, 1, 1)]
+void KUpdateDeformationTileOrdered(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex;
+    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
+        return;
+
+    RunUpdateDeformationParticle(particleIndex);
 }
 
 bool IsAirDomainState(int state)

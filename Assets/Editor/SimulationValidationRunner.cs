@@ -43,6 +43,9 @@ namespace PaintBucketSim.Editor
         private static bool _shakeBucket;
         private static bool _sealBucket;
         private static bool _outflowTest;
+        private static bool _waitAdaptiveActivity;
+        private static bool _disableCheckpointWaits;
+        private static bool _forceDiagnosticCheckpointWaits;
         private static SimulationManager _manager;
         private static PaintFluidSystem _fluid;
         private static BucketSystem _bucket;
@@ -133,6 +136,19 @@ namespace PaintBucketSim.Editor
             if (_executedSubsteps < _targetSubsteps)
             {
                 FluidSolverStats checkpointStats = _fluid.SolverStats;
+                int expectedActivityStep = _waitAdaptiveActivity
+                    ? GetExpectedAdaptiveActivityStepAtOrBefore(
+                        _executedSubsteps
+                    )
+                    : 0;
+                if (_waitAdaptiveActivity &&
+                    expectedActivityStep > 0 &&
+                    checkpointStats.gpuAdaptiveActivityStepIndex <
+                        expectedActivityStep)
+                {
+                    return;
+                }
+
                 if (ShouldWaitForDiagnosticsAtSubstep(_executedSubsteps) &&
                     checkpointStats.gpuDiagnosticsStepIndex <
                     _executedSubsteps)
@@ -218,7 +234,44 @@ namespace PaintBucketSim.Editor
                 $"substeps={_executedSubsteps}, " +
                 $"diagnosticsStep={stats.gpuDiagnosticsStepIndex}, " +
                 $"particles={stats.particleCount}, " +
+                $"dispatches={stats.gpuDispatchCount}, " +
+                $"gpuProfile={stats.gpuStageProfilingEnabled}, " +
+                $"gpuSetupMs={stats.gpuProfileMpmSetupMilliseconds:F3}, " +
+                $"gpuP2GMs={stats.gpuProfileP2GMilliseconds:F3}, " +
+                $"gpuGridMs={stats.gpuProfileGridUpdateMilliseconds:F3}, " +
+                $"gpuMpmMs={stats.gpuProfileMpmCoreMilliseconds:F3}, " +
+                $"gpuProjectionMs={stats.gpuProfileProjectionMilliseconds:F3}, " +
+                $"gpuPostMs={stats.gpuProfileParticlePostMilliseconds:F3}, " +
+                $"gpuTotalMs={stats.gpuProfileTotalMilliseconds:F3}, " +
+                $"adaptiveMultiRate={stats.gpuAdaptiveMultiRateEnabled}, " +
+                $"adaptiveSampleStep={stats.gpuAdaptiveActivityStepIndex}, " +
+                $"adaptivePriority={stats.gpuAdaptivePriorityParticleCount}, " +
+                $"adaptiveCalm={stats.gpuAdaptiveCalmInteriorParticleCount}, " +
+                $"adaptivePriorityFraction={stats.gpuAdaptivePriorityParticleFraction:F3}, " +
+                $"adaptiveAvgSpeed={stats.gpuAdaptiveAverageParticleSpeed:F3}, " +
+                $"adaptiveMaxSpeed={stats.gpuAdaptiveMaximumParticleSpeed:F3}, " +
+                $"adaptiveAvgJDeviation={stats.gpuAdaptiveAverageJDeviation:F3}, " +
+                $"calmDeformationInterval={stats.gpuCalmInteriorDeformationInterval}, " +
                 $"gridContainsBucket={stats.gpuGridContainsBucket}, " +
+                $"activeMpmGrid={stats.gpuActiveMpmGridBoundsUsed}, " +
+                $"activeMpmGridNodes={stats.gpuActiveMpmGridNodeCount}, " +
+                $"activeMpmGridFraction={stats.gpuActiveMpmGridNodeFraction:F3}, " +
+                $"activeMpmGridMin=({stats.gpuActiveMpmGridMinX},{stats.gpuActiveMpmGridMinY},{stats.gpuActiveMpmGridMinZ}), " +
+                $"activeMpmGridSize=({stats.gpuActiveMpmGridSizeX},{stats.gpuActiveMpmGridSizeY},{stats.gpuActiveMpmGridSizeZ}), " +
+                $"mpmTiles={stats.gpuMpmTileOccupancyUsed}, " +
+                $"tiledMpmDispatch={stats.gpuTiledMpmGridDispatchUsed}, " +
+                $"mpmTileSize={stats.gpuMpmTileSizeCells}, " +
+                $"mpmTileCount={stats.gpuMpmTileCount}, " +
+                $"mpmActiveTiles={stats.gpuMpmActiveTileCount}, " +
+                $"mpmActiveTileFraction={stats.gpuMpmActiveTileFraction:F3}, " +
+                $"mpmParticleLists={stats.gpuMpmParticleTileListsUsed}, " +
+                $"tiledP2G={stats.gpuTiledP2GUsed}, " +
+                $"tileOrderedPipeline={stats.gpuTileOrderedParticlePipelineUsed}, " +
+                $"hybridTiledP2G={stats.gpuHybridTiledP2GUsed}, " +
+                $"mpmTileParticleRefs={stats.gpuMpmTileParticleReferenceCount}, " +
+                $"mpmTileMaxRefs={stats.gpuMpmTileMaxParticleReferences}, " +
+                $"mpmTileListCapacity={stats.gpuMpmTileParticleListCapacity}, " +
+                $"mpmTileListOverflow={stats.gpuMpmTileParticleListOverflowCount}, " +
                 $"active={stats.gpuActiveParticleCount}, " +
                 $"partialGridSupport={stats.gpuOutOfGridParticleCount}, " +
                 $"noGridSupport={stats.gpuNoGridSupportParticleCount}, " +
@@ -229,6 +282,7 @@ namespace PaintBucketSim.Editor
                 $"jAvg={stats.gpuAverageDeformationJ:F4}, " +
                 $"jMin={stats.gpuMinimumDeformationJ:F4}, " +
                 $"jMax={stats.gpuMaximumDeformationJ:F4}, " +
+                $"freeSurface={_fluid.GpuMpmConfig != null && _fluid.GpuMpmConfig.enableFreeSurfacePolish}, " +
                 $"fillAvg01={stats.gpuAverageFillHeight01:F4}, " +
                 $"fillMin01={stats.gpuMinimumFillHeight01:F4}, " +
                 $"fillMax01={stats.gpuMaximumFillHeight01:F4}, " +
@@ -238,6 +292,8 @@ namespace PaintBucketSim.Editor
                 $"nanInf={stats.gpuNanInfCount}, " +
                 $"holes={stats.gpuConfiguredHoleCount}, " +
                 $"holeOpen={stats.gpuHoleOpeningEnabled}, " +
+                $"airborneDispatch={stats.gpuAirborneDispatchRan}, " +
+                $"postCollision={stats.gpuPostBucketCollisionRan}, " +
                 $"outflow={stats.gpuOutflowTransitionCount}, " +
                 $"maxObservedOutflow={_maxOutflowTransitionsObserved}, " +
                 $"jet={stats.gpuJetParticleCount}, " +
@@ -246,8 +302,27 @@ namespace PaintBucketSim.Editor
                 $"maxObservedAirborne={_maxAirborneParticlesObserved}, " +
                 $"lost={stats.gpuLostParticleCount}, " +
                 $"fluidCells={stats.projectionFluidCellCount}, " +
+                $"activeProjection={stats.projectionActiveBoundsUsed}, " +
+                $"activeProjectionNodes={stats.projectionActiveNodeCount}, " +
+                $"activeProjectionFraction={stats.projectionActiveNodeFraction:F3}, " +
+                $"activeProjectionMin=({stats.projectionActiveMinX},{stats.projectionActiveMinY},{stats.projectionActiveMinZ}), " +
+                $"activeProjectionSize=({stats.projectionActiveSizeX},{stats.projectionActiveSizeY},{stats.projectionActiveSizeZ}), " +
+                $"sparsePressure={stats.projectionSparsePressureDispatchUsed}, " +
+                $"sparsePressureCells={stats.projectionSparsePressureCellCount}, " +
+                $"sparsePressureFraction={stats.projectionSparsePressureCellFraction:F3}, " +
+                $"adaptiveProjection={stats.projectionAdaptiveCadenceEnabled}, " +
+                $"adaptiveProjectionCalm={stats.projectionAdaptiveCalmMode}, " +
+                $"effectiveProjectionInterval={stats.projectionEffectiveSubstepInterval}, " +
+                $"projectionCalmCounter={stats.projectionCalmCounter}, " +
+                $"projectionCalmSubsteps={stats.projectionAdaptiveCalmSubstepCount}, " +
+                $"projectionCalmEntries={stats.projectionAdaptiveCalmEntryCount}, " +
+                $"projectionCalmExits={stats.projectionAdaptiveCalmExitCount}, " +
                 $"divBeforeAvg={stats.projectionAverageAbsDivergenceBefore:F5}, " +
                 $"divAfterAvg={stats.projectionAverageAbsDivergenceAfter:F5}, " +
+                $"pressureMode={(ProjectionPressureSolveMode)stats.pressureSolveMode}, " +
+                $"jacobiIter={stats.pressureJacobiIterations}, " +
+                $"rbSorIter={stats.pressureRedBlackSorIterations}, " +
+                $"rbSorOmega={stats.pressureRedBlackSorOmega:F2}, " +
                 $"pressureMax={stats.projectionMeasuredMaxAbsPressure:F3}";
 
             double elapsedSeconds =
@@ -307,6 +382,18 @@ namespace PaintBucketSim.Editor
             if (completedSubsteps <= 0)
                 return false;
 
+            if (_disableCheckpointWaits)
+                return false;
+
+            if (!_forceDiagnosticCheckpointWaits &&
+                _fluid != null &&
+                _fluid.GpuMpmConfig != null &&
+                _fluid.GpuMpmConfig.enableAdaptiveMultiRate &&
+                _fluid.GpuMpmConfig.enableAdaptiveProjectionCadence)
+            {
+                return false;
+            }
+
             return completedSubsteps ==
                    GetExpectedDiagnosticsStepAtOrBefore(completedSubsteps);
         }
@@ -316,6 +403,15 @@ namespace PaintBucketSim.Editor
             if (completedSubsteps <= 0 ||
                 _diagnosticsInterval <= 0)
                 return 0;
+
+            if (!_forceDiagnosticCheckpointWaits &&
+                _fluid != null &&
+                _fluid.GpuMpmConfig != null &&
+                _fluid.GpuMpmConfig.enableAdaptiveMultiRate &&
+                _fluid.GpuMpmConfig.enableAdaptiveProjectionCadence)
+            {
+                return Mathf.Max(0, _lastRecordedDiagnosticsStep);
+            }
 
             if (_fluid == null ||
                 _fluid.GpuMpmConfig == null ||
@@ -353,6 +449,29 @@ namespace PaintBucketSim.Editor
             return lastExpectedDiagnosticsStep;
         }
 
+        private static int GetExpectedAdaptiveActivityStepAtOrBefore(
+            int completedSubsteps)
+        {
+            if (completedSubsteps <= 0 ||
+                _fluid == null ||
+                _fluid.GpuMpmConfig == null ||
+                !_fluid.GpuMpmConfig.enableAdaptiveMultiRate)
+            {
+                return 0;
+            }
+
+            int interval = Mathf.Clamp(
+                _fluid.GpuMpmConfig.adaptiveActivitySampleInterval,
+                1,
+                32
+            );
+
+            return
+                1 +
+                ((completedSubsteps - 1) / interval) *
+                interval;
+        }
+
         private static void ConfigureValidationMode()
         {
             string[] args = Environment.GetCommandLineArgs();
@@ -360,6 +479,12 @@ namespace PaintBucketSim.Editor
             _shakeBucket = HasFlag(args, "-paintValidationShakeBucket");
             _sealBucket = HasFlag(args, "-paintValidationSealBucket");
             _outflowTest = HasFlag(args, "-paintValidationOutflow");
+            _waitAdaptiveActivity =
+                HasFlag(args, "-paintValidationWaitAdaptiveActivity");
+            _disableCheckpointWaits =
+                HasFlag(args, "-paintValidationNoCheckpointWaits");
+            _forceDiagnosticCheckpointWaits =
+                HasFlag(args, "-paintValidationForceDiagnosticWaits");
             _targetSubsteps = GetIntArgument(
                 args,
                 "-paintValidationSteps",
@@ -399,6 +524,8 @@ namespace PaintBucketSim.Editor
             if (_fluid.GpuMpmConfig != null)
             {
                 _fluid.GpuMpmConfig.enableGpuDiagnostics = true;
+                _fluid.GpuMpmConfig.enableGpuStageProfiling =
+                    HasFlag(args, "-paintValidationGpuStageProfile");
                 _fluid.GpuMpmConfig.diagnosticsReadbackInterval =
                     _diagnosticsInterval;
             }
@@ -430,10 +557,238 @@ namespace PaintBucketSim.Editor
                     "-paintValidationCellSize",
                     baseConfig.cellSizeMeters
                 );
+                if (HasFlag(args, "-paintValidationEnableActiveMpmGridBounds"))
+                {
+                    baseConfig.enableActiveMpmGridBounds = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableActiveMpmGridBounds"))
+                {
+                    baseConfig.enableActiveMpmGridBounds = false;
+                }
+                baseConfig.activeMpmGridBoundsPaddingMeters = GetFloatArgument(
+                    args,
+                    "-paintValidationActiveMpmGridPadding",
+                    baseConfig.activeMpmGridBoundsPaddingMeters
+                );
+                baseConfig.activeMpmGridBoundsPaddingCells = Mathf.Max(
+                    0,
+                    GetRawIntArgument(
+                        args,
+                        "-paintValidationActiveMpmGridPaddingCells",
+                        baseConfig.activeMpmGridBoundsPaddingCells
+                    )
+                );
+                baseConfig.activeMpmGridMaxFullGridFraction = GetFloatArgument(
+                    args,
+                    "-paintValidationActiveMpmGridMaxFraction",
+                    baseConfig.activeMpmGridMaxFullGridFraction
+                );
+                if (HasFlag(args, "-paintValidationEnableMpmTileOccupancy"))
+                {
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableMpmTileOccupancy"))
+                {
+                    baseConfig.enableMpmTileOccupancy = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableTiledMpmGridDispatch"))
+                {
+                    baseConfig.enableTiledMpmGridDispatch = true;
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableTiledMpmGridDispatch"))
+                {
+                    baseConfig.enableTiledMpmGridDispatch = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableMpmParticleTileLists"))
+                {
+                    baseConfig.enableMpmParticleTileLists = true;
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableMpmParticleTileLists"))
+                {
+                    baseConfig.enableMpmParticleTileLists = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableTiledP2G"))
+                {
+                    baseConfig.enableTiledP2G = true;
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableTiledP2G"))
+                {
+                    baseConfig.enableTiledP2G = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableTileOrderedPipeline"))
+                {
+                    baseConfig.enableTileOrderedParticlePipeline = true;
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableTileOrderedPipeline"))
+                {
+                    baseConfig.enableTileOrderedParticlePipeline = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableHybridTiledP2G"))
+                {
+                    baseConfig.enableHybridTiledP2G = true;
+                    baseConfig.enableMpmTileOccupancy = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableHybridTiledP2G"))
+                {
+                    baseConfig.enableHybridTiledP2G = false;
+                }
+                baseConfig.mpmTileSizeCells = Mathf.Clamp(
+                    GetRawIntArgument(
+                        args,
+                        "-paintValidationMpmTileSize",
+                        baseConfig.mpmTileSizeCells
+                    ),
+                    4,
+                    8
+                );
+                baseConfig.enablePostG2PBucketCollision =
+                    !HasFlag(args, "-paintValidationDisablePostBucketCollision");
+                baseConfig.enableAdaptivePostG2PBucketCollision =
+                    !HasFlag(args, "-paintValidationDisableAdaptivePostBucketCollision");
+                baseConfig.enableSmartAirborneDispatch =
+                    !HasFlag(args, "-paintValidationDisableSmartAirborneDispatch");
                 baseConfig.projectionSubstepInterval = GetIntArgument(
                     args,
                     "-paintValidationProjectionInterval",
                     baseConfig.projectionSubstepInterval
+                );
+                if (HasFlag(args, "-paintValidationEnableSparseProjectionPressure"))
+                {
+                    baseConfig.enableSparseProjectionPressureDispatch = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableSparseProjectionPressure"))
+                {
+                    baseConfig.enableSparseProjectionPressureDispatch = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableAdaptiveMultiRate"))
+                {
+                    baseConfig.enableAdaptiveMultiRate = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableAdaptiveMultiRate"))
+                {
+                    baseConfig.enableAdaptiveMultiRate = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableAdaptiveProjection"))
+                {
+                    baseConfig.enableAdaptiveProjectionCadence = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableAdaptiveProjection"))
+                {
+                    baseConfig.enableAdaptiveProjectionCadence = false;
+                }
+                baseConfig.adaptiveActivitySampleInterval = GetIntArgument(
+                    args,
+                    "-paintValidationAdaptiveSampleInterval",
+                    baseConfig.adaptiveActivitySampleInterval
+                );
+                baseConfig.calmInteriorDeformationInterval = Mathf.Clamp(
+                    GetIntArgument(
+                        args,
+                        "-paintValidationCalmDeformationInterval",
+                        baseConfig.calmInteriorDeformationInterval
+                    ),
+                    1,
+                    4
+                );
+                baseConfig.calmProjectionSubstepInterval = Mathf.Clamp(
+                    GetIntArgument(
+                        args,
+                        "-paintValidationCalmProjectionInterval",
+                        baseConfig.calmProjectionSubstepInterval
+                    ),
+                    1,
+                    8
+                );
+                baseConfig.adaptiveProjectionCalmDelaySubsteps =
+                    GetIntArgument(
+                        args,
+                        "-paintValidationProjectionCalmDelay",
+                        baseConfig.adaptiveProjectionCalmDelaySubsteps
+                    );
+                baseConfig.adaptiveProjectionCalmAverageSpeed =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionCalmSpeed",
+                        baseConfig.adaptiveProjectionCalmAverageSpeed
+                    );
+                baseConfig.adaptiveProjectionCalmPriorityFraction =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionCalmPriorityFraction",
+                        baseConfig.adaptiveProjectionCalmPriorityFraction
+                    );
+                baseConfig.adaptiveProjectionMaxAverageJDeviation =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionMaxAverageJDeviation",
+                        baseConfig.adaptiveProjectionMaxAverageJDeviation
+                    );
+                baseConfig.adaptiveProjectionBucketLinearSpeed =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionBucketLinearThreshold",
+                        baseConfig.adaptiveProjectionBucketLinearSpeed
+                    );
+                baseConfig.adaptiveProjectionBucketAngularSpeed =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionBucketAngularThreshold",
+                        baseConfig.adaptiveProjectionBucketAngularSpeed
+                    );
+                baseConfig.enableActiveProjectionBounds =
+                    !HasFlag(args, "-paintValidationDisableActiveProjectionBounds");
+                baseConfig.activeProjectionBoundsPaddingMeters = GetFloatArgument(
+                    args,
+                    "-paintValidationActiveProjectionPadding",
+                    baseConfig.activeProjectionBoundsPaddingMeters
+                );
+                baseConfig.activeProjectionBoundsPaddingCells = Mathf.Max(
+                    0,
+                    GetRawIntArgument(
+                        args,
+                        "-paintValidationActiveProjectionPaddingCells",
+                        baseConfig.activeProjectionBoundsPaddingCells
+                    )
+                );
+                baseConfig.activeProjectionMaxFullGridFraction = GetFloatArgument(
+                    args,
+                    "-paintValidationActiveProjectionMaxFraction",
+                    baseConfig.activeProjectionMaxFullGridFraction
+                );
+                baseConfig.enableFreeSurfacePolish =
+                    !HasFlag(args, "-paintValidationDisableFreeSurfacePolish");
+                if (HasFlag(args, "-paintValidationDisableMaterialStress"))
+                    baseConfig.enableMaterialStress = false;
+                else if (HasFlag(args, "-paintValidationEnableMaterialStress"))
+                    baseConfig.enableMaterialStress = true;
+
+                if (HasFlag(args, "-paintValidationDisablePaintRheology"))
+                    baseConfig.enablePaintRheology = false;
+                else if (HasFlag(args, "-paintValidationEnablePaintRheology"))
+                    baseConfig.enablePaintRheology = true;
+                baseConfig.freeSurfaceGradientScale = GetFloatArgument(
+                    args,
+                    "-paintValidationFreeSurfaceGradientScale",
+                    baseConfig.freeSurfaceGradientScale
+                );
+                baseConfig.freeSurfaceNormalDampingPerSecond = GetFloatArgument(
+                    args,
+                    "-paintValidationFreeSurfaceDamping",
+                    baseConfig.freeSurfaceNormalDampingPerSecond
+                );
+                baseConfig.freeSurfaceCohesionAcceleration = GetFloatArgument(
+                    args,
+                    "-paintValidationFreeSurfaceCohesion",
+                    baseConfig.freeSurfaceCohesionAcceleration
+                );
+                baseConfig.maxFreeSurfaceVelocityCorrection = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxFreeSurfaceCorrection",
+                    baseConfig.maxFreeSurfaceVelocityCorrection
                 );
                 baseConfig.enablePressureWarmStart =
                     !HasFlag(args, "-paintValidationDisableWarmStart");
@@ -465,10 +820,25 @@ namespace PaintBucketSim.Editor
             config.enableJacobiPressureSolve = true;
             config.enablePressureGradientSubtraction = true;
             config.useStaggeredFaceProjection = true;
+            config.pressureSolveMode =
+                (ProjectionPressureSolveMode)Mathf.Clamp(
+                    GetRawIntArgument(
+                        args,
+                        "-paintValidationPressureSolveMode",
+                        (int)config.pressureSolveMode
+                    ),
+                    (int)ProjectionPressureSolveMode.Jacobi,
+                    (int)ProjectionPressureSolveMode.RedBlackSor
+                );
             config.pressureJacobiIterations = GetIntArgument(
                 args,
                 "-paintValidationJacobiIterations",
                 16
+            );
+            config.pressureRedBlackSorIterations = GetIntArgument(
+                args,
+                "-paintValidationRedBlackSorIterations",
+                config.pressureRedBlackSorIterations
             );
             config.pressureRhsScale = GetFloatArgument(
                 args,
@@ -479,6 +849,11 @@ namespace PaintBucketSim.Editor
                 args,
                 "-paintValidationPressureRelaxation",
                 0.8f
+            );
+            config.pressureRedBlackSorOmega = GetFloatArgument(
+                args,
+                "-paintValidationRedBlackSorOmega",
+                config.pressureRedBlackSorOmega
             );
             config.pressureGradientScale = GetFloatArgument(
                 args,
@@ -610,6 +985,36 @@ namespace PaintBucketSim.Editor
                 ))
                 {
                     return Mathf.Max(1, value);
+                }
+            }
+
+            return fallback;
+        }
+
+        private static int GetRawIntArgument(
+            string[] args,
+            string name,
+            int fallback)
+        {
+            for (int i = 0; i + 1 < args.Length; i++)
+            {
+                if (!string.Equals(
+                    args[i],
+                    name,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                {
+                    continue;
+                }
+
+                if (int.TryParse(
+                    args[i + 1],
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int value
+                ))
+                {
+                    return value;
                 }
             }
 

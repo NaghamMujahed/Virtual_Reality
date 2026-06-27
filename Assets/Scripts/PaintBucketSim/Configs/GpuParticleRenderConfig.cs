@@ -39,6 +39,18 @@ namespace PaintBucketSim.Configs
         [Tooltip("Only used by CameraFacingSplat. Higher values make each splat shade more like a rounded droplet.")]
         public float splatNormalStrength = 0.85f;
 
+        [Range(0.0f, 0.75f)]
+        [Tooltip("Softens the visual edge of camera-facing splats without changing physical particle radius.")]
+        public float splatEdgeSoftness = 0.22f;
+
+        [Range(0.0f, 1.0f)]
+        [Tooltip("Simple specular highlight strength for paint splats.")]
+        public float paintSpecularStrength = 0.18f;
+
+        [Range(0.0f, 1.0f)]
+        [Tooltip("Rim/fresnel tint strength. Helps the particle cloud read as a glossy fluid surface.")]
+        public float paintFresnelStrength = 0.10f;
+
         public bool usePerParticleColor = true;
 
         public Color fallbackColor = new Color(0.1f, 0.35f, 1.0f, 1.0f);
@@ -70,6 +82,9 @@ namespace PaintBucketSim.Configs
                 visualRadiusScale = 0.001f;
 
             splatNormalStrength = Mathf.Clamp(splatNormalStrength, 0.05f, 2.0f);
+            splatEdgeSoftness = Mathf.Clamp01(splatEdgeSoftness);
+            paintSpecularStrength = Mathf.Clamp01(paintSpecularStrength);
+            paintFresnelStrength = Mathf.Clamp01(paintFresnelStrength);
 
             worldBoundsSize.x = Mathf.Max(0.1f, worldBoundsSize.x);
             worldBoundsSize.y = Mathf.Max(0.1f, worldBoundsSize.y);

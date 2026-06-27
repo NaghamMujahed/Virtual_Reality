@@ -10,6 +10,12 @@ namespace PaintBucketSim.Configs
         TemporaryLid = 1,
         MarkSpilled = 2
     }
+
+    public enum ProjectionPressureSolveMode
+    {
+        Jacobi = 0,
+        RedBlackSor = 1
+    }
     /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
     [CreateAssetMenu(
@@ -53,6 +59,45 @@ namespace PaintBucketSim.Configs
         [Min(0.1f)]
         public float maxParticleSpeed = 10.0f;
 
+        [Header("Dense MPM Active Grid Bounds / G14")]
+        [Tooltip("Restrict dense MPM grid clear/update to an active bucket AABB instead of dispatching over the full dense grid.")]
+        public bool enableActiveMpmGridBounds = false;
+
+        [Tooltip("Extra padding around the rotated bucket AABB for MPM grid clear/update and particle transfer support.")]
+        [Min(0.0f)]
+        public float activeMpmGridBoundsPaddingMeters = 0.04f;
+
+        [Tooltip("Extra integer-cell padding around active MPM grid bounds. Keep at least 2 for quadratic transfer support.")]
+        [Min(0)]
+        public int activeMpmGridBoundsPaddingCells = 2;
+
+        [Tooltip("If active MPM bounds cover more than this fraction of the full grid, fall back to full-grid MPM dispatch.")]
+        [Range(0.1f, 1.0f)]
+        public float activeMpmGridMaxFullGridFraction = 0.95f;
+
+        [Header("Sparse/Tiled MPM Grid Foundation / G15")]
+        [Tooltip("Build a GPU active-tile list from particle transfer support. This is the foundation for sparse/tiled MPM.")]
+        public bool enableMpmTileOccupancy = false;
+
+        [Tooltip("Use the GPU active-tile list for grid clear/update dispatch. Experimental until full sparse P2G/G2P is implemented.")]
+        public bool enableTiledMpmGridDispatch = false;
+
+        [Tooltip("Build compact per-tile particle support lists on the GPU. Required for tiled P2G and later sparse/tiled kernels.")]
+        public bool enableMpmParticleTileLists = false;
+
+        [Tooltip("Experimental: execute the regular P2G transfer using particles ordered by tile. Physics stays unchanged while grid-memory locality can improve on some GPUs.")]
+        public bool enableTiledP2G = false;
+
+        [Tooltip("Experimental G16: reuse the tile-ordered particle list across P2G, projection marking, G2P, post-collision, and deformation. This amortizes list construction and improves grid-memory locality.")]
+        public bool enableTileOrderedParticlePipeline = false;
+
+        [Tooltip("G16: aggregate owner-tile P2G contributions in group-shared memory and use global atomics only across tile edges.")]
+        public bool enableHybridTiledP2G = true;
+
+        [Tooltip("Tile edge length in grid cells. Kept power-of-two for fast shader tile addressing.")]
+        [Range(4, 8)]
+        public int mpmTileSizeCells = 8;
+
         [Header("PIC/MPM Transfer")]
         //[Tooltip("0 = keep particle velocity more, 1 = pure PIC grid velocity. For first prototype use 1.")]
         //[Range(0.0f, 1.0f)]
@@ -77,6 +122,9 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Enable compact GPU counters and asynchronous readback for solver validation.")]
         public bool enableGpuDiagnostics = true;
+
+        [Tooltip("Validation only: synchronize the GPU at major solver boundaries to measure broad stage costs. Never enable for normal play.")]
+        public bool enableGpuStageProfiling = false;
 
         [Min(1)]
         public int diagnosticsReadbackInterval = 15;
@@ -118,6 +166,64 @@ namespace PaintBucketSim.Configs
         [Min(1)]
         public int projectionSubstepInterval = 1;
 
+        [Tooltip("G16: build a compact GPU list of fluid projection cells and run pressure iterations only on that list.")]
+        public bool enableSparseProjectionPressureDispatch = true;
+
+        [Header("Adaptive Multi-Rate Simulation / G17")]
+        [Tooltip("Sample particle activity on the GPU and update calm interior deformation less often while keeping P2G mass transfer at full rate.")]
+        public bool enableAdaptiveMultiRate = true;
+
+        [Tooltip("GPU activity classification cadence in MPM substeps.")]
+        [Range(1, 32)]
+        public int adaptiveActivitySampleInterval = 8;
+
+        [Tooltip("Deformation update interval for particles classified as calm interior. Priority particles still update every substep.")]
+        [Range(1, 4)]
+        public int calmInteriorDeformationInterval = 1;
+
+        [Tooltip("Particles at or above this speed remain high priority.")]
+        [Min(0.0f)]
+        public float adaptivePriorityParticleSpeed = 1.25f;
+
+        [Tooltip("Distance from bucket walls/bottom that remains high priority.")]
+        [Min(0.0f)]
+        public float adaptivePriorityBoundaryBandMeters = 0.025f;
+
+        [Tooltip("Upper normalized bucket region always treated as a possible free surface.")]
+        [Range(0.0f, 1.0f)]
+        public float adaptivePriorityTopFraction = 0.75f;
+
+        [Tooltip("Allow projection cadence to increase only after the sampled liquid and bucket remain calm.")]
+        public bool enableAdaptiveProjectionCadence = true;
+
+        [Tooltip("Projection interval used after sustained calm. Must be at least projectionSubstepInterval.")]
+        [Range(1, 8)]
+        public int calmProjectionSubstepInterval = 3;
+
+        [Tooltip("Consecutive calm substeps required before entering the slower projection cadence.")]
+        [Min(1)]
+        public int adaptiveProjectionCalmDelaySubsteps = 32;
+
+        [Tooltip("Maximum sampled average particle speed allowed for calm projection cadence.")]
+        [Min(0.0f)]
+        public float adaptiveProjectionCalmAverageSpeed = 0.7f;
+
+        [Tooltip("Maximum high-priority fraction allowed for calm projection cadence.")]
+        [Range(0.0f, 1.0f)]
+        public float adaptiveProjectionCalmPriorityFraction = 0.85f;
+
+        [Tooltip("Maximum sampled average |J-1| allowed for calm projection cadence. Compression restores active pressure updates.")]
+        [Range(0.0f, 1.0f)]
+        public float adaptiveProjectionMaxAverageJDeviation = 0.04f;
+
+        [Tooltip("Bucket linear speed that immediately restores active projection cadence.")]
+        [Min(0.0f)]
+        public float adaptiveProjectionBucketLinearSpeed = 0.08f;
+
+        [Tooltip("Bucket angular speed in rad/s that immediately restores active projection cadence.")]
+        [Min(0.0f)]
+        public float adaptiveProjectionBucketAngularSpeed = 0.25f;
+
         [Tooltip("Reuse a damped version of the previous pressure field as the next Jacobi initial guess.")]
         public bool enablePressureWarmStart = true;
 
@@ -138,6 +244,22 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("If true, cells above the bucket top are treated as air. If false, top can behave like a temporary lid.")]
         public bool projectionTopOpen = true;
+
+        [Header("MLS-MPM Projection Active Bounds / G13")]
+        [Tooltip("Restrict projection-grid kernels to an active world-space bucket AABB instead of dispatching over the full dense grid.")]
+        public bool enableActiveProjectionBounds = true;
+
+        [Tooltip("Extra padding around the rotated bucket AABB for projection, holes, and nearby spray.")]
+        [Min(0.0f)]
+        public float activeProjectionBoundsPaddingMeters = 0.04f;
+
+        [Tooltip("Extra integer-cell padding around active projection bounds. Helps keep neighbor stencils safe.")]
+        [Min(0)]
+        public int activeProjectionBoundsPaddingCells = 2;
+
+        [Tooltip("If active bounds cover more than this fraction of the full grid, fall back to full-grid projection dispatch.")]
+        [Range(0.1f, 1.0f)]
+        public float activeProjectionMaxFullGridFraction = 0.95f;
 
         ////////////////    G6.A Changes   //////////////////
 
@@ -208,6 +330,26 @@ namespace PaintBucketSim.Configs
         [Tooltip("Blend between old constant viscosity and advanced rheology. 0 = old viscosity, 1 = full rheology.")]
         [Range(0.0f, 1.0f)]
         public float rheologyStrength = 1.0f;
+
+        [Header("Free Surface Polish / Cohesion")]
+        [Tooltip("Lightweight GPU free-surface stabilization. Uses grid mass gradients to detect exposed liquid surfaces.")]
+        public bool enableFreeSurfacePolish = true;
+
+        [Tooltip("Grid-mass gradient magnitude that maps to a fully exposed surface mask. Tune with diagnostics; higher = weaker effect.")]
+        [Min(1e-6f)]
+        public float freeSurfaceGradientScale = 0.08f;
+
+        [Tooltip("Damps velocity moving out of the inferred liquid surface normal. Helps reduce lightweight flying surface particles.")]
+        [Min(0.0f)]
+        public float freeSurfaceNormalDampingPerSecond = 2.5f;
+
+        [Tooltip("Small acceleration pulling exposed surface particles back toward the liquid body.")]
+        [Min(0.0f)]
+        public float freeSurfaceCohesionAcceleration = 0.75f;
+
+        [Tooltip("Clamp for the total velocity correction applied by the free-surface polish step per substep.")]
+        [Min(0.0f)]
+        public float maxFreeSurfaceVelocityCorrection = 0.35f;
         ////////////////    End G7 Changes   //////////////////
 
         /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// 
@@ -228,6 +370,12 @@ namespace PaintBucketSim.Configs
         [Tooltip("Tangential damping/friction at bucket walls. 0 = no friction, 1 = remove tangential velocity.")]
         [Range(0.0f, 1.0f)]
         public float bucketFriction = 0.25f;
+
+        [Tooltip("Run a second bucket collision pass after G2P. Safer near fast walls, but expensive with many particles.")]
+        public bool enablePostG2PBucketCollision = true;
+
+        [Tooltip("When enabled, the post-G2P bucket collision pass runs only when open holes or top spilling can create air-domain particles.")]
+        public bool enableAdaptivePostG2PBucketCollision = true;
 
         public GpuBucketTopMode topBoundaryMode = GpuBucketTopMode.TemporaryLid;
 
@@ -259,6 +407,9 @@ namespace PaintBucketSim.Configs
 
         [Header("GPU Outflow / Airborne Prototype")]
         public bool enableAirborneParticleAdvection = true;
+
+        [Tooltip("Skip the airborne-particle pass while holes are closed and no airborne/spilled particles have been produced.")]
+        public bool enableSmartAirborneDispatch = true;
 
         [Min(0.0f)]
         public float airborneDragPerSecond = 0.15f;
@@ -303,11 +454,18 @@ namespace PaintBucketSim.Configs
         public bool projectionSolidNoFlux = true;
 
 
-        [Header("MLS-MPM Projection Pressure Solver - Jacobi V1")]
+        [Header("MLS-MPM Projection Pressure Solver")]
         public bool enableJacobiPressureSolve = true;
+
+        [Tooltip("Jacobi is the stable reference path. Red-Black SOR converges faster and is the preferred performance path.")]
+        public ProjectionPressureSolveMode pressureSolveMode = ProjectionPressureSolveMode.RedBlackSor;
 
         [Min(1)]
         public int pressureJacobiIterations = 40;
+
+        [Tooltip("Red-Black SOR iterations. Each iteration dispatches red and black cell passes.")]
+        [Min(1)]
+        public int pressureRedBlackSorIterations = 4;
 
         [Tooltip("Scales the pressure equation right-hand side. Lower values are safer in early tests.")]
         [Min(0.0f)]
@@ -316,6 +474,10 @@ namespace PaintBucketSim.Configs
         [Tooltip("Relaxation factor for Jacobi. 1 = standard Jacobi, lower = more stable/damped.")]
         [Range(0.05f, 1.0f)]
         public float pressureJacobiRelaxation = 0.8f;
+
+        [Tooltip("Successive over-relaxation factor for Red-Black SOR. 1 = Gauss-Seidel, >1 usually converges faster.")]
+        [Range(0.05f, 1.95f)]
+        public float pressureRedBlackSorOmega = 1.35f;
 
         [Tooltip("Clamps pressure values to avoid early solver explosions.")]
         [Min(1.0f)]
@@ -393,6 +555,55 @@ namespace PaintBucketSim.Configs
             if (projectionSubstepInterval < 1)
                 projectionSubstepInterval = 1;
 
+            adaptiveActivitySampleInterval = Mathf.Clamp(
+                adaptiveActivitySampleInterval,
+                1,
+                32
+            );
+            calmInteriorDeformationInterval = Mathf.Clamp(
+                calmInteriorDeformationInterval,
+                1,
+                4
+            );
+            calmProjectionSubstepInterval = Mathf.Clamp(
+                calmProjectionSubstepInterval,
+                projectionSubstepInterval,
+                8
+            );
+            adaptiveProjectionCalmDelaySubsteps = Mathf.Max(
+                1,
+                adaptiveProjectionCalmDelaySubsteps
+            );
+            adaptivePriorityParticleSpeed = Mathf.Max(
+                0.0f,
+                adaptivePriorityParticleSpeed
+            );
+            adaptivePriorityBoundaryBandMeters = Mathf.Max(
+                0.0f,
+                adaptivePriorityBoundaryBandMeters
+            );
+            adaptivePriorityTopFraction = Mathf.Clamp01(
+                adaptivePriorityTopFraction
+            );
+            adaptiveProjectionCalmAverageSpeed = Mathf.Max(
+                0.0f,
+                adaptiveProjectionCalmAverageSpeed
+            );
+            adaptiveProjectionCalmPriorityFraction = Mathf.Clamp01(
+                adaptiveProjectionCalmPriorityFraction
+            );
+            adaptiveProjectionMaxAverageJDeviation = Mathf.Clamp01(
+                adaptiveProjectionMaxAverageJDeviation
+            );
+            adaptiveProjectionBucketLinearSpeed = Mathf.Max(
+                0.0f,
+                adaptiveProjectionBucketLinearSpeed
+            );
+            adaptiveProjectionBucketAngularSpeed = Mathf.Max(
+                0.0f,
+                adaptiveProjectionBucketAngularSpeed
+            );
+
             pressureWarmStartFactor = Mathf.Clamp01(
                 pressureWarmStartFactor
             );
@@ -458,6 +669,18 @@ namespace PaintBucketSim.Configs
             if (highShearViscosity > lowShearViscosity)
                 highShearViscosity = lowShearViscosity;
 
+            if (freeSurfaceGradientScale < 1e-6f)
+                freeSurfaceGradientScale = 1e-6f;
+
+            if (freeSurfaceNormalDampingPerSecond < 0.0f)
+                freeSurfaceNormalDampingPerSecond = 0.0f;
+
+            if (freeSurfaceCohesionAcceleration < 0.0f)
+                freeSurfaceCohesionAcceleration = 0.0f;
+
+            if (maxFreeSurfaceVelocityCorrection < 0.0f)
+                maxFreeSurfaceVelocityCorrection = 0.0f;
+
             ////////////////    End G7 Changes   //////////////////
 
             /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// 
@@ -500,6 +723,47 @@ namespace PaintBucketSim.Configs
             if (minFluidCellMass < 0.0f)
                 minFluidCellMass = 0.0f;
 
+            if (activeMpmGridBoundsPaddingMeters < 0.0f)
+                activeMpmGridBoundsPaddingMeters = 0.0f;
+
+            if (activeMpmGridBoundsPaddingCells < 0)
+                activeMpmGridBoundsPaddingCells = 0;
+
+            activeMpmGridMaxFullGridFraction = Mathf.Clamp(
+                activeMpmGridMaxFullGridFraction,
+                0.1f,
+                1.0f
+            );
+
+            mpmTileSizeCells = NormalizeTileSizeCells(mpmTileSizeCells);
+
+            if (enableTiledMpmGridDispatch)
+                enableMpmTileOccupancy = true;
+
+            if (enableTiledP2G)
+                enableMpmTileOccupancy = true;
+
+            if (enableTileOrderedParticlePipeline)
+                enableMpmTileOccupancy = true;
+
+            if (enableHybridTiledP2G)
+                enableMpmTileOccupancy = true;
+
+            if (enableMpmParticleTileLists)
+                enableMpmTileOccupancy = true;
+
+            if (activeProjectionBoundsPaddingMeters < 0.0f)
+                activeProjectionBoundsPaddingMeters = 0.0f;
+
+            if (activeProjectionBoundsPaddingCells < 0)
+                activeProjectionBoundsPaddingCells = 0;
+
+            activeProjectionMaxFullGridFraction = Mathf.Clamp(
+                activeProjectionMaxFullGridFraction,
+                0.1f,
+                1.0f
+            );
+
             projectionDivergenceScale = Mathf.Clamp(projectionDivergenceScale, 0.0f, 2.0f);
 
             if (maxAbsProjectionDivergence < 0.01f)
@@ -508,6 +772,9 @@ namespace PaintBucketSim.Configs
             if (pressureJacobiIterations < 1)
                 pressureJacobiIterations = 1;
 
+            if (pressureRedBlackSorIterations < 1)
+                pressureRedBlackSorIterations = 1;
+
             if (pressureRhsScale < 0.0f)
                 pressureRhsScale = 0.0f;
 
@@ -515,6 +782,12 @@ namespace PaintBucketSim.Configs
                 pressureJacobiRelaxation,
                 0.05f,
                 1.0f
+            );
+
+            pressureRedBlackSorOmega = Mathf.Clamp(
+                pressureRedBlackSorOmega,
+                0.05f,
+                1.95f
             );
 
             if (maxProjectionPressure < 1.0f)
@@ -530,6 +803,14 @@ namespace PaintBucketSim.Configs
 
             if (maxProjectionBoundaryVelocityCorrection < 0.01f)
                 maxProjectionBoundaryVelocityCorrection = 0.01f;
+        }
+
+        private static int NormalizeTileSizeCells(int value)
+        {
+            if (value <= 4)
+                return 4;
+
+            return 8;
         }
     }
 }

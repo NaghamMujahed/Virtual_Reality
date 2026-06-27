@@ -164,6 +164,9 @@ namespace PaintBucketSim.Systems.Fluid
             _mpb.SetInt("_ParticleCount", gpuBufferSet.UploadedParticleCount);
             _mpb.SetFloat("_RenderMode", useSplat ? 1.0f : 0.0f);
             _mpb.SetFloat("_SplatNormalStrength", renderConfig.splatNormalStrength);
+            _mpb.SetFloat("_SplatEdgeSoftness", renderConfig.splatEdgeSoftness);
+            _mpb.SetFloat("_PaintSpecularStrength", renderConfig.paintSpecularStrength);
+            _mpb.SetFloat("_PaintFresnelStrength", renderConfig.paintFresnelStrength);
 
             Camera camera = Camera.main != null ? Camera.main : Camera.current;
             if (camera != null)
