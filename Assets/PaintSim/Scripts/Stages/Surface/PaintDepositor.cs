@@ -6,11 +6,16 @@ namespace PaintSim.Scripts.Stages.Surface
     public sealed class PaintDepositor
     {
         private const int ThreadGroupSize = 64;
+        private const int DiagnosticCounterCount = 8;
 
         private readonly ComputeShader _shader;
         private readonly PaintFilmGrid _paintFilmGrid;
         private readonly PaintProperties _paintProperties;
         private readonly int _kernelIndex = -1;
+        private readonly uint[] _zeroDiagnostics = new uint[DiagnosticCounterCount];
+        private readonly uint[] _diagnostics = new uint[DiagnosticCounterCount];
+
+        private ComputeBuffer _diagnosticBuffer;
 
         private static readonly int ID_ThicknessScale =
             Shader.PropertyToID("_ThicknessScale");
@@ -37,6 +42,12 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_DepositOnlyMlsAirDomainParticles");
         private static readonly int ID_MarkMlsParticlesDeposited =
             Shader.PropertyToID("_MarkMlsParticlesDeposited");
+        private static readonly int ID_AcceptFluidDomainSurfaceHits =
+            Shader.PropertyToID("_AcceptFluidDomainSurfaceHits");
+        private static readonly int ID_EnableSurfaceImpactDiagnostics =
+            Shader.PropertyToID("_EnableSurfaceImpactDiagnostics");
+        private static readonly int ID_SurfaceImpactDiagnostics =
+            Shader.PropertyToID("_SurfaceImpactDiagnostics");
 
         private static readonly int ID_DepositionFraction =
             Shader.PropertyToID("_DepositionFraction");
@@ -46,6 +57,8 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_AbsorptionRate");
         private static readonly int ID_Roughness =
             Shader.PropertyToID("_Roughness");
+        private static readonly int ID_SpreadSpeed =
+            Shader.PropertyToID("_SpreadSpeed");
         private static readonly int ID_SurfaceTypeID =
             Shader.PropertyToID("_SurfaceTypeID");
 
@@ -62,6 +75,7 @@ namespace PaintSim.Scripts.Stages.Surface
                 return;
 
             _kernelIndex = _shader.FindKernel("CSMainMlsMpm");
+            EnsureDiagnosticBuffer();
         }
 
         public void DispatchFromMlsMpmBuffers(
@@ -72,7 +86,9 @@ namespace PaintSim.Scripts.Stages.Surface
             int activeParticleCount,
             SurfaceProperties surface,
             bool markParticlesOnImpact = true,
-            bool depositOnlyAirDomainParticles = true)
+            bool depositOnlyAirDomainParticles = true,
+            bool acceptFluidDomainSurfaceHits = true,
+            bool enableDiagnostics = false)
         {
             if (_shader == null ||
                 _kernelIndex < 0 ||
@@ -98,6 +114,7 @@ namespace PaintSim.Scripts.Stages.Surface
                 return;
 
             ApplyCommonShaderParameters(particleCount, surface);
+            EnsureDiagnosticBuffer();
 
             _shader.SetInt(ID_MlsParticleCount, particleCount);
             _shader.SetInt(
@@ -105,9 +122,29 @@ namespace PaintSim.Scripts.Stages.Surface
                 depositOnlyAirDomainParticles ? 1 : 0
             );
             _shader.SetInt(
+                ID_AcceptFluidDomainSurfaceHits,
+                acceptFluidDomainSurfaceHits ? 1 : 0
+            );
+            _shader.SetInt(
                 ID_MarkMlsParticlesDeposited,
                 markParticlesOnImpact ? 1 : 0
             );
+            _shader.SetInt(
+                ID_EnableSurfaceImpactDiagnostics,
+                enableDiagnostics ? 1 : 0
+            );
+
+            if (_diagnosticBuffer != null)
+            {
+                if (enableDiagnostics)
+                    _diagnosticBuffer.SetData(_zeroDiagnostics);
+
+                _shader.SetBuffer(
+                    _kernelIndex,
+                    ID_SurfaceImpactDiagnostics,
+                    _diagnosticBuffer
+                );
+            }
 
             _shader.SetBuffer(
                 _kernelIndex,
@@ -137,6 +174,34 @@ namespace PaintSim.Scripts.Stages.Surface
                 _shader.Dispatch(_kernelIndex, threadGroups, 1, 1);
         }
 
+        public SurfaceImpactDiagnostics ReadDiagnostics()
+        {
+            if (_diagnosticBuffer == null)
+                return default;
+
+            _diagnosticBuffer.GetData(_diagnostics);
+            return new SurfaceImpactDiagnostics(_diagnostics);
+        }
+
+        public void Dispose()
+        {
+            _diagnosticBuffer?.Release();
+            _diagnosticBuffer = null;
+        }
+
+        private void EnsureDiagnosticBuffer()
+        {
+            if (_diagnosticBuffer != null)
+                return;
+
+            _diagnosticBuffer = new ComputeBuffer(
+                DiagnosticCounterCount,
+                sizeof(uint),
+                ComputeBufferType.Default
+            );
+            _diagnosticBuffer.SetData(_zeroDiagnostics);
+        }
+
         private void ApplyCommonShaderParameters(
             int particleCount,
             SurfaceProperties surface)
@@ -151,8 +216,49 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_SplashMultiplier, surface.SplashMultiplier);
             _shader.SetFloat(ID_AbsorptionRate, surface.AbsorptionRate);
             _shader.SetFloat(ID_Roughness, surface.Roughness);
+            _shader.SetFloat(ID_SpreadSpeed, surface.SpreadSpeed);
             _shader.SetInt(ID_SurfaceTypeID, (int)surface.SurfaceTypeID);
             _shader.SetInt(ID_MlsParticleCount, particleCount);
+        }
+    }
+
+    public readonly struct SurfaceImpactDiagnostics
+    {
+        public readonly uint Scanned;
+        public readonly uint StateAccepted;
+        public readonly uint NearSurface;
+        public readonly uint InGrid;
+        public readonly uint Impacted;
+        public readonly uint Settled;
+        public readonly uint StateSkipped;
+        public readonly uint CellWrites;
+
+        public SurfaceImpactDiagnostics(uint[] counters)
+        {
+            Scanned = Get(counters, 0);
+            StateAccepted = Get(counters, 1);
+            NearSurface = Get(counters, 2);
+            InGrid = Get(counters, 3);
+            Impacted = Get(counters, 4);
+            Settled = Get(counters, 5);
+            StateSkipped = Get(counters, 6);
+            CellWrites = Get(counters, 7);
+        }
+
+        private static uint Get(uint[] counters, int index)
+        {
+            return counters != null && index >= 0 && index < counters.Length
+                ? counters[index]
+                : 0u;
+        }
+
+        public override string ToString()
+        {
+            return
+                $"scanned={Scanned}, stateAccepted={StateAccepted}, " +
+                $"nearSurface={NearSurface}, inGrid={InGrid}, " +
+                $"impacted={Impacted}, settled={Settled}, " +
+                $"stateSkipped={StateSkipped}, cellWrites={CellWrites}";
         }
     }
 }

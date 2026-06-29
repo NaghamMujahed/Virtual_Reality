@@ -1,8 +1,8 @@
 # Paint Surface / MLS-MPM Integration
 
-هذا الملف يوثق حالة الدمج النهائية بين نظام الرسم على اللوحة القادم من فرع `zain` وبين solver المشروع الأساسي المعتمد على GPU MLS-MPM.
+هذا الملف يوثق مسار دمج الرسم على اللوحة مع solver المشروع الأساسي `GPU MLS-MPM`.
 
-القرار المعتمد الآن: لا يوجد تشغيل DFSPH داخل المشروع الحالي. نظام اللوحة يستقبل الجزيئات مباشرة من `GpuFluidBufferSet` الخاص بالـMLS-MPM، ثم يحول الاصطدام إلى طبقة طلاء على اللوحة.
+القرار الحالي: لا يوجد DFSPH يعمل بالتوازي. اللوحة تقرأ الجزيئات مباشرة من `GpuFluidBufferSet` الخاص بالـMLS-MPM.
 
 ## المسار الحالي
 
@@ -16,111 +16,57 @@ PaintSimulationHost
         ↓
 PaintDepositor.DispatchFromMlsMpmBuffers(...)
         ↓
-SurfaceImpact.compute / CSMainMlsMpm
+SurfaceImpact.compute
         ↓
 PaintFilmGrid
         ↓
+PaintEvolver + PaintEvaporation.compute
+        ↓
 PaintSurfaceRenderer + PaintFilmBaker.compute
         ↓
-Material _MainTex على اللوحة
+Material _BaseMap / _MainTex
 ```
+
+## الإصلاح الاحترافي الأخير
+
+تمت معالجة مشكلة أن الرسم بعد الدمج فقد جزءاً من splash/spread/wetness/drying:
+
+- `PaintSimulationHost` لم يعد يعتمد عملياً على diagnostics فقط لكي يسمح بالترسيب؛ يمكنه قبول الجزيئات التي وصلت إلى سطح اللوحة حتى لو لم تتحول حالتها إلى Airborne بعد.
+- `SurfaceImpact.compute` يستخدم الآن `SpreadSpeed` فعلياً، ويضيف splatter ثانوي حول ضربة الجزيء عند الطاقة العالية.
+- `PaintFilmGrid` أصبح يملك `ScratchCellBuffer` حتى يكون انتشار الطلاء ping-pong بدلاً من القراءة والكتابة في نفس buffer.
+- `PaintEvaporation.compute` أعيد بناؤه إلى مرحلتين:
+  - `Spread`: انتشار رطب مع ميل بسيط باتجاه flow velocity.
+  - `Evaporate`: تقليل الرطوبة وزيادة العمر مع إبقاء الطلاء الجاف مرئياً.
+- `PaintSurfaceRenderer` يربط texture على `_BaseMap` و`_MainTex`، ويصنع material runtime عند غياب material على اللوحة.
+- `SampleScene` رُبطت فيها لوحة `PaintPlane` بمادة `PaintSurfaceMaterial`.
 
 ## الملفات الأساسية
 
 - `Assets/PaintSim/Scripts/UnityBridge/PaintSimulationHost.cs`
-  - جسر الدمج الوحيد بين solver المشروع ونظام اللوحة.
-  - لا يملك محاكاة مستقلة ولا DFSPH.
-  - يتخطى dispatch عندما لا توجد جزيئات في مجال الهواء/النفث لتخفيف الكلفة.
-
 - `Assets/PaintSim/Scripts/Stages/Surface/PaintSurface.cs`
-  - ينشئ grid الطلاء من حجم اللوحة الحقيقي.
-  - لا يغير Scale اللوحة افتراضياً، لذلك لا يحدث تصغير تلقائي للوحة.
-  - يدعم اللوحات الأفقية والعمودية والمائلة عبر `PaintSurfacePlaneMode`.
-
 - `Assets/PaintSim/Scripts/Stages/Surface/PaintFilmGrid.cs`
-  - يخزن grid الطلاء ومحاور اللوحة في العالم:
-    - `SurfaceOriginWS`
-    - `SurfaceAxisU`
-    - `SurfaceAxisV`
-    - `SurfaceNormalWS`
-
+- `Assets/PaintSim/Scripts/Stages/Surface/PaintDepositor.cs`
+- `Assets/PaintSim/Scripts/Stages/Surface/PaintEvolver.cs`
+- `Assets/PaintSim/Scripts/Rendering/PaintSurfaceRenderer.cs`
 - `Assets/Resources/ComputeShaders/Impact/SurfaceImpact.compute`
-  - يقرأ buffers الخاصة بالـMLS-MPM.
-  - يحسب الاصطدام على مستوى اللوحة الموجه، وليس على افتراض XZ/Y فقط.
-  - يكتب الترسيب داخل `PaintCellBuffer`.
-  - يحدث حالة الجزيء إلى:
-    - `Deposited = 8`
-    - `Absorbed = 9`
-    - أو يبقيه `Airborne = 6` إذا ارتد/تناثر.
+- `Assets/Resources/ComputeShaders/Surface/PaintEvaporation.compute`
+- `Assets/Resources/ComputeShaders/Surface/PaintFilmBaker.compute`
 
-## ما تم حذفه من دمج zain
+## ملاحظات ضبط
 
-تم حذف الأجزاء التي كانت ستسبب تكراراً أو محاكاة ثانية غير مرغوبة:
-
-- DFSPH stage.
-- SPH/DFSPH particle data.
-- BufferManager وSimulationPipeline المستوردان.
-- Exit/Impact stages الخاصة بالمسار القديم.
-- Particle renderer المستورد من zain.
-- Shaders ومواد غير مستخدمة في المسار الحالي.
-
-المتبقي من `PaintSim` هو فقط ما يخدم اللوحة/الترسيب/rendering.
-
-## تركيب المشهد
-
-1. ضع `PaintSurface` على جسم اللوحة.
-2. ضع `PaintSimulationHost` مرة واحدة في المشهد.
-3. اربط يدوياً أو اترك Auto Find مفعلاً:
-   - `PaintFluidSystem`
-   - `GpuFluidBufferSet`
-   - `PaintSurface`
-4. تأكد أن Material اللوحة يقبل `_MainTex`.
-5. في `PaintSurface`:
-   - `Sizing Mode = FitRendererBounds` غالباً هو الخيار الصحيح.
-   - `Plane Mode = AutoFromMeshBounds` غالباً يكفي:
-     - Unity Plane → XZ.
-     - Unity Quad → XY.
-     - Mesh مائل/عمودي → يختار المحور الأقل سماكة كـNormal.
-   - إذا كانت اللوحة Mesh خاصاً وغريب المحاور، اختر `LocalXY` أو `LocalXZ` أو `LocalYZ` يدوياً.
-
-## تعدد الألوان والحواجز داخل الدلو
-
-الإعدادات موجودة في `PaintFluidConfig`:
-
-- `enableColorCompartments`
-- `colorCompartmentCount`
-- `colorCompartmentAxis`
-- `colorDividerGapFraction`
-- `compartmentColors`
-- `enablePhysicalColorDividers`
-- `colorDividerThicknessMeters`
-- `carveInitialParticlesAroundPhysicalDividers`
-
-الحالة الحالية ليست مجرد فراغ تهيئة فقط؛ تمت إضافة حل تصادم GPU للحواجز داخل `GpuDenseMpmPrototype.compute` وربطه من `GpuMpmDenseLocalSolver`.
-
-هذا يعني أن الفواصل اللونية يمكن أن تعمل كحواجز فيزيائية داخل الدلو، مع دعم:
-
-- تقسيم على محور X.
-- تقسيم على محور Z.
-- تقسيم radial wedges.
-
-## ملاحظات أداء مهمة
-
-- لا يوجد DFSPH يعمل بالتوازي.
-- `PaintSimulationHost` يتخطى الترسيب عندما لا توجد جزيئات Jet/Airborne/OutflowTransition.
-- `PaintSurface` يسمح بتقليل كلفة اللوحة عبر:
-  - `Render Every N Frames`
-  - `Evolve Every N Frames`
-- الـCPU `PaintParticleRenderer` الموجود في المشروع الأساسي لا يرسم عندما يكون GPU solver فعالاً، والـrenderer المعتمد للمسار الحالي هو `GpuParticleIndirectRenderer`.
+- `PaintSurface > Diffusion Rate` يستخدم قيمة legacy، ويتم تحويله داخلياً إلى معدل انتشار محافظ أصغر.
+- `Runoff Rate` يزيد امتداد الطلاء باتجاه flow velocity.
+- `Minimum Wet Thickness` يؤثر على سرعة جفاف الطبقات الخفيفة.
+- `SurfaceProperties.SpreadSpeed` أصبح مؤثراً في حجم البقعة والـsplash.
 
 ## التحقق
 
-تم تشغيل Unity batchmode بعد التنظيف ودعم اللوحة الموجهة:
+آخر اختبار Unity batch:
+
+`Logs/PaintSurfaceProfessional_G26.log`
+
+النتيجة:
 
 - لا توجد أخطاء C#.
 - لا توجد Shader errors.
-- التحذيرات المتبقية هي تحذيرات Unity obsolete حول `FindFirstObjectByType` في سكربتات قديمة، وليست أخطاء تشغيلية في الدمج.
-
-آخر log تحقق:
-
-`Logs/PaintSimIntegration_G23_OrientedSurface.log`
+- التحذيرات المتبقية تخص `DebugOverlay.cs` فقط، وهي تحذيرات obsolete قديمة وغير مرتبطة بنظام الرسم.

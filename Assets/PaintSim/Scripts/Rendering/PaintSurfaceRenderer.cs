@@ -11,6 +11,8 @@ namespace PaintSim.Scripts.Rendering
         private readonly MeshRenderer _surfaceRenderer;
 
         private RenderTexture _paintTexture;
+        private Color _canvasBaseColor = new Color(0.72f, 0.65f, 0.55f, 1.0f);
+        private Material _runtimeFallbackMaterial;
 
         private readonly int _kernelIndex;
 
@@ -24,6 +26,10 @@ namespace PaintSim.Scripts.Rendering
         private static readonly int ID_MaxThickness    = Shader.PropertyToID("_MaxThickness");
         private static readonly int ID_WetnessShine    = Shader.PropertyToID("_WetnessShine");
         private static readonly int ID_MainTex         = Shader.PropertyToID("_MainTex");
+        private static readonly int ID_BaseMap         = Shader.PropertyToID("_BaseMap");
+        private static readonly int ID_Color           = Shader.PropertyToID("_Color");
+        private static readonly int ID_BaseColor       = Shader.PropertyToID("_BaseColor");
+        private static readonly int ID_CanvasBaseColor = Shader.PropertyToID("_CanvasBaseColor");
 
         public float MaxThickness = 0.0001f;
         public float WetnessShine = 0.8f;
@@ -54,7 +60,7 @@ namespace PaintSim.Scripts.Rendering
                 _paintFilmGrid.GridWidth,
                 _paintFilmGrid.GridHeight,
                 0,
-                RenderTextureFormat.ARGB32
+                RenderTextureFormat.ARGBHalf
             )
             {
                 enableRandomWrite = true,
@@ -71,15 +77,63 @@ namespace PaintSim.Scripts.Rendering
                 return;
             }
 
-            var mat = _surfaceRenderer.material;
+            Material mat = ResolveSurfaceMaterial();
             if (mat == null)
             {
-                Debug.LogError("[PaintSurfaceRenderer] Material is NULL on Plane");
+                Debug.LogError("[PaintSurfaceRenderer] Could not create or resolve a surface material.");
                 return;
             }
 
-            mat.SetTexture(ID_MainTex, _paintTexture);
-            mat.color = Color.white;
+            if (mat.HasProperty(ID_BaseColor))
+                _canvasBaseColor = mat.GetColor(ID_BaseColor);
+            else if (mat.HasProperty(ID_Color))
+                _canvasBaseColor = mat.GetColor(ID_Color);
+
+            if (mat.HasProperty(ID_MainTex))
+                mat.SetTexture(ID_MainTex, _paintTexture);
+
+            if (mat.HasProperty(ID_BaseMap))
+                mat.SetTexture(ID_BaseMap, _paintTexture);
+
+            if (mat.HasProperty(ID_BaseColor))
+                mat.SetColor(ID_BaseColor, Color.white);
+
+            if (mat.HasProperty(ID_Color))
+                mat.SetColor(ID_Color, Color.white);
+        }
+
+        private Material ResolveSurfaceMaterial()
+        {
+            if (_surfaceRenderer == null)
+                return null;
+
+            if (_surfaceRenderer.sharedMaterial == null ||
+                _surfaceRenderer.sharedMaterials == null ||
+                _surfaceRenderer.sharedMaterials.Length == 0)
+            {
+                Shader shader =
+                    Shader.Find("Universal Render Pipeline/Unlit") ??
+                    Shader.Find("Universal Render Pipeline/Lit") ??
+                    Shader.Find("Standard");
+
+                if (shader == null)
+                    return null;
+
+                _runtimeFallbackMaterial = new Material(shader)
+                {
+                    name = "Runtime Paint Surface Material"
+                };
+
+                if (_runtimeFallbackMaterial.HasProperty(ID_BaseColor))
+                    _runtimeFallbackMaterial.SetColor(ID_BaseColor, _canvasBaseColor);
+
+                if (_runtimeFallbackMaterial.HasProperty(ID_Color))
+                    _runtimeFallbackMaterial.SetColor(ID_Color, _canvasBaseColor);
+
+                _surfaceRenderer.sharedMaterial = _runtimeFallbackMaterial;
+            }
+
+            return _surfaceRenderer.material;
         }
 
         public void Render()
@@ -103,6 +157,7 @@ namespace PaintSim.Scripts.Rendering
             _bakerShader.SetInt(ID_ThicknessScale, PaintCellData.ThicknessScale);
             _bakerShader.SetFloat(ID_MaxThickness, MaxThickness);
             _bakerShader.SetFloat(ID_WetnessShine, WetnessShine);
+            _bakerShader.SetVector(ID_CanvasBaseColor, _canvasBaseColor);
 
             int groupsX = Mathf.CeilToInt(_paintFilmGrid.GridWidth / (float)GroupSize);
             int groupsY = Mathf.CeilToInt(_paintFilmGrid.GridHeight / (float)GroupSize);
@@ -119,6 +174,16 @@ namespace PaintSim.Scripts.Rendering
                     Object.Destroy(_paintTexture);
                 else
                     Object.DestroyImmediate(_paintTexture);
+            }
+
+            if (_runtimeFallbackMaterial != null)
+            {
+                if (Application.isPlaying)
+                    Object.Destroy(_runtimeFallbackMaterial);
+                else
+                    Object.DestroyImmediate(_runtimeFallbackMaterial);
+
+                _runtimeFallbackMaterial = null;
             }
         }
     }

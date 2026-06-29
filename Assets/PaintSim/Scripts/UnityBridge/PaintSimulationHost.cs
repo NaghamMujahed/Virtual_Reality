@@ -23,9 +23,15 @@ namespace PaintSim.Scripts.UnityBridge
 
         [Header("Deposition Performance")]
         [SerializeField] private bool _depositInLateUpdate = true;
+        [SerializeField, Min(1)] private int _depositEveryNFrames = 1;
         [SerializeField] private bool _skipWhenNoAirDomainParticles = true;
         [SerializeField] private bool _depositOnlyAirDomainParticles = true;
+        [SerializeField] private bool _acceptFluidDomainSurfaceHits = true;
         [SerializeField] private bool _markMlsMpmParticlesOnImpact = true;
+
+        [Header("Surface Impact Diagnostics")]
+        [SerializeField] private bool _enableSurfaceImpactDiagnostics = true;
+        [SerializeField, Min(1)] private int _diagnosticLogEveryNFrames = 120;
 
         [Header("Paint Properties")]
         [SerializeField] private bool _syncPaintPropertiesFromMlsMpmMaterial = true;
@@ -156,7 +162,11 @@ namespace PaintSim.Scripts.UnityBridge
             if (count <= 0)
                 return;
 
+            if (Time.frameCount % Mathf.Max(1, _depositEveryNFrames) != 0)
+                return;
+
             if (_skipWhenNoAirDomainParticles &&
+                !_acceptFluidDomainSurfaceHits &&
                 _paintFluidSystem != null &&
                 _paintFluidSystem.IsGpuSolverActive)
             {
@@ -178,8 +188,17 @@ namespace PaintSim.Scripts.UnityBridge
                 count,
                 _paintSurface.SurfaceProperties,
                 _markMlsMpmParticlesOnImpact,
-                _depositOnlyAirDomainParticles
+                _depositOnlyAirDomainParticles,
+                _acceptFluidDomainSurfaceHits,
+                _enableSurfaceImpactDiagnostics
             );
+
+            if (_enableSurfaceImpactDiagnostics &&
+                Time.frameCount % Mathf.Max(1, _diagnosticLogEveryNFrames) == 0)
+            {
+                SurfaceImpactDiagnostics diagnostics = _paintDepositor.ReadDiagnostics();
+                Debug.Log($"[PaintSimulationHost] SurfaceImpact diagnostics: {diagnostics}");
+            }
         }
 
         private void OnValidate()
@@ -189,6 +208,14 @@ namespace PaintSim.Scripts.UnityBridge
             _paintSurfaceTension = Mathf.Max(_paintSurfaceTension, 0.0001f);
             _materialViscositySampleShearRate =
                 Mathf.Max(_materialViscositySampleShearRate, 0.0f);
+            _depositEveryNFrames = Mathf.Max(1, _depositEveryNFrames);
+            _diagnosticLogEveryNFrames = Mathf.Max(1, _diagnosticLogEveryNFrames);
+        }
+
+        private void OnDestroy()
+        {
+            _paintDepositor?.Dispose();
+            _paintDepositor = null;
         }
     }
 }

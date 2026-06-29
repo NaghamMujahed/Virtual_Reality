@@ -20,6 +20,7 @@ int   _GridHeight;
 int   _ThicknessScale;
 float _MaxThickness;
 float _WetnessShine;
+float4 _CanvasBaseColor;
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
@@ -34,7 +35,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
     if (cell.IsActive == 0)
     {
-        _OutputTexture[texCoord] = float4(0, 0, 0, 0);
+        _OutputTexture[texCoord] = float4(saturate(_CanvasBaseColor.rgb), 1.0);
         return;
     }
 
@@ -50,7 +51,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     float shine = wetness * _WetnessShine;
     color.rgb = lerp(color.rgb, 1.0.xxx, shine * 0.05);
 
-    color.a = alpha;
+    color.rgb = lerp(saturate(_CanvasBaseColor.rgb), color.rgb, alpha);
+    color.a = 1.0;
 
     _OutputTexture[texCoord] = saturate(color);
 }

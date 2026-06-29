@@ -18,6 +18,7 @@ RWStructuredBuffer<float4> _MlsParticlePositionRadius;
 RWStructuredBuffer<float4> _MlsParticleVelocityMass;
 StructuredBuffer<float4>   _MlsParticleColor;
 RWStructuredBuffer<float4> _MlsParticleStateAgeId;
+RWStructuredBuffer<uint>   _SurfaceImpactDiagnostics;
 
 int _GridWidth;
 int _GridHeight;
@@ -44,16 +45,34 @@ float _DepositionFraction;
 float _SplashMultiplier;
 float _AbsorptionRate;
 float _Roughness;
+float _SpreadSpeed;
 uint  _SurfaceTypeID;
 
 int _MlsParticleCount;
 int _DepositOnlyMlsAirDomainParticles;
 int _MarkMlsParticlesDeposited;
+int _AcceptFluidDomainSurfaceHits;
+int _EnableSurfaceImpactDiagnostics;
 
 #define PI 3.14159265f
 #define WE_DEPOSITION 5.0f
 #define WE_SPREAD     25.0f
 #define K_SPLASH      60.0f
+
+#define DIAG_SCANNED          0
+#define DIAG_STATE_ACCEPTED   1
+#define DIAG_NEAR_SURFACE     2
+#define DIAG_IN_GRID          3
+#define DIAG_IMPACTED         4
+#define DIAG_SETTLED          5
+#define DIAG_STATE_SKIPPED    6
+#define DIAG_CELL_WRITES      7
+
+void DiagAdd(uint index, uint value)
+{
+    if (_EnableSurfaceImpactDiagnostics != 0)
+        InterlockedAdd(_SurfaceImpactDiagnostics[index], value);
+}
 
 float3 SafeNormalize3(float3 value, float3 fallback)
 {
@@ -85,13 +104,25 @@ bool IsMlsAirDomainState(int state)
     return state == 4 || state == 5 || state == 6 || state == 7;
 }
 
+bool IsMlsFluidDomainState(int state)
+{
+    // InsideFluid=1, NearBoundary=2, NearHole=3.
+    return state == 1 || state == 2 || state == 3;
+}
+
 bool IsMlsDepositableState(int state)
 {
     if (state == 0 || state == 8 || state == 9 || state == 10)
         return false;
 
     if (_DepositOnlyMlsAirDomainParticles != 0)
-        return IsMlsAirDomainState(state);
+    {
+        if (IsMlsAirDomainState(state))
+            return true;
+
+        return _AcceptFluidDomainSurfaceHits != 0 &&
+               IsMlsFluidDomainState(state);
+    }
 
     return state > 0 && state < 8;
 }
@@ -117,6 +148,7 @@ void WriteCell(
 
     InterlockedAdd(_PaintCellBuffer[idx].ThicknessInt, w);
     InterlockedMax(_PaintCellBuffer[idx].IsActive, 1u);
+    DiagAdd(DIAG_CELL_WRITES, 1u);
 
     _PaintCellBuffer[idx].Wetness = 1.0f;
 
@@ -179,8 +211,12 @@ bool DepositSurfaceImpact(
     int baseU = (int)floor(localU);
     int baseV = (int)floor(localV);
 
+    DiagAdd(DIAG_NEAR_SURFACE, 1u);
+
     if (baseU < -6 || baseU >= _GridWidth + 6 || baseV < -6 || baseV >= _GridHeight + 6)
         return false;
+
+    DiagAdd(DIAG_IN_GRID, 1u);
 
     float speed = length(velocity);
     float normalVelocity = dot(velocity, normalWS);
@@ -233,7 +269,11 @@ bool DepositSurfaceImpact(
 
     float absorbed = saturate(1.0f - depositionFraction);
 
-    float baseRadiusCells = 1.0f + sqrt(max(weber, 0.0f)) * 0.2f;
+    float spreadSpeed = saturate(_SpreadSpeed);
+    float baseRadiusCells =
+        1.0f +
+        sqrt(max(weber, 0.0f)) *
+        lerp(0.12f, 0.32f, spreadSpeed);
     float radiusU = clamp(
         baseRadiusCells * (1.0f + abs(tangentU) * 2.0f),
         1.0f,
@@ -281,6 +321,55 @@ bool DepositSurfaceImpact(
                 color,
                 _PaintDensity,
                 flow
+            );
+        }
+    }
+
+    float splash01 =
+        saturate((weber - WE_SPREAD) / 120.0f) *
+        max(_SplashMultiplier, 0.0f);
+
+    if (splash01 > 0.01f && depositInt > 0)
+    {
+        [unroll]
+        for (int k = 0; k < 10; k++)
+        {
+            float seed =
+                (float)particleIndex * 17.113f +
+                (float)k * 31.719f +
+                localU * 0.137f +
+                localV * 0.271f;
+
+            float r0 = frac(sin(seed) * 43758.5453f);
+            float r1 = frac(sin(seed + 19.19f) * 24634.6345f);
+            float r2 = frac(sin(seed + 71.71f) * 13412.9831f);
+
+            float angle = r0 * 6.2831853f;
+            float dist =
+                lerp(1.4f, 4.8f, r1) *
+                lerp(radiusU, max(radiusU, radiusV), 0.5f) *
+                lerp(0.7f, 1.35f, splash01);
+
+            float2 dir = float2(cos(angle), sin(angle));
+            float tangentAlignment =
+                saturate(abs(dot(normalize(float2(tangentU, tangentV) + 1e-5f), dir)));
+
+            dist *= lerp(0.75f, 1.35f, tangentAlignment);
+
+            int satelliteU = baseU + (int)round(dir.x * dist);
+            int satelliteV = baseV + (int)round(dir.y * dist);
+
+            int satelliteThickness =
+                (int)max(1.0f, (float)depositInt * splash01 * lerp(0.015f, 0.08f, r2));
+
+            WriteCell(
+                satelliteU,
+                satelliteV,
+                lerp(0.35f, 0.85f, r2),
+                satelliteThickness,
+                color,
+                _PaintDensity,
+                float2(tangentU, tangentV) * speed * 0.03f
             );
         }
     }
@@ -352,11 +441,18 @@ void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
     if (i >= (uint)max(_MlsParticleCount, 0))
         return;
 
+    DiagAdd(DIAG_SCANNED, 1u);
+
     float4 stateAgeId = _MlsParticleStateAgeId[i];
     int state = (int)round(stateAgeId.x);
 
     if (!IsMlsDepositableState(state))
+    {
+        DiagAdd(DIAG_STATE_SKIPPED, 1u);
         return;
+    }
+
+    DiagAdd(DIAG_STATE_ACCEPTED, 1u);
 
     float4 pr = _MlsParticlePositionRadius[i];
     float4 vm = _MlsParticleVelocityMass[i];
@@ -385,11 +481,14 @@ void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
     if (!impacted || _MarkMlsParticlesDeposited == 0)
         return;
 
+    DiagAdd(DIAG_IMPACTED, 1u);
+
     _MlsParticlePositionRadius[i] = float4(resolvedPosition, max(resolvedRadius, 0.0f));
     _MlsParticleVelocityMass[i] = float4(resolvedVelocity, max(resolvedMass, 0.0f));
 
     if (settled)
     {
+        DiagAdd(DIAG_SETTLED, 1u);
         stateAgeId.x = _AbsorptionRate >= 0.95f ? 9.0f : 8.0f;
         stateAgeId.z = 0.0f;
     }

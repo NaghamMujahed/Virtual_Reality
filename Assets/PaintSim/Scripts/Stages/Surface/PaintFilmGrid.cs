@@ -20,6 +20,7 @@ namespace PaintSim.Scripts.Stages.Surface
         public bool DoubleSidedImpact { get; private set; }
 
         public ComputeBuffer PaintCellBuffer { get; private set; }
+        public ComputeBuffer ScratchCellBuffer { get; private set; }
 
         private static readonly int ID_PaintCellBuffer = Shader.PropertyToID("_PaintCellBuffer");
         private static readonly int ID_GridWidth = Shader.PropertyToID("_GridWidth");
@@ -111,11 +112,18 @@ namespace PaintSim.Scripts.Stages.Surface
                 ComputeBufferType.Default
             );
 
+            ScratchCellBuffer = new ComputeBuffer(
+                totalCells,
+                PaintCellData.Stride,
+                ComputeBufferType.Default
+            );
+
             var emptyCells = new PaintCellData[totalCells];
             for (int i = 0; i < totalCells; i++)
                 emptyCells[i] = PaintCellData.Empty;
 
             PaintCellBuffer.SetData(emptyCells);
+            ScratchCellBuffer.SetData(emptyCells);
         }
 
         public void BindToShader(ComputeShader shader, int kernelIndex)
@@ -178,12 +186,15 @@ namespace PaintSim.Scripts.Stages.Surface
                 emptyCells[i] = PaintCellData.Empty;
 
             PaintCellBuffer.SetData(emptyCells);
+            ScratchCellBuffer?.SetData(emptyCells);
         }
 
         public void Dispose()
         {
             PaintCellBuffer?.Release();
+            ScratchCellBuffer?.Release();
             PaintCellBuffer = null;
+            ScratchCellBuffer = null;
         }
     }
 }

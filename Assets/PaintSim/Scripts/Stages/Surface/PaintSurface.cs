@@ -49,7 +49,13 @@ namespace PaintSim.Scripts.Stages.Surface
         [SerializeField] private ComputeShader _evaporationShader;
         [SerializeField] private float _evaporationRate = 0.05f;
         [SerializeField] private float _diffusionRate = 30.0f;
+        [SerializeField, Min(0.0f)] private float _runoffRate = 0.18f;
+        [SerializeField, Min(0.000001f)] private float _minimumWetThickness = 0.000015f;
         [SerializeField, Min(1)] private int _evolveEveryNFrames = 2;
+
+        [Header("Debug / Validation")]
+        [SerializeField] private Color _debugStampColor = new Color(1.0f, 0.05f, 0.02f, 1.0f);
+        [SerializeField, Min(0.000001f)] private float _debugStampThickness = 0.00008f;
 
         public PaintFilmGrid PaintFilmGrid { get; private set; }
         public SurfaceProperties SurfaceProperties { get; private set; }
@@ -166,7 +172,10 @@ namespace PaintSim.Scripts.Stages.Surface
 
             worldWidth = Mathf.Max(maxU - minU, _cellSize);
             worldHeight = Mathf.Max(maxV - minV, _cellSize);
-            float normalOffset = (minN + maxN) * 0.5f;
+            // Use the visible/contact face instead of the mesh center.
+            // This matters for thick boards/cubes: the paint surface should be
+            // on the top/front face, not buried halfway inside the object.
+            float normalOffset = maxN;
 
             originWS = axisU * minU + axisV * minV + normalWS * normalOffset;
         }
@@ -337,7 +346,9 @@ namespace PaintSim.Scripts.Stages.Surface
 
             _evolver = new PaintEvolver(_evaporationShader, PaintFilmGrid);
             _evolver.EvaporationRate = _evaporationRate;
-            _evolver.DiffusionRate = _diffusionRate;
+            _evolver.DiffusionRate = EffectiveDiffusionRate();
+            _evolver.RunoffRate = _runoffRate;
+            _evolver.MinimumWetThickness = _minimumWetThickness;
         }
 
         private void InitRenderer()
@@ -365,12 +376,83 @@ namespace PaintSim.Scripts.Stages.Surface
                 Time.frameCount % Mathf.Max(1, _evolveEveryNFrames) == 0)
             {
                 _evolver.EvaporationRate = _evaporationRate;
-                _evolver.DiffusionRate = _diffusionRate;
+                _evolver.DiffusionRate = EffectiveDiffusionRate();
+                _evolver.RunoffRate = _runoffRate;
+                _evolver.MinimumWetThickness = _minimumWetThickness;
                 _evolver.Evolve(Time.deltaTime * Mathf.Max(1, _evolveEveryNFrames));
             }
 
             if (Time.frameCount % Mathf.Max(1, _renderEveryNFrames) == 0)
                 _renderer?.Render();
+        }
+
+        [ContextMenu("PaintSim/Debug Stamp Center")]
+        private void DebugStampCenter()
+        {
+            if (!Application.isPlaying)
+            {
+                Debug.LogWarning(
+                    "[PaintSurface] Debug Stamp Center is intended for Play Mode " +
+                    "after the paint grid has been initialized."
+                );
+                return;
+            }
+
+            if (PaintFilmGrid == null || PaintFilmGrid.PaintCellBuffer == null)
+            {
+                Debug.LogWarning("[PaintSurface] PaintFilmGrid is not initialized.");
+                return;
+            }
+
+            int centerX = PaintFilmGrid.GridWidth / 2;
+            int centerY = PaintFilmGrid.GridHeight / 2;
+            int radius = Mathf.Max(2, Mathf.RoundToInt(0.02f / PaintFilmGrid.CellSize));
+            int thickness = PaintCellData.ToThicknessInt(_debugStampThickness);
+
+            var oneCell = new PaintCellData[1];
+
+            for (int y = -radius; y <= radius; y++)
+            {
+                for (int x = -radius; x <= radius; x++)
+                {
+                    float normalizedDistance =
+                        Mathf.Sqrt(x * x + y * y) / Mathf.Max(radius, 1);
+
+                    if (normalizedDistance > 1.0f)
+                        continue;
+
+                    float weight = Mathf.Exp(-normalizedDistance * normalizedDistance * 4.0f);
+                    int ix = centerX + x;
+                    int iy = centerY + y;
+
+                    if (ix < 0 || ix >= PaintFilmGrid.GridWidth ||
+                        iy < 0 || iy >= PaintFilmGrid.GridHeight)
+                    {
+                        continue;
+                    }
+
+                    oneCell[0] = new PaintCellData
+                    {
+                        ThicknessInt = Mathf.Max(1, Mathf.RoundToInt(thickness * weight)),
+                        Wetness = 1.0f,
+                        Age = 0.0f,
+                        IsActive = 1u,
+                        Color = _debugStampColor,
+                        FlowVelocity = Vector2.zero,
+                        PaintDensity = 1200.0f
+                    };
+
+                    PaintFilmGrid.PaintCellBuffer.SetData(
+                        oneCell,
+                        0,
+                        iy * PaintFilmGrid.GridWidth + ix,
+                        1
+                    );
+                }
+            }
+
+            _renderer?.Render();
+            Debug.Log("[PaintSurface] Debug stamp written to the center of the paint surface.");
         }
 
         public void Dispose()
@@ -388,9 +470,21 @@ namespace PaintSim.Scripts.Stages.Surface
             _gridHeight = Mathf.Max(1, _gridHeight);
             _cellSize = Mathf.Max(_cellSize, 0.0001f);
             _impactCaptureDistance = Mathf.Max(_impactCaptureDistance, 0.0001f);
+            _evaporationRate = Mathf.Max(_evaporationRate, 0.0f);
+            _diffusionRate = Mathf.Max(_diffusionRate, 0.0f);
+            _runoffRate = Mathf.Max(_runoffRate, 0.0f);
+            _minimumWetThickness = Mathf.Max(_minimumWetThickness, 0.000001f);
             _renderEveryNFrames = Mathf.Max(1, _renderEveryNFrames);
             _evolveEveryNFrames = Mathf.Max(1, _evolveEveryNFrames);
             SurfaceProperties = SurfaceProperties.FromType(_surfaceType);
+        }
+
+        private float EffectiveDiffusionRate()
+        {
+            // Existing scenes used values around 30 for the old non-conservative
+            // diffusion shader. The new ping-pong spread model expects a smaller
+            // normalized rate, so we preserve inspector compatibility here.
+            return Mathf.Clamp(_diffusionRate * 0.02f, 0.0f, 2.0f);
         }
 
         private void OnDestroy()
