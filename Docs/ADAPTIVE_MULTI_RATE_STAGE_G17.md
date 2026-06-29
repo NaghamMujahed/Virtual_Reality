@@ -88,11 +88,12 @@ Passing coverage includes:
   overflow;
 - no final shader errors or shader warnings on D3D11 / NVIDIA MX110.
 
-## Next stage
+## Superseded next-stage decision
 
-G18 should target persistent spatial ordering:
+G17.5 first compared the projected solver against a compact density-EOS
+MLS-MPM path. The validated density path is now the default and makes
+projection/deformation adaptive sampling unnecessary in production mode.
+See `FAST_DENSITY_MLS_MPM_STAGE_G17_5.md`.
 
-- Morton or cell keys on the GPU;
-- radix sort or persistent cell ranges;
-- reuse by collision, G2P, rendering, and later adaptive-resolution work;
-- removal of dense-capacity allocations where practical.
+Persistent spatial ordering remains a candidate for G18 only if it reduces
+the now-measured two-pass P2G bottleneck in an A/B benchmark.

@@ -39,7 +39,7 @@ namespace PaintBucketSim.Configs
         public Vector3 localCenter = new Vector3(0.0f, -0.5f, 0.0f);
         public Vector3 localNormal = Vector3.down;
 
-        [Min(0.001f)]
+        [Min(0.0005f)]
         public float radiusMeters = 0.035f;
 
         [Tooltip("Full local X/Y size used by ellipse, rectangle, and slot holes. Circle/square can keep using radius.")]

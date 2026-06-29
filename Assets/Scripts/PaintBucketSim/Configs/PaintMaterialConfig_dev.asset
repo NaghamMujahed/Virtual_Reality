@@ -14,11 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintMaterialConfig
   densityKgPerM3: 1150
   baseColor: {r: 0.1, g: 0.35, b: 1, a: 1}
-  viscosityModel: 0
-  constantViscosityPaS: 1.5
-  zeroShearViscosityPaS: 5
-  infiniteShearViscosityPaS: 0.5
+  viscosityModel: 1
+  constantViscosityPaS: 0.16
+  zeroShearViscosityPaS: 2.6
+  infiniteShearViscosityPaS: 0.14
   relaxationTimeSeconds: 0.8
+  yasudaExponent: 2.2
   flowIndex: 0.55
   yieldStressPa: 0
   surfaceTensionNPerM: 0.035

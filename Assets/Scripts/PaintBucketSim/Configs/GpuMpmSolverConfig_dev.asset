@@ -33,6 +33,14 @@ MonoBehaviour:
   enableTiledP2G: 0
   enableTileOrderedParticlePipeline: 0
   enableHybridTiledP2G: 1
+  enableCenteredHybridP2GOwnerTile: 1
+  enableFusedG2PPostCollision: 1
+  enableFusedPreCollisionTileMark: 1
+  enableAdaptiveTransferStencil: 1
+  enableAdaptiveG2PTransferStencil: 0
+  adaptiveTransferMinParticles: 200000
+  ownerTileListRebuildInterval: 2
+  ownerTileListReuseMinParticles: 350000
   mpmTileSizeCells: 8
   massFixedScale: 1000000
   momentumFixedScale: 1000000
@@ -46,14 +54,20 @@ MonoBehaviour:
   manualApicDInverse: 625
   enableProjectionGridInfrastructure: 1
   useMpmGridForProjection: 1
-  projectionSubstepInterval: 2
+  projectionSubstepInterval: 1
   enableSparseProjectionPressureDispatch: 1
+  enableMpmTileProjectionDispatch: 1
+  enableProjectionDensityDriftCorrection: 1
+  projectionDensityDriftStrength: 0.2
+  projectionDensityDriftMinRatio: 1.02
+  projectionDensityDriftMaxDivergence: 13
   enableAdaptiveMultiRate: 1
   adaptiveActivitySampleInterval: 8
   calmInteriorDeformationInterval: 1
-  adaptivePriorityParticleSpeed: 1.25
+  adaptivePriorityParticleSpeed: 3
+  adaptivePriorityJDeviation: 1
   adaptivePriorityBoundaryBandMeters: 0.025
-  adaptivePriorityTopFraction: 0.75
+  adaptivePriorityTopFraction: 0.6
   enableAdaptiveProjectionCadence: 1
   calmProjectionSubstepInterval: 3
   adaptiveProjectionCalmDelaySubsteps: 32
@@ -73,20 +87,31 @@ MonoBehaviour:
   activeProjectionBoundsPaddingCells: 2
   activeProjectionMaxFullGridFraction: 0.95
   enableMaterialStress: 1
-  bulkModulus: 12500
-  mpmViscosity: 0.2
+  enableReferenceDensityEosMode: 1
+  referenceEosExponent: 5
+  referenceClampNegativePressure: 1
+  referenceEnableProjectionFallback: 1
+  enableGridDensityEos: 1
+  gridDensityEosPressureScale: 4
+  gridDensityEosMaxVelocityCorrection: 1.5
+  bulkModulus: 1000
+  mpmViscosity: 0.16
   materialStressStrength: 1
-  maxStressMagnitude: 20000
+  maxStressMagnitude: 8000
   minJ: 0.65
   maxJ: 1.35
   maxDeformationGradientValue: 5
+  paintMaterialPreset: 3
+  autoApplyPaintMaterialPreset: 1
   enablePaintRheology: 1
-  lowShearViscosity: 2
-  highShearViscosity: 0.15
+  lowShearViscosity: 2.6
+  highShearViscosity: 0.14
   shearThinningRelaxationTime: 0.8
   shearThinningPowerN: 0.55
+  carreauYasudaExponent: 2.2
   yieldStress: 0
-  maxYieldViscosityContribution: 5
+  yieldRegularizationRate: 25
+  maxYieldViscosityContribution: 3
   maxEffectiveViscosity: 8
   rheologyStrength: 1
   enableFreeSurfacePolish: 1
@@ -94,6 +119,9 @@ MonoBehaviour:
   freeSurfaceNormalDampingPerSecond: 2.5
   freeSurfaceCohesionAcceleration: 0.75
   maxFreeSurfaceVelocityCorrection: 0.35
+  enableJetCohesion: 1
+  jetCohesionAcceleration: 0.25
+  maxJetCohesionVelocityCorrection: 0.12
   enableGpuBucketCollision: 1
   useRealBucketCollision: 1
   bucketCollisionPadding: 0.002
@@ -114,6 +142,10 @@ MonoBehaviour:
   enableSmartAirborneDispatch: 1
   airborneDragPerSecond: 0.15
   jetStateDurationSeconds: 0.08
+  enableJetMpmCollar: 1
+  jetMpmCollarDurationSeconds: 0.05
+  jetMpmCollarMaxDistanceMeters: 0.06
+  jetMpmCollarRadialPaddingMeters: 0.05
   airborneLifetimeSeconds: 8
   airborneKillBelowWorldY: -2
   killAirborneBelowWorldY: 0

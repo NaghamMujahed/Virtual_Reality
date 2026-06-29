@@ -62,6 +62,7 @@ namespace PaintBucketSim.Systems.Fluid
         public FluidParticlePoolStats PoolStats => _poolStats;
 
         private FluidCalibrationStats _calibrationStats;
+        private float _initialLatticeCellVolumeM3;
         public FluidCalibrationStats CalibrationStats => _calibrationStats;
 
         public FluidDiagnostics Diagnostics
@@ -145,6 +146,7 @@ namespace PaintBucketSim.Systems.Fluid
             }
 
             _initialized = false;
+            _initialLatticeCellVolumeM3 = 0.0f;
         }
 
         private void DisposeSolverOnly()
@@ -259,7 +261,16 @@ namespace PaintBucketSim.Systems.Fluid
                 BucketSystem = bucketSystem,
                 BoundarySystem = boundarySystem,
 
-                Particles = _data
+                Particles = _data,
+                ReferenceDensityScale =
+                    _initialLatticeCellVolumeM3 > 1e-12f &&
+                    _calibrationStats.restVolumePerParticleM3 > 0.0f
+                        ? Mathf.Max(
+                            _calibrationStats.restVolumePerParticleM3 /
+                            _initialLatticeCellVolumeM3,
+                            1e-4f
+                        )
+                        : 1.0f
             };
         }
 
@@ -383,6 +394,8 @@ namespace PaintBucketSim.Systems.Fluid
                 paintFluidConfig.initializationMode == FluidInitializationMode.ManualSpacing
                     ? Mathf.Max(paintFluidConfig.manualParticleSpacingMeters, 0.005f)
                     : EstimateSpacingFromVolume(restVolume);
+            _initialLatticeCellVolumeM3 =
+                estimatedSpacing * estimatedSpacing * estimatedSpacing;
             float radius =
                 estimatedSpacing *
                 Mathf.Clamp(paintFluidConfig.particleRadiusToSpacing, 0.25f, 0.65f);
@@ -971,11 +984,19 @@ namespace PaintBucketSim.Systems.Fluid
                     restVolume = _data.Masses[i] / restDensity;
                 }
 
+                float referenceDensityScale =
+                    _initialLatticeCellVolumeM3 > 1e-12f
+                        ? Mathf.Max(
+                            restVolume / _initialLatticeCellVolumeM3,
+                            1e-4f
+                        )
+                        : 1.0f;
+
                 volumeJOutput[written] = new Vector4(
                     restVolume,
                     1.0f,
                     restDensity,
-                    0.0f
+                    referenceDensityScale
                 );
                 // Initial deformation gradient F = Identity.
                                 deformationF0Output[written] = new Vector4(1, 0, 0, 0);

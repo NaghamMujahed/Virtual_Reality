@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: GpuFluidBufferConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuFluidBufferConfig
   enableGpuFluidBuffers: 1
-  maxGpuParticles: 150000
+  maxGpuParticles: 350000
   uploadFromCpuWhileCpuSolverActive: 1
   uploadEveryNFrames: 1
   uploadStride: 1
@@ -21,7 +21,7 @@ MonoBehaviour:
   debugColorByStateOnGpu: 1
   insideColor: {r: 0.1, g: 0.35, b: 1, a: 1}
   nearHoleColor: {r: 1, g: 0.25, b: 0.05, a: 1}
-  airborneColor: {r: 0.7, g: 0.9, b: 1, a: 1}
+  airborneColor: {r: 0.078431375, g: 0.2784314, b: 0.8000001, a: 1}
   depositedColor: {r: 0.15, g: 0.9, b: 0.25, a: 1}
   fallbackColor: {r: 1, g: 1, b: 1, a: 1}
   logLifecycle: 1

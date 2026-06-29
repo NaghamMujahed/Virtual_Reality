@@ -38,6 +38,7 @@ namespace PaintBucketSim.Editor
         private static int _maxNanInfObserved;
         private static int _maxOutflowTransitionsObserved;
         private static int _maxJetParticlesObserved;
+        private static int _maxJetMpmCollarParticlesObserved;
         private static int _maxAirborneParticlesObserved;
         private static bool _projectionTest;
         private static bool _shakeBucket;
@@ -112,6 +113,7 @@ namespace PaintBucketSim.Editor
             _maxNanInfObserved = 0;
             _maxOutflowTransitionsObserved = 0;
             _maxJetParticlesObserved = 0;
+            _maxJetMpmCollarParticlesObserved = 0;
             _maxAirborneParticlesObserved = 0;
 
             EditorApplication.update -= UpdateValidation;
@@ -209,12 +211,27 @@ namespace PaintBucketSim.Editor
             if (_shakeBucket)
                 valid &= _maxCollisionCorrectionsObserved > 0;
 
+            if (_sealBucket && !_outflowTest)
+            {
+                valid &=
+                    stats.gpuActiveParticleCount >=
+                    Mathf.FloorToInt(stats.particleCount * 0.95f);
+            }
+
             if (_outflowTest)
             {
                 valid &=
                     _maxOutflowTransitionsObserved > 0 ||
                     _maxJetParticlesObserved > 0 ||
                     _maxAirborneParticlesObserved > 0;
+
+                if (_fluid != null &&
+                    _fluid.GpuMpmConfig != null &&
+                    _fluid.GpuMpmConfig.enableJetMpmCollar)
+                {
+                    valid &=
+                        _maxJetMpmCollarParticlesObserved > 0;
+                }
             }
 
             if (stats.pressureSolveEnabled &&
@@ -224,6 +241,8 @@ namespace PaintBucketSim.Editor
                     stats.projectionAverageAbsDivergenceAfter <=
                     stats.projectionAverageAbsDivergenceBefore * 1.05f + 1e-4f;
             }
+
+            GpuMpmSolverConfig gpuConfig = _fluid.GpuMpmConfig;
 
             string report =
                 $"mode={(_projectionTest ? "staggered-projection" : "baseline")}" +
@@ -243,6 +262,16 @@ namespace PaintBucketSim.Editor
                 $"gpuProjectionMs={stats.gpuProfileProjectionMilliseconds:F3}, " +
                 $"gpuPostMs={stats.gpuProfileParticlePostMilliseconds:F3}, " +
                 $"gpuTotalMs={stats.gpuProfileTotalMilliseconds:F3}, " +
+                $"materialPreset={(gpuConfig != null ? gpuConfig.paintMaterialPreset.ToString() : "None")}, " +
+                $"bulkModulus={(gpuConfig != null ? gpuConfig.bulkModulus : 0.0f):F3}, " +
+                $"maxStress={(gpuConfig != null ? gpuConfig.maxStressMagnitude : 0.0f):F3}, " +
+                $"mu0={(gpuConfig != null ? gpuConfig.lowShearViscosity : 0.0f):F3}, " +
+                $"muInf={(gpuConfig != null ? gpuConfig.highShearViscosity : 0.0f):F3}, " +
+                $"carreauA={(gpuConfig != null ? gpuConfig.carreauYasudaExponent : 0.0f):F3}, " +
+                $"powerN={(gpuConfig != null ? gpuConfig.shearThinningPowerN : 0.0f):F3}, " +
+                $"yieldStress={(gpuConfig != null ? gpuConfig.yieldStress : 0.0f):F3}, " +
+                $"jetCohesion={(gpuConfig != null && gpuConfig.enableJetCohesion)}, " +
+                $"jetCohesionAccel={(gpuConfig != null ? gpuConfig.jetCohesionAcceleration : 0.0f):F3}, " +
                 $"adaptiveMultiRate={stats.gpuAdaptiveMultiRateEnabled}, " +
                 $"adaptiveSampleStep={stats.gpuAdaptiveActivityStepIndex}, " +
                 $"adaptivePriority={stats.gpuAdaptivePriorityParticleCount}, " +
@@ -251,6 +280,11 @@ namespace PaintBucketSim.Editor
                 $"adaptiveAvgSpeed={stats.gpuAdaptiveAverageParticleSpeed:F3}, " +
                 $"adaptiveMaxSpeed={stats.gpuAdaptiveMaximumParticleSpeed:F3}, " +
                 $"adaptiveAvgJDeviation={stats.gpuAdaptiveAverageJDeviation:F3}, " +
+                $"referenceDensityEos={stats.gpuReferenceDensityEosUsed}, " +
+                $"gridDensityEos={stats.gpuGridDensityEosUsed}, " +
+                $"gridDensityEosPressureScale={stats.gpuGridDensityEosPressureScale:F3}, " +
+                $"referenceGridRestDensity={stats.gpuReferenceGridRestDensity:F3}, " +
+                $"referenceProjectionFallback={stats.gpuReferenceProjectionFallbackUsed}, " +
                 $"calmDeformationInterval={stats.gpuCalmInteriorDeformationInterval}, " +
                 $"gridContainsBucket={stats.gpuGridContainsBucket}, " +
                 $"activeMpmGrid={stats.gpuActiveMpmGridBoundsUsed}, " +
@@ -265,9 +299,16 @@ namespace PaintBucketSim.Editor
                 $"mpmActiveTiles={stats.gpuMpmActiveTileCount}, " +
                 $"mpmActiveTileFraction={stats.gpuMpmActiveTileFraction:F3}, " +
                 $"mpmParticleLists={stats.gpuMpmParticleTileListsUsed}, " +
+                $"ownerListInterval={stats.gpuOwnerTileListRebuildInterval}, " +
+                $"ownerListRebuilt={stats.gpuOwnerTileListRebuilt}, " +
+                $"ownerListReused={stats.gpuOwnerTileListReused}, " +
                 $"tiledP2G={stats.gpuTiledP2GUsed}, " +
                 $"tileOrderedPipeline={stats.gpuTileOrderedParticlePipelineUsed}, " +
                 $"hybridTiledP2G={stats.gpuHybridTiledP2GUsed}, " +
+                $"centeredP2GOwner={stats.gpuCenteredHybridP2GOwnerEnabled}, " +
+                $"fusedG2PCollision={stats.gpuFusedG2PPostCollisionUsed}, " +
+                $"fusedPreCollisionMark={stats.gpuFusedPreCollisionTileMarkUsed}, " +
+                $"adaptiveTransferStencil={stats.gpuAdaptiveTransferStencilUsed}, " +
                 $"mpmTileParticleRefs={stats.gpuMpmTileParticleReferenceCount}, " +
                 $"mpmTileMaxRefs={stats.gpuMpmTileMaxParticleReferences}, " +
                 $"mpmTileListCapacity={stats.gpuMpmTileParticleListCapacity}, " +
@@ -298,11 +339,16 @@ namespace PaintBucketSim.Editor
                 $"maxObservedOutflow={_maxOutflowTransitionsObserved}, " +
                 $"jet={stats.gpuJetParticleCount}, " +
                 $"maxObservedJet={_maxJetParticlesObserved}, " +
+                $"jetMpmCollar={stats.gpuJetMpmCollarParticleCount}, " +
+                $"maxObservedJetMpmCollar={_maxJetMpmCollarParticlesObserved}, " +
                 $"airborne={stats.gpuAirborneParticleCount}, " +
                 $"maxObservedAirborne={_maxAirborneParticlesObserved}, " +
                 $"lost={stats.gpuLostParticleCount}, " +
                 $"fluidCells={stats.projectionFluidCellCount}, " +
                 $"activeProjection={stats.projectionActiveBoundsUsed}, " +
+                $"tileProjection={stats.projectionMpmTileDispatchUsed}, " +
+                $"densityDrift={stats.projectionDensityDriftCorrectionEnabled}, " +
+                $"densityDriftStrength={stats.projectionDensityDriftStrength:F3}, " +
                 $"activeProjectionNodes={stats.projectionActiveNodeCount}, " +
                 $"activeProjectionFraction={stats.projectionActiveNodeFraction:F3}, " +
                 $"activeProjectionMin=({stats.projectionActiveMinX},{stats.projectionActiveMinY},{stats.projectionActiveMinZ}), " +
@@ -318,7 +364,7 @@ namespace PaintBucketSim.Editor
                 $"projectionCalmEntries={stats.projectionAdaptiveCalmEntryCount}, " +
                 $"projectionCalmExits={stats.projectionAdaptiveCalmExitCount}, " +
                 $"divBeforeAvg={stats.projectionAverageAbsDivergenceBefore:F5}, " +
-                $"divAfterAvg={stats.projectionAverageAbsDivergenceAfter:F5}, " +
+                $"divResidualAfterAvg={stats.projectionAverageAbsDivergenceAfter:F5}, " +
                 $"pressureMode={(ProjectionPressureSolveMode)stats.pressureSolveMode}, " +
                 $"jacobiIter={stats.pressureJacobiIterations}, " +
                 $"rbSorIter={stats.pressureRedBlackSorIterations}, " +
@@ -371,6 +417,10 @@ namespace PaintBucketSim.Editor
                 _maxJetParticlesObserved,
                 stats.gpuJetParticleCount
             );
+            _maxJetMpmCollarParticlesObserved = Mathf.Max(
+                _maxJetMpmCollarParticlesObserved,
+                stats.gpuJetMpmCollarParticleCount
+            );
             _maxAirborneParticlesObserved = Mathf.Max(
                 _maxAirborneParticlesObserved,
                 stats.gpuAirborneParticleCount
@@ -415,7 +465,11 @@ namespace PaintBucketSim.Editor
 
             if (_fluid == null ||
                 _fluid.GpuMpmConfig == null ||
-                !_fluid.GpuMpmConfig.enableProjectionGridInfrastructure)
+                !_fluid.GpuMpmConfig.enableProjectionGridInfrastructure ||
+                (
+                    _fluid.GpuMpmConfig.enableReferenceDensityEosMode &&
+                    !_fluid.GpuMpmConfig.referenceEnableProjectionFallback
+                ))
             {
                 return completedSubsteps -
                        completedSubsteps % _diagnosticsInterval;
@@ -455,7 +509,8 @@ namespace PaintBucketSim.Editor
             if (completedSubsteps <= 0 ||
                 _fluid == null ||
                 _fluid.GpuMpmConfig == null ||
-                !_fluid.GpuMpmConfig.enableAdaptiveMultiRate)
+                !_fluid.GpuMpmConfig.enableAdaptiveMultiRate ||
+                _fluid.GpuMpmConfig.enableReferenceDensityEosMode)
             {
                 return 0;
             }
@@ -528,6 +583,27 @@ namespace PaintBucketSim.Editor
                     HasFlag(args, "-paintValidationGpuStageProfile");
                 _fluid.GpuMpmConfig.diagnosticsReadbackInterval =
                     _diagnosticsInterval;
+                _fluid.GpuMpmConfig.ownerTileListRebuildInterval =
+                    Mathf.Clamp(
+                        GetIntArgument(
+                            args,
+                            "-paintValidationOwnerTileListInterval",
+                            _fluid.GpuMpmConfig
+                                .ownerTileListRebuildInterval
+                        ),
+                        1,
+                        2
+                    );
+                _fluid.GpuMpmConfig.ownerTileListReuseMinParticles =
+                    Mathf.Max(
+                        0,
+                        GetIntArgument(
+                            args,
+                            "-paintValidationOwnerTileListReuseMinParticles",
+                            _fluid.GpuMpmConfig
+                                .ownerTileListReuseMinParticles
+                        )
+                    );
             }
 
             if (_manager.Config != null)
@@ -542,6 +618,23 @@ namespace PaintBucketSim.Editor
             if (_fluid.GpuMpmConfig != null)
             {
                 var baseConfig = _fluid.GpuMpmConfig;
+                int materialPreset = GetRawIntArgument(
+                    args,
+                    "-paintValidationMaterialPreset",
+                    -1
+                );
+                if (materialPreset >= 0)
+                {
+                    materialPreset = Mathf.Clamp(
+                        materialPreset,
+                        (int)GpuPaintMaterialPreset.Custom,
+                        (int)GpuPaintMaterialPreset.HeavyBodyPaint
+                    );
+                    baseConfig.ApplyPaintMaterialPreset(
+                        (GpuPaintMaterialPreset)materialPreset
+                    );
+                }
+
                 int gridResolution = GetIntArgument(
                     args,
                     "-paintValidationGridResolution",
@@ -636,6 +729,56 @@ namespace PaintBucketSim.Editor
                 {
                     baseConfig.enableHybridTiledP2G = false;
                 }
+                if (HasFlag(args, "-paintValidationEnableCenteredP2GOwner"))
+                {
+                    baseConfig.enableCenteredHybridP2GOwnerTile = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableCenteredP2GOwner"))
+                {
+                    baseConfig.enableCenteredHybridP2GOwnerTile = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableFusedG2PCollision"))
+                {
+                    baseConfig.enableFusedG2PPostCollision = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableFusedG2PCollision"))
+                {
+                    baseConfig.enableFusedG2PPostCollision = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableFusedPreCollisionMark"))
+                {
+                    baseConfig.enableFusedPreCollisionTileMark = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableFusedPreCollisionMark"))
+                {
+                    baseConfig.enableFusedPreCollisionTileMark = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableAdaptiveTransferStencil"))
+                {
+                    baseConfig.enableAdaptiveTransferStencil = true;
+                    baseConfig.enableAdaptiveMultiRate = true;
+                }
+                else if (HasFlag(
+                    args,
+                    "-paintValidationDisableAdaptiveTransferStencil"))
+                {
+                    baseConfig.enableAdaptiveTransferStencil = false;
+                }
+                if (HasFlag(args, "-paintValidationEnableAdaptiveG2PTransferStencil"))
+                {
+                    baseConfig.enableAdaptiveG2PTransferStencil = true;
+                }
+                else if (HasFlag(
+                    args,
+                    "-paintValidationDisableAdaptiveG2PTransferStencil"))
+                {
+                    baseConfig.enableAdaptiveG2PTransferStencil = false;
+                }
+                baseConfig.adaptiveTransferMinParticles = GetIntArgument(
+                    args,
+                    "-paintValidationAdaptiveTransferMinParticles",
+                    baseConfig.adaptiveTransferMinParticles
+                );
                 baseConfig.mpmTileSizeCells = Mathf.Clamp(
                     GetRawIntArgument(
                         args,
@@ -664,6 +807,40 @@ namespace PaintBucketSim.Editor
                 {
                     baseConfig.enableSparseProjectionPressureDispatch = false;
                 }
+                if (HasFlag(args, "-paintValidationEnableTileProjection"))
+                {
+                    baseConfig.enableMpmTileProjectionDispatch = true;
+                }
+                else if (HasFlag(args, "-paintValidationDisableTileProjection"))
+                {
+                    baseConfig.enableMpmTileProjectionDispatch = false;
+                }
+                if (HasFlag(args, "-paintValidationDisableProjectionDensityDrift"))
+                {
+                    baseConfig.enableProjectionDensityDriftCorrection = false;
+                }
+                else if (HasFlag(args, "-paintValidationEnableProjectionDensityDrift"))
+                {
+                    baseConfig.enableProjectionDensityDriftCorrection = true;
+                }
+                baseConfig.projectionDensityDriftStrength =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionDensityDriftStrength",
+                        baseConfig.projectionDensityDriftStrength
+                    );
+                baseConfig.projectionDensityDriftMinRatio =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionDensityDriftMinRatio",
+                        baseConfig.projectionDensityDriftMinRatio
+                    );
+                baseConfig.projectionDensityDriftMaxDivergence =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationProjectionDensityDriftMaxDivergence",
+                        baseConfig.projectionDensityDriftMaxDivergence
+                    );
                 if (HasFlag(args, "-paintValidationEnableAdaptiveMultiRate"))
                 {
                     baseConfig.enableAdaptiveMultiRate = true;
@@ -685,6 +862,27 @@ namespace PaintBucketSim.Editor
                     "-paintValidationAdaptiveSampleInterval",
                     baseConfig.adaptiveActivitySampleInterval
                 );
+                baseConfig.adaptivePriorityParticleSpeed = GetFloatArgument(
+                    args,
+                    "-paintValidationAdaptivePrioritySpeed",
+                    baseConfig.adaptivePriorityParticleSpeed
+                );
+                baseConfig.adaptivePriorityJDeviation = GetFloatArgument(
+                    args,
+                    "-paintValidationAdaptivePriorityJDeviation",
+                    baseConfig.adaptivePriorityJDeviation
+                );
+                baseConfig.adaptivePriorityTopFraction = GetFloatArgument(
+                    args,
+                    "-paintValidationAdaptivePriorityTopFraction",
+                    baseConfig.adaptivePriorityTopFraction
+                );
+                baseConfig.adaptivePriorityBoundaryBandMeters =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationAdaptivePriorityBoundaryBand",
+                        baseConfig.adaptivePriorityBoundaryBandMeters
+                    );
                 baseConfig.calmInteriorDeformationInterval = Mathf.Clamp(
                     GetIntArgument(
                         args,
@@ -770,6 +968,69 @@ namespace PaintBucketSim.Editor
                     baseConfig.enablePaintRheology = false;
                 else if (HasFlag(args, "-paintValidationEnablePaintRheology"))
                     baseConfig.enablePaintRheology = true;
+
+                if (HasFlag(args, "-paintValidationEnableReferenceDensityEos"))
+                    baseConfig.enableReferenceDensityEosMode = true;
+                else if (HasFlag(args, "-paintValidationDisableReferenceDensityEos"))
+                    baseConfig.enableReferenceDensityEosMode = false;
+
+                if (HasFlag(args, "-paintValidationEnableGridDensityEos"))
+                    baseConfig.enableGridDensityEos = true;
+                else if (HasFlag(args, "-paintValidationDisableGridDensityEos"))
+                    baseConfig.enableGridDensityEos = false;
+                baseConfig.gridDensityEosMaxVelocityCorrection =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationGridDensityEosMaxCorrection",
+                        baseConfig.gridDensityEosMaxVelocityCorrection
+                    );
+                baseConfig.gridDensityEosPressureScale =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationGridDensityEosPressureScale",
+                        baseConfig.gridDensityEosPressureScale
+                    );
+
+                if (HasFlag(args, "-paintValidationEnableJetMpmCollar"))
+                    baseConfig.enableJetMpmCollar = true;
+                else if (HasFlag(args, "-paintValidationDisableJetMpmCollar"))
+                    baseConfig.enableJetMpmCollar = false;
+                baseConfig.jetMpmCollarDurationSeconds =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationJetMpmCollarDuration",
+                        baseConfig.jetMpmCollarDurationSeconds
+                    );
+                baseConfig.jetMpmCollarMaxDistanceMeters =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationJetMpmCollarMaxDistance",
+                        baseConfig.jetMpmCollarMaxDistanceMeters
+                    );
+                baseConfig.jetMpmCollarRadialPaddingMeters =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationJetMpmCollarRadialPadding",
+                        baseConfig.jetMpmCollarRadialPaddingMeters
+                    );
+
+                baseConfig.referenceEosExponent = GetFloatArgument(
+                    args,
+                    "-paintValidationReferenceEosExponent",
+                    baseConfig.referenceEosExponent
+                );
+                if (HasFlag(
+                    args,
+                    "-paintValidationEnableReferenceProjectionFallback"))
+                {
+                    baseConfig.referenceEnableProjectionFallback = true;
+                }
+                else if (HasFlag(
+                    args,
+                    "-paintValidationDisableReferenceProjectionFallback"))
+                {
+                    baseConfig.referenceEnableProjectionFallback = false;
+                }
                 baseConfig.freeSurfaceGradientScale = GetFloatArgument(
                     args,
                     "-paintValidationFreeSurfaceGradientScale",
@@ -799,20 +1060,109 @@ namespace PaintBucketSim.Editor
                 );
             }
 
-            if (!_projectionTest || _fluid.GpuMpmConfig == null)
+            var config = _fluid.GpuMpmConfig;
+            if (config != null)
             {
-                if (_outflowTest && _fluid.GpuMpmConfig != null)
+                if (_sealBucket)
+                {
+                    config.topBoundaryMode =
+                        GpuBucketTopMode.TemporaryLid;
+                    config.projectionTopOpen = false;
+                    config.enableBottomHoleOpening = false;
+                }
+
+                config.bulkModulus = GetFloatArgument(
+                    args,
+                    "-paintValidationBulkModulus",
+                    config.bulkModulus
+                );
+                config.maxStressMagnitude = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxStressMagnitude",
+                    config.maxStressMagnitude
+                );
+                config.materialStressStrength = GetFloatArgument(
+                    args,
+                    "-paintValidationStressStrength",
+                    config.materialStressStrength
+                );
+                config.lowShearViscosity = GetFloatArgument(
+                    args,
+                    "-paintValidationLowShearViscosity",
+                    config.lowShearViscosity
+                );
+                config.highShearViscosity = GetFloatArgument(
+                    args,
+                    "-paintValidationHighShearViscosity",
+                    config.highShearViscosity
+                );
+                config.shearThinningRelaxationTime = GetFloatArgument(
+                    args,
+                    "-paintValidationShearRelaxation",
+                    config.shearThinningRelaxationTime
+                );
+                config.shearThinningPowerN = GetFloatArgument(
+                    args,
+                    "-paintValidationShearPowerN",
+                    config.shearThinningPowerN
+                );
+                config.carreauYasudaExponent = GetFloatArgument(
+                    args,
+                    "-paintValidationCarreauYasudaA",
+                    config.carreauYasudaExponent
+                );
+                config.yieldStress = GetFloatArgument(
+                    args,
+                    "-paintValidationYieldStress",
+                    config.yieldStress
+                );
+                config.yieldRegularizationRate = GetFloatArgument(
+                    args,
+                    "-paintValidationYieldRegularization",
+                    config.yieldRegularizationRate
+                );
+                config.maxYieldViscosityContribution = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxYieldViscosity",
+                    config.maxYieldViscosityContribution
+                );
+                config.maxEffectiveViscosity = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxEffectiveViscosity",
+                    config.maxEffectiveViscosity
+                );
+                if (HasFlag(args, "-paintValidationDisableJetCohesion"))
+                    config.enableJetCohesion = false;
+                else if (HasFlag(args, "-paintValidationEnableJetCohesion"))
+                    config.enableJetCohesion = true;
+                config.jetCohesionAcceleration = GetFloatArgument(
+                    args,
+                    "-paintValidationJetCohesion",
+                    config.jetCohesionAcceleration
+                );
+                config.maxJetCohesionVelocityCorrection = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxJetCohesionCorrection",
+                    config.maxJetCohesionVelocityCorrection
+                );
+                config.minJ = GetFloatArgument(
+                    args,
+                    "-paintValidationMinJ",
+                    config.minJ
+                );
+                config.maxJ = GetFloatArgument(
+                    args,
+                    "-paintValidationMaxJ",
+                    config.maxJ
+                );
+            }
+
+            if (!_projectionTest || config == null)
+            {
+                if (_outflowTest && config != null)
                     ConfigureOutflowValidation(args);
 
                 return;
-            }
-
-            var config = _fluid.GpuMpmConfig;
-            if (_sealBucket)
-            {
-                config.topBoundaryMode = GpuBucketTopMode.TemporaryLid;
-                config.projectionTopOpen = false;
-                config.enableBottomHoleOpening = false;
             }
 
             config.enableProjectionGridInfrastructure = true;
@@ -820,6 +1170,8 @@ namespace PaintBucketSim.Editor
             config.enableJacobiPressureSolve = true;
             config.enablePressureGradientSubtraction = true;
             config.useStaggeredFaceProjection = true;
+            if (HasFlag(args, "-paintValidationDisableStaggeredProjection"))
+                config.useStaggeredFaceProjection = false;
             config.pressureSolveMode =
                 (ProjectionPressureSolveMode)Mathf.Clamp(
                     GetRawIntArgument(
@@ -865,27 +1217,6 @@ namespace PaintBucketSim.Editor
                 "-paintValidationMaxPressureCorrection",
                 2.0f
             );
-            config.bulkModulus = GetFloatArgument(
-                args,
-                "-paintValidationBulkModulus",
-                config.bulkModulus
-            );
-            config.materialStressStrength = GetFloatArgument(
-                args,
-                "-paintValidationStressStrength",
-                config.materialStressStrength
-            );
-            config.minJ = GetFloatArgument(
-                args,
-                "-paintValidationMinJ",
-                config.minJ
-            );
-            config.maxJ = GetFloatArgument(
-                args,
-                "-paintValidationMaxJ",
-                config.maxJ
-            );
-
             if (_outflowTest)
                 ConfigureOutflowValidation(args);
         }

@@ -20,6 +20,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         public GpuFluidBufferSet GpuBufferSet;
 
         public FluidParticleData Particles;
+        public float ReferenceDensityScale = 1.0f;
 
         public bool IsValid =>
             MaterialConfig != null &&

@@ -65,12 +65,22 @@
         public bool gpuTiledMpmGridDispatchUsed;
         public bool gpuMpmParticleTileListsEnabled;
         public bool gpuMpmParticleTileListsUsed;
+        public int gpuOwnerTileListRebuildInterval;
+        public bool gpuOwnerTileListRebuilt;
+        public bool gpuOwnerTileListReused;
         public bool gpuTiledP2GEnabled;
         public bool gpuTiledP2GUsed;
         public bool gpuTileOrderedParticlePipelineEnabled;
         public bool gpuTileOrderedParticlePipelineUsed;
         public bool gpuHybridTiledP2GEnabled;
         public bool gpuHybridTiledP2GUsed;
+        public bool gpuCenteredHybridP2GOwnerEnabled;
+        public bool gpuFusedG2PPostCollisionEnabled;
+        public bool gpuFusedG2PPostCollisionUsed;
+        public bool gpuFusedPreCollisionTileMarkEnabled;
+        public bool gpuFusedPreCollisionTileMarkUsed;
+        public bool gpuAdaptiveTransferStencilEnabled;
+        public bool gpuAdaptiveTransferStencilUsed;
         public int gpuMpmTileSizeCells;
         public int gpuMpmTileResolutionX;
         public int gpuMpmTileResolutionY;
@@ -111,6 +121,12 @@
         public float gpuEstimatedFillSpan01;
         public float gpuAverageParticleSpeed;
         public float gpuMaximumParticleSpeed;
+        public bool gpuReferenceDensityEosRequested;
+        public bool gpuReferenceDensityEosUsed;
+        public bool gpuGridDensityEosUsed;
+        public float gpuGridDensityEosPressureScale;
+        public float gpuReferenceGridRestDensity;
+        public bool gpuReferenceProjectionFallbackUsed;
         public bool gpuAdaptiveMultiRateEnabled;
         public bool gpuAdaptiveActivityReady;
         public int gpuAdaptiveActivitySampleInterval;
@@ -132,6 +148,7 @@
         public bool gpuPostBucketCollisionRan;
         public int gpuOutflowTransitionCount;
         public int gpuJetParticleCount;
+        public int gpuJetMpmCollarParticleCount;
         public int gpuAirborneParticleCount;
         public int gpuLostParticleCount;
 
@@ -152,6 +169,12 @@
         public int projectionDispatchCount;
         public bool projectionSparsePressureDispatchEnabled;
         public bool projectionSparsePressureDispatchUsed;
+        public bool projectionMpmTileDispatchEnabled;
+        public bool projectionMpmTileDispatchUsed;
+        public bool projectionDensityDriftCorrectionEnabled;
+        public float projectionDensityDriftStrength;
+        public float projectionDensityDriftMinRatio;
+        public float projectionDensityDriftMaxDivergence;
         public int projectionSparsePressureCellCount;
         public float projectionSparsePressureCellFraction;
         public float projectionMinFluidCellMass;

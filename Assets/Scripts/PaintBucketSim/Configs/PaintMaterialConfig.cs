@@ -5,6 +5,7 @@ namespace PaintBucketSim.Configs
     public enum PaintViscosityModel
     {
         Constant = 0,
+        CarreauYasuda = 1,
         ShearThinningCarreau = 1,
         HerschelBulkley = 2
     }
@@ -27,17 +28,21 @@ namespace PaintBucketSim.Configs
         [Min(0.0001f)]
         public float constantViscosityPaS = 1.5f;
 
-        [Tooltip("Zero-shear viscosity for Carreau-like shear thinning.")]
+        [Tooltip("Zero-shear viscosity for Carreau-Yasuda shear thinning.")]
         [Min(0.0001f)]
         public float zeroShearViscosityPaS = 5.0f;
 
-        [Tooltip("Infinite-shear viscosity for Carreau-like shear thinning.")]
+        [Tooltip("Infinite-shear viscosity for Carreau-Yasuda shear thinning.")]
         [Min(0.0001f)]
         public float infiniteShearViscosityPaS = 0.5f;
 
         [Tooltip("Relaxation time for shear-thinning model.")]
         [Min(0.0001f)]
         public float relaxationTimeSeconds = 0.8f;
+
+        [Tooltip("Carreau-Yasuda transition sharpness a. a=2 behaves like the classic Carreau model.")]
+        [Range(0.25f, 8.0f)]
+        public float yasudaExponent = 2.0f;
 
         [Tooltip("Flow index. Less than 1 gives shear-thinning behavior.")]
         [Range(0.05f, 2.0f)]
@@ -74,6 +79,24 @@ namespace PaintBucketSim.Configs
             if (constantViscosityPaS <= 0.0f)
                 constantViscosityPaS = 0.0001f;
 
+            if (zeroShearViscosityPaS <= 0.0f)
+                zeroShearViscosityPaS = 0.0001f;
+
+            if (infiniteShearViscosityPaS <= 0.0f)
+                infiniteShearViscosityPaS = 0.0001f;
+
+            if (infiniteShearViscosityPaS > zeroShearViscosityPaS)
+                infiniteShearViscosityPaS = zeroShearViscosityPaS;
+
+            if (relaxationTimeSeconds <= 0.0f)
+                relaxationTimeSeconds = 0.0001f;
+
+            yasudaExponent = Mathf.Clamp(yasudaExponent, 0.25f, 8.0f);
+            flowIndex = Mathf.Clamp(flowIndex, 0.05f, 2.0f);
+
+            if (yieldStressPa < 0.0f)
+                yieldStressPa = 0.0f;
+
             if (surfaceTensionNPerM <= 0.0f)
                 surfaceTensionNPerM = 0.0001f;
         }
@@ -85,11 +108,15 @@ namespace PaintBucketSim.Configs
             if (viscosityModel == PaintViscosityModel.Constant)
                 return constantViscosityPaS;
 
-            if (viscosityModel == PaintViscosityModel.ShearThinningCarreau)
+            if (viscosityModel == PaintViscosityModel.CarreauYasuda)
             {
                 float lambdaGamma = relaxationTimeSeconds * shearRate;
-                float exponent = 0.5f * (flowIndex - 1.0f);
-                float factor = Mathf.Pow(1.0f + lambdaGamma * lambdaGamma, exponent);
+                float a = Mathf.Max(yasudaExponent, 0.25f);
+                float exponent = (flowIndex - 1.0f) / a;
+                float factor = Mathf.Pow(
+                    1.0f + Mathf.Pow(lambdaGamma, a),
+                    exponent
+                );
 
                 return infiniteShearViscosityPaS +
                        (zeroShearViscosityPaS - infiniteShearViscosityPaS) * factor;
