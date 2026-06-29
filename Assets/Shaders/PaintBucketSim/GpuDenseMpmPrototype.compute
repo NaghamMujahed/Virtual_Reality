@@ -277,6 +277,12 @@ float _HoleNearHeight;
 float _HoleRadialPadding;
 int _BucketHoleCount;
 float _HoleOutflowExitDistance;
+
+// Physical paint-color compartment dividers.
+int _EnableColorCompartmentDividers;
+int _ColorCompartmentCount;
+int _ColorCompartmentAxis;
+float _ColorDividerThickness;
 //      End Changes G8.A      //
 
 // G9 outflow / airborne prototype
@@ -4191,6 +4197,105 @@ float3 ApplyCollisionVelocityAgainstMovingWall(
 
     return relativeVelocity + wallVelocityLocal;
 }
+
+bool TryResolveColorDividerCollision(
+    inout float3 pLocal,
+    inout float3 vLocal,
+    float radius)
+{
+    if (_EnableColorCompartmentDividers == 0 ||
+        _ColorCompartmentCount <= 1 ||
+        _ColorDividerThickness <= 0.0)
+    {
+        return false;
+    }
+
+    float innerRadius =
+        BucketInnerRadiusAtY(pLocal.y) -
+        _BucketCollisionPadding -
+        radius;
+
+    innerRadius = max(innerRadius, radius);
+
+    float halfThickness = 0.5 * _ColorDividerThickness + radius;
+    int boundaryCount = min(max(_ColorCompartmentCount - 1, 0), 15);
+
+    float bestAbsDistance = 1e20;
+    float3 bestNormal = float3(0.0, 0.0, 0.0);
+
+    [loop]
+    for (int boundary = 1; boundary <= boundaryCount; boundary++)
+    {
+        if (_ColorCompartmentAxis == 1)
+        {
+            float zPlane = lerp(
+                -innerRadius,
+                innerRadius,
+                (float)boundary / (float)_ColorCompartmentCount
+            );
+            float signedDistance = pLocal.z - zPlane;
+            float absDistance = abs(signedDistance);
+
+            if (absDistance < bestAbsDistance)
+            {
+                bestAbsDistance = absDistance;
+                bestNormal = float3(0.0, 0.0, signedDistance >= 0.0 ? 1.0 : -1.0);
+            }
+        }
+        else if (_ColorCompartmentAxis == 2)
+        {
+            float angle =
+                -3.14159265 +
+                6.28318530 * (float)boundary /
+                (float)_ColorCompartmentCount;
+            float2 direction = float2(cos(angle), sin(angle));
+            float2 normal2 = float2(-direction.y, direction.x);
+            float signedDistance = dot(pLocal.xz, normal2);
+            float absDistance = abs(signedDistance);
+
+            if (absDistance < bestAbsDistance)
+            {
+                bestAbsDistance = absDistance;
+                bestNormal = float3(
+                    normal2.x * (signedDistance >= 0.0 ? 1.0 : -1.0),
+                    0.0,
+                    normal2.y * (signedDistance >= 0.0 ? 1.0 : -1.0)
+                );
+            }
+        }
+        else
+        {
+            float xPlane = lerp(
+                -innerRadius,
+                innerRadius,
+                (float)boundary / (float)_ColorCompartmentCount
+            );
+            float signedDistance = pLocal.x - xPlane;
+            float absDistance = abs(signedDistance);
+
+            if (absDistance < bestAbsDistance)
+            {
+                bestAbsDistance = absDistance;
+                bestNormal = float3(signedDistance >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+            }
+        }
+    }
+
+    if (bestAbsDistance >= halfThickness)
+        return false;
+
+    float penetration = halfThickness - bestAbsDistance;
+    pLocal += bestNormal * penetration;
+
+    float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
+    vLocal = ApplyCollisionVelocityAgainstMovingWall(
+        vLocal,
+        bestNormal,
+        wallVelocityLocal
+    );
+
+    return true;
+}
 /// /// /// /// /// /// /// ///   End G8.B Changes  /// /// /// /// /// /// /// /// /// ///
 
 #if 0
@@ -6323,6 +6428,16 @@ void RunBucketCollisionParticle(uint particleIndex)
         collided = true;
 
         // FluidParticleState.NearBoundary = 2, but do not overwrite NearHole.
+        if (!nearOpenHole)
+            stateAgeId.x = 2.0;
+    }
+
+    // 2.b) Internal color-compartment dividers
+    if (!canPassThroughHole &&
+        TryResolveColorDividerCollision(pLocal, vLocal, radius))
+    {
+        collided = true;
+
         if (!nearOpenHole)
             stateAgeId.x = 2.0;
     }

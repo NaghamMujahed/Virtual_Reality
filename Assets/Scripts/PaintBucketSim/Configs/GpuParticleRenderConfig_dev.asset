@@ -24,6 +24,7 @@ MonoBehaviour:
   paintFresnelStrength: 0.1
   usePerParticleColor: 1
   fallbackColor: {r: 0.1, g: 0.35, b: 1, a: 1}
+  hideCanvasAndLostParticles: 1
   worldBoundsCenter: {x: 0, y: 0, z: 0}
   worldBoundsSize: {x: 20, y: 20, z: 20}
   showWarnings: 1

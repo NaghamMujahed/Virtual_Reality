@@ -79,13 +79,13 @@ namespace PaintBucketSim.Systems.Fluid
         private void Awake()
         {
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (gpuFluidBufferSet == null)
-                gpuFluidBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
+                gpuFluidBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
         }
 
         private void OnDestroy()
@@ -232,10 +232,10 @@ namespace PaintBucketSim.Systems.Fluid
             }
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (bucketSystem == null || !bucketSystem.IsInitialized)
             {
@@ -420,9 +420,6 @@ namespace PaintBucketSim.Systems.Fluid
             //float particleVolume = estimatedSpacing * estimatedSpacing * estimatedSpacing;
             //float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
 
-            Color color = paintMaterialConfig.baseColor;
-            float4 color4 = new float4(color.r, color.g, color.b, color.a);
-
             for (float y = yMin; y <= yMax; y += estimatedSpacing)
             {
                 float t = Mathf.InverseLerp(-halfHeight, halfHeight, y);
@@ -450,6 +447,10 @@ namespace PaintBucketSim.Systems.Fluid
                         if (IsTooCloseToBottomHole(bucketConfig, local, radius))
                             continue;
 
+                        if (IsInsideColorCompartmentDivider(local, innerRadius, radius))
+                            continue;
+
+                        float4 color4 = ResolveInitialParticleColor(local, innerRadius);
                         float3 world = bucketSystem.LocalToWorldPoint(local);
 
                         _data.SpawnParticle(
@@ -492,6 +493,127 @@ namespace PaintBucketSim.Systems.Fluid
             );
 
             RecalibrateGeneratedParticles(targetPaintVolume, restDensity);
+        }
+
+        private float4 ResolveInitialParticleColor(float3 local, float innerRadius)
+        {
+            Color color =
+                paintMaterialConfig != null
+                    ? paintMaterialConfig.baseColor
+                    : Color.white;
+
+            if (paintFluidConfig != null &&
+                paintFluidConfig.enableColorCompartments &&
+                paintFluidConfig.colorCompartmentCount > 1 &&
+                paintFluidConfig.compartmentColors != null &&
+                paintFluidConfig.compartmentColors.Length > 0)
+            {
+                int compartment = ComputeColorCompartmentIndex(local, innerRadius);
+                Color[] colors = paintFluidConfig.compartmentColors;
+                color = colors[Mathf.Abs(compartment) % colors.Length];
+            }
+
+            return new float4(color.r, color.g, color.b, color.a);
+        }
+
+        private bool IsInsideColorCompartmentDivider(
+            float3 local,
+            float innerRadius,
+            float particleRadius)
+        {
+            if (paintFluidConfig == null ||
+                !paintFluidConfig.enableColorCompartments ||
+                paintFluidConfig.colorCompartmentCount <= 1 ||
+                (
+                    paintFluidConfig.colorDividerGapFraction <= 0.0f &&
+                    (
+                        !paintFluidConfig.enablePhysicalColorDividers ||
+                        !paintFluidConfig.carveInitialParticlesAroundPhysicalDividers ||
+                        paintFluidConfig.colorDividerThicknessMeters <= 0.0f
+                    )
+                ))
+            {
+                return false;
+            }
+
+            int count = Mathf.Max(1, paintFluidConfig.colorCompartmentCount);
+            float dividerThickness =
+                paintFluidConfig.enablePhysicalColorDividers &&
+                paintFluidConfig.carveInitialParticlesAroundPhysicalDividers
+                    ? paintFluidConfig.colorDividerThicknessMeters
+                    : (innerRadius * 2.0f / count) *
+                      Mathf.Clamp01(paintFluidConfig.colorDividerGapFraction);
+
+            float clearance = dividerThickness * 0.5f + particleRadius;
+            if (clearance <= 0.0f)
+                return false;
+
+            float u = ComputeColorCompartmentCoordinate01(local, innerRadius);
+            float scaled = u * count;
+            int nearestBoundary = Mathf.RoundToInt(scaled);
+
+            if (nearestBoundary <= 0.0f || nearestBoundary >= count)
+                return false;
+
+            switch (paintFluidConfig.colorCompartmentAxis)
+            {
+                case FluidColorCompartmentAxis.BucketLocalZ:
+                {
+                    float boundaryZ =
+                        Mathf.Lerp(-innerRadius, innerRadius, nearestBoundary / (float)count);
+                    return Mathf.Abs(local.z - boundaryZ) < clearance;
+                }
+
+                case FluidColorCompartmentAxis.RadialWedges:
+                {
+                    float angle = -Mathf.PI +
+                                  (Mathf.PI * 2.0f) * nearestBoundary / count;
+                    Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                    Vector2 normal = new Vector2(-direction.y, direction.x);
+                    float distance =
+                        Mathf.Abs(local.x * normal.x + local.z * normal.y);
+                    return distance < clearance;
+                }
+
+                case FluidColorCompartmentAxis.BucketLocalX:
+                default:
+                {
+                    float boundaryX =
+                        Mathf.Lerp(-innerRadius, innerRadius, nearestBoundary / (float)count);
+                    return Mathf.Abs(local.x - boundaryX) < clearance;
+                }
+            }
+        }
+
+        private int ComputeColorCompartmentIndex(float3 local, float innerRadius)
+        {
+            float u = ComputeColorCompartmentCoordinate01(local, innerRadius);
+            int count = Mathf.Max(1, paintFluidConfig.colorCompartmentCount);
+            return Mathf.Clamp((int)Mathf.Floor(u * count), 0, count - 1);
+        }
+
+        private float ComputeColorCompartmentCoordinate01(float3 local, float innerRadius)
+        {
+            float range = Mathf.Max(innerRadius, 0.0001f);
+
+            switch (paintFluidConfig.colorCompartmentAxis)
+            {
+                case FluidColorCompartmentAxis.BucketLocalZ:
+                    return Mathf.Clamp01(local.z / (range * 2.0f) + 0.5f);
+
+                case FluidColorCompartmentAxis.RadialWedges:
+                {
+                    float angle = Mathf.Atan2(local.z, local.x);
+                    return Mathf.Repeat(
+                        (angle + Mathf.PI) / (Mathf.PI * 2.0f),
+                        1.0f
+                    );
+                }
+
+                case FluidColorCompartmentAxis.BucketLocalX:
+                default:
+                    return Mathf.Clamp01(local.x / (range * 2.0f) + 0.5f);
+            }
         }
 
         private void UpdateWorldFromLocalPreview()

@@ -103,7 +103,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         private void Awake()
         {
             if (paintFluidSystem == null)
-                paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
 
             ResolveComputeKernels();
         }

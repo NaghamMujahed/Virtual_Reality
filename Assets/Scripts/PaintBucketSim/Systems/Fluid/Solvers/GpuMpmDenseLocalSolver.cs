@@ -4001,6 +4001,33 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetInt("_BucketTopMode", (int)context.GpuMpmConfig.topBoundaryMode);
             compute.SetFloat("_BucketTopPadding", context.GpuMpmConfig.topBoundaryPadding);
 
+            bool colorDividersEnabled =
+                context.FluidConfig != null &&
+                context.FluidConfig.enableColorCompartments &&
+                context.FluidConfig.enablePhysicalColorDividers &&
+                context.FluidConfig.colorCompartmentCount > 1 &&
+                context.FluidConfig.colorDividerThicknessMeters > 0.0f;
+
+            compute.SetInt("_EnableColorCompartmentDividers", colorDividersEnabled ? 1 : 0);
+            compute.SetInt(
+                "_ColorCompartmentCount",
+                colorDividersEnabled
+                    ? Mathf.Clamp(context.FluidConfig.colorCompartmentCount, 1, 16)
+                    : 1
+            );
+            compute.SetInt(
+                "_ColorCompartmentAxis",
+                colorDividersEnabled
+                    ? (int)context.FluidConfig.colorCompartmentAxis
+                    : 0
+            );
+            compute.SetFloat(
+                "_ColorDividerThickness",
+                colorDividersEnabled
+                    ? Mathf.Max(context.FluidConfig.colorDividerThicknessMeters, 0.0f)
+                    : 0.0f
+            );
+
             int activeHoleCount = UploadBucketHoleData(context);
             bool hasHole = activeHoleCount > 0;
 

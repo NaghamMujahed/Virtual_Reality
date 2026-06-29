@@ -2695,6 +2695,7 @@ Transform:
   m_Children:
   - {fileID: 1435666627}
   - {fileID: 1657576615}
+  - {fileID: 1243977411}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &303841544
@@ -9353,7 +9354,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: MAT_Canvas_Warm
-  m_Shader: {fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}
+  m_Shader: {fileID: 10750, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -9362,8 +9363,7 @@ Material:
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: -1
-  stringTagMap:
-    RenderType: Opaque
+  stringTagMap: {}
   disabledShaderPasses:
   - MOTIONVECTORS
   m_LockedProperties: 
@@ -9461,8 +9461,8 @@ Material:
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.86, g: 0.8, b: 0.68, a: 1}
-    - _Color: {r: 0.86, g: 0.8, b: 0.68, a: 1}
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
@@ -9521,8 +9521,10 @@ GameObject:
   - component: {fileID: 1243977414}
   - component: {fileID: 1243977413}
   - component: {fileID: 1243977412}
+  - component: {fileID: 1243977416}
+  - component: {fileID: 1243977415}
   m_Layer: 0
-  m_Name: Canvas_Platform_4x4
+  m_Name: PaintPlane
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -9537,11 +9539,11 @@ Transform:
   m_GameObject: {fileID: 1243977410}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.035, z: 0}
-  m_LocalScale: {x: 4, y: 0.07, z: 4}
+  m_LocalPosition: {x: 0, y: 1.43, z: 0}
+  m_LocalScale: {x: 8, y: 0.01, z: 8}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1829239762}
+  m_Father: {fileID: 303841543}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!23 &1243977412
 MeshRenderer:
@@ -9567,8 +9569,7 @@ MeshRenderer:
   m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 1222686981}
+  m_Materials: []
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -9621,6 +9622,71 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1243977410}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &1243977415
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1243977410}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3dc1c9c8bb4efea469bc67bb6cd77cdf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintSim.Scripts.UnityBridge.PaintSimulationHost
+  _autoFindMlsMpmSources: 1
+  _paintFluidSystem: {fileID: 303841553}
+  _gpuFluidBufferSet: {fileID: 303841555}
+  _paintSurface: {fileID: 1243977416}
+  _surfaceImpactShader: {fileID: 7200000, guid: dba385dfb1cad68448de3d8fc2160cda, type: 3}
+  _renderPaintSurface: 1
+  _depositInLateUpdate: 1
+  _depositEveryNFrames: 1
+  _skipWhenNoAirDomainParticles: 1
+  _depositOnlyAirDomainParticles: 1
+  _acceptFluidDomainSurfaceHits: 1
+  _markMlsMpmParticlesOnImpact: 1
+  _enableSurfaceImpactDiagnostics: 1
+  _diagnosticLogEveryNFrames: 120
+  _syncPaintPropertiesFromMlsMpmMaterial: 1
+  _paintColor: {r: 1, g: 0, b: 0, a: 1}
+  _paintDensity: 1200
+  _paintViscosity: 0.1
+  _paintSurfaceTension: 0.04
+  _materialViscositySampleShearRate: 20
+  _materialViscositySampleTemperature: 20
+--- !u!114 &1243977416
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1243977410}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7b1d06023d5fe744836bd71341a757c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintSim.Scripts.Stages.Surface.PaintSurface
+  _surfaceType: 0
+  _sizingMode: 0
+  _planeMode: 0
+  _gridWidth: 256
+  _gridHeight: 256
+  _cellSize: 0.01
+  _resizeTransformToExplicitGrid: 0
+  _impactCaptureDistance: 0.03
+  _doubleSidedImpact: 1
+  _paintFilmBakerShader: {fileID: 7200000, guid: 66a63eb08b67aba499aad6f41f2ab2f1, type: 3}
+  _maxThickness: 0.0001
+  _wetnessShine: 0.8
+  _renderEveryNFrames: 1
+  _enableEvolution: 1
+  _evaporationShader: {fileID: 7200000, guid: d732c12b1f53b16458bbd821f0f08ad3, type: 3}
+  _evaporationRate: 0.05
+  _diffusionRate: 30
+  _evolveEveryNFrames: 2
+  _debugStampColor: {r: 1, g: 0.05, b: 0.02, a: 1}
+  _debugStampThickness: 0.00008
 --- !u!1 &1261355734
 GameObject:
   m_ObjectHideFlags: 0
@@ -13977,7 +14043,6 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 1243977411}
   - {fileID: 787803042}
   - {fileID: 768981149}
   - {fileID: 1158431015}

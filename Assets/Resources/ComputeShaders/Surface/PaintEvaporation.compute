@@ -1,0 +1,129 @@
+#pragma kernel Diffuse
+#pragma kernel Evaporate
+
+struct PaintCellData
+{
+    int    ThicknessInt;
+    float  Wetness;
+    float  Age;
+    uint   IsActive;
+    float4 Color;
+    float2 FlowVelocity;
+    float  PaintDensity;
+    float  _pad0;
+};
+
+RWStructuredBuffer<PaintCellData> _PaintCellBuffer;
+
+int   _GridWidth;
+int   _GridHeight;
+float _DeltaTime;
+float _EvaporationRate;
+float _DiffusionRate; 
+
+int GetIdx(int x, int y) {
+    return clamp(y, 0, _GridHeight - 1) * _GridWidth + clamp(x, 0, _GridWidth - 1);
+}
+
+[numthreads(8, 8, 1)]
+void Diffuse(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight) return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+    int idx = y * _GridWidth + x;
+
+    PaintCellData self = _PaintCellBuffer[idx];
+
+    PaintCellData nU = _PaintCellBuffer[GetIdx(x, y + 1)];
+    PaintCellData nD = _PaintCellBuffer[GetIdx(x, y - 1)];
+    PaintCellData nL = _PaintCellBuffer[GetIdx(x - 1, y)];
+    PaintCellData nR = _PaintCellBuffer[GetIdx(x + 1, y)];
+
+    int diffU = nU.ThicknessInt - self.ThicknessInt;
+    int diffD = nD.ThicknessInt - self.ThicknessInt;
+    int diffL = nL.ThicknessInt - self.ThicknessInt;
+    int diffR = nR.ThicknessInt - self.ThicknessInt;
+
+    float flowU = diffU * max(self.Wetness, nU.Wetness) * 0.25f;
+    float flowD = diffD * max(self.Wetness, nD.Wetness) * 0.25f;
+    float flowL = diffL * max(self.Wetness, nL.Wetness) * 0.25f;
+    float flowR = diffR * max(self.Wetness, nR.Wetness) * 0.25f;
+
+    float totalFlow = (flowU + flowD + flowL + flowR) * _DiffusionRate * _DeltaTime;
+    int flowInt = (int)totalFlow;
+
+    if (flowInt != 0)
+    {
+        self.ThicknessInt += flowInt;
+        // إذا استقبلت الخلية طلاءً جديداً، نمزج اللون والرطوبة
+        if (flowInt > 0 && self.ThicknessInt > 0)
+        {
+            self.IsActive = 1u; 
+
+            float4 sumColor = float4(0,0,0,0);
+            float sumWetness = 0;
+            float weight = 0;
+
+            // تحديد الجيران الذين أعطونا الطلاء لمزج خصائصهم
+            if (flowU > 0) { sumColor += nU.Color * flowU; sumWetness += nU.Wetness * flowU; weight += flowU; }
+            if (flowD > 0) { sumColor += nD.Color * flowD; sumWetness += nD.Wetness * flowD; weight += flowD; }
+            if (flowL > 0) { sumColor += nL.Color * flowL; sumWetness += nL.Wetness * flowL; weight += flowL; }
+            if (flowR > 0) { sumColor += nR.Color * flowR; sumWetness += nR.Wetness * flowR; weight += flowR; }
+
+            if (weight > 0)
+            {
+                // حساب السماكة التي كانت موجودة قبل دخول الطلاء الجديد
+                int oldThickness = self.ThicknessInt - flowInt;
+                
+                float4 incomingColor = sumColor / weight;
+                float incomingWetness = sumWetness / weight;
+
+                if (oldThickness <= 0)
+                {
+                    // 1. الخلية كانت فارغة تماماً (أو سالبة): نأخذ اللون الجديد 100% بدون دمج مع الأسود
+                    self.Color = incomingColor;
+                    self.Wetness = incomingWetness;
+                }
+                else
+                {
+                    // 2. الخلية كان بها طلاء: ندمج فيزيائياً بناءً على نسبة الطلاء الجديد إلى الإجمالي
+                    float blend = saturate((float)flowInt / (float)self.ThicknessInt);
+                    self.Color = lerp(self.Color, incomingColor, blend);
+                    self.Wetness = lerp(self.Wetness, incomingWetness, blend);
+                }
+            }
+        }
+
+        // تنظيف إذا نفد الطلاء من الخلية
+        if (self.ThicknessInt <= 0)
+        {
+            self.ThicknessInt = 0;
+            self.IsActive = 0u;
+            self.Wetness = 0.0f;
+        }
+
+        _PaintCellBuffer[idx] = self;
+    }
+}
+
+// ─────────────────────────────────────────
+// 2. شادر الجفاف (Evaporation)
+// ─────────────────────────────────────────
+[numthreads(8, 8, 1)]
+void Evaporate(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight) return;
+
+    int idx = (int)id.y * _GridWidth + (int)id.x;
+    PaintCellData cell = _PaintCellBuffer[idx];
+
+    if (cell.IsActive == 0 || cell.Wetness <= 0.0) return;
+
+    cell.Age += _DeltaTime;
+    cell.Wetness -= _EvaporationRate * _DeltaTime;
+    cell.Wetness = max(cell.Wetness, 0.0);
+
+    _PaintCellBuffer[idx] = cell;
+}

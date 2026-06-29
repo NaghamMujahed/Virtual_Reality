@@ -10,6 +10,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
         _SplatEdgeSoftness ("Splat Edge Softness", Float) = 0.22
         _PaintSpecularStrength ("Paint Specular Strength", Float) = 0.18
         _PaintFresnelStrength ("Paint Fresnel Strength", Float) = 0.10
+        _HideCanvasAndLostParticles ("Hide Canvas/Lost Particles", Float) = 1.0
         _Smoothness ("Smoothness", Range(0, 1)) = 0.35
     }
 
@@ -51,6 +52,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
 
             StructuredBuffer<float4> _ParticlePositionRadius;
             StructuredBuffer<float4> _ParticleColor;
+            StructuredBuffer<float4> _ParticleStateAgeId;
 
             float4 _FallbackColor;
             float _VisualRadiusScale;
@@ -61,6 +63,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
             float _SplatEdgeSoftness;
             float _PaintSpecularStrength;
             float _PaintFresnelStrength;
+            float _HideCanvasAndLostParticles;
             float3 _CameraRightWS;
             float3 _CameraUpWS;
             float3 _CameraForwardWS;
@@ -111,11 +114,20 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
                 float4 particleColor = _ParticleColor[particleIndex];
                 output.color = lerp(_FallbackColor, particleColor, saturate(_UsePerParticleColor));
 
+                if (_HideCanvasAndLostParticles > 0.5)
+                {
+                    int state = (int)round(_ParticleStateAgeId[particleIndex].x);
+                    if (state == 0 || state == 8 || state == 9 || state == 10)
+                        output.color.a = 0.0;
+                }
+
                 return output;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
+                clip(input.color.a - 0.001);
+
                 float3 n = normalize(input.normalWS);
                 float edgeMask = 1.0;
 

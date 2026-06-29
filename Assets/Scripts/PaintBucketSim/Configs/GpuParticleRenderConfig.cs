@@ -55,6 +55,10 @@ namespace PaintBucketSim.Configs
 
         public Color fallbackColor = new Color(0.1f, 0.35f, 1.0f, 1.0f);
 
+        [Header("State Filtering")]
+        [Tooltip("Hide particles that have already been deposited/absorbed on the canvas, or marked lost/inactive.")]
+        public bool hideCanvasAndLostParticles = true;
+
         [Header("Bounds / Culling")]
         [Tooltip("RenderMeshIndirect culls the whole batch using this world bounds.")]
         public Vector3 worldBoundsCenter = Vector3.zero;

@@ -36,7 +36,7 @@ namespace PaintBucketSim.Systems.Fluid
         private void Awake()
         {
             if (gpuBufferSet == null)
-                gpuBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
+                gpuBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
 
             EnsureParticleMesh();
 
@@ -153,12 +153,17 @@ namespace PaintBucketSim.Systems.Fluid
 
             _mpb.SetBuffer("_ParticlePositionRadius", gpuBufferSet.PositionRadiusBuffer);
             _mpb.SetBuffer("_ParticleColor", gpuBufferSet.ColorBuffer);
+            _mpb.SetBuffer("_ParticleStateAgeId", gpuBufferSet.StateAgeIdBuffer);
 
             bool useSplat =
                 renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
 
             _mpb.SetFloat("_VisualRadiusScale", renderConfig.visualRadiusScale);
             _mpb.SetFloat("_UsePerParticleColor", renderConfig.usePerParticleColor ? 1.0f : 0.0f);
+            _mpb.SetFloat(
+                "_HideCanvasAndLostParticles",
+                renderConfig.hideCanvasAndLostParticles ? 1.0f : 0.0f
+            );
             _mpb.SetColor("_FallbackColor", renderConfig.fallbackColor);
             _mpb.SetInt("_ParticleIndexStride", _effectiveRenderStride);
             _mpb.SetInt("_ParticleCount", gpuBufferSet.UploadedParticleCount);

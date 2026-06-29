@@ -69,19 +69,19 @@ namespace PaintBucketSim.Core
             }
 
             if (ropeSystem == null)
-                ropeSystem = FindFirstObjectByType<RopeSystem>();
+                ropeSystem = FindAnyObjectByType<RopeSystem>();
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (ropeBucketCouplingSystem == null)
-                ropeBucketCouplingSystem = FindFirstObjectByType<RopeBucketCouplingSystem>();
+                ropeBucketCouplingSystem = FindAnyObjectByType<RopeBucketCouplingSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (paintFluidSystem == null)
-                paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
 
             Context = new SimulationContext();
             Context.Initialize(simulationConfig, environmentConfig);

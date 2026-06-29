@@ -60,7 +60,7 @@ MonoBehaviour:
   enableProjectionDensityDriftCorrection: 1
   projectionDensityDriftStrength: 0.2
   projectionDensityDriftMinRatio: 1.02
-  projectionDensityDriftMaxDivergence: 13
+  projectionDensityDriftMaxDivergence: 12
   enableAdaptiveMultiRate: 1
   adaptiveActivitySampleInterval: 8
   calmInteriorDeformationInterval: 1
@@ -132,7 +132,7 @@ MonoBehaviour:
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 0
+  enableBottomHoleOpening: 1
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
