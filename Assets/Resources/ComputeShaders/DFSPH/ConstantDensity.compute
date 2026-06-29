@@ -1,0 +1,186 @@
+// ═══════════════════════════════════════════
+// ConstantDensity.compute
+// Loop 2 في DFSPH:
+//   1. يحسب خطأ الكثافة: ρ - ρ₀
+//   2. يخزن kappa في Pressure (مؤقتاً)
+//   3. يطبق تصحيح السرعة لإرجاع الكثافة للهدف
+// ═══════════════════════════════════════════
+
+#pragma kernel ComputeDensityError
+#pragma kernel ApplyDensityCorrection
+
+// ───────────────────────────────────────────
+// نفس struct في DensityPressure.compute
+// ───────────────────────────────────────────
+struct Particle
+{
+    float3 Position;    float _pad0;
+    float3 Velocity;    float _pad1;
+    float3 Acceleration;float _pad2;
+    float Density;
+    float Pressure;
+    float Alpha;
+    float VelocityDivergence;
+    float Mass;
+    float SmoothingLength;
+    float Radius;
+    float Age;
+    float4 Color;
+    uint Phase;
+    uint IsActive;
+    uint ParticleIndex;
+    uint _pad3;
+};
+
+// ───────────────────────────────────────────
+// Buffers
+// ───────────────────────────────────────────
+RWStructuredBuffer<Particle> _Particles;
+StructuredBuffer<uint2> _HashBuffer;
+StructuredBuffer<uint>  _HashOffsetBuffer;
+
+// ───────────────────────────────────────────
+// Constants
+// ───────────────────────────────────────────
+float  _CellSize;
+int    _HashTableSize;
+int    _MaxParticles;
+float  _SmoothingLength;
+float  _RestDensity;
+float  _DensityThreshold;
+float  _DeltaTime;
+float  _PI;
+
+// ═══════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════
+
+uint HashCell(int3 cell)
+{
+    const uint p1 = 73856093u;
+    const uint p2 = 19349663u;
+    const uint p3 = 83492791u;
+    return ((uint)cell.x * p1 + (uint)cell.y * p2 + (uint)cell.z * p3) % (uint)_HashTableSize;
+}
+
+float dWdr_Cubic(float r, float h)
+{
+    float q = r / h;
+    if (q > 2.0) return 0.0;
+
+    float factor = 1.0 / (_PI * h * h * h * h);
+    if (q <= 1.0)
+    {
+        return factor * (-3.0 * q + 2.25 * q * q);
+    }
+    else
+    {
+        float t = 2.0 - q;
+        return factor * (-0.75 * t * t);
+    }
+}
+
+// ═══════════════════════════════════════════
+// Kernel 1: يحسب خطأ الكثافة ويخزن kappa
+// ═══════════════════════════════════════════
+
+[numthreads(64, 1, 1)]
+void ComputeDensityError(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_MaxParticles) return;
+
+    Particle pi = _Particles[i];
+    if (pi.IsActive == 0) return;
+
+    float rho_i = pi.Density;
+    if (rho_i < 1e-6) return;
+
+    float densityError = rho_i - _RestDensity;
+
+    // إذا الخطأ ضمن الحد المقبول، لا تصحيح
+    if (abs(densityError) < _DensityThreshold || pi.Alpha < 1e-6)
+    {
+        pi.Pressure = 0.0;
+        _Particles[i] = pi;
+        return;
+    }
+
+    // kappa = -Δρ · α / dt²
+    // نخزنها في Pressure مؤقتاً
+    float kappa = -densityError * pi.Alpha / (_DeltaTime * _DeltaTime);
+    pi.Pressure = kappa;
+
+    _Particles[i] = pi;
+}
+
+// ═══════════════════════════════════════════
+// Kernel 2: يطبق تصحيح السرعة
+// ═══════════════════════════════════════════
+
+[numthreads(64, 1, 1)]
+void ApplyDensityCorrection(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_MaxParticles) return;
+
+    Particle pi = _Particles[i];
+    if (pi.IsActive == 0) return;
+
+    float rho_i = pi.Density;
+    if (rho_i < 1e-6) return;
+
+    float kappa_i = pi.Pressure; // قرأناها من Kernel 1
+    if (abs(kappa_i) < 1e-8) return;
+
+    float h = _SmoothingLength;
+    float3 dv = float3(0.0, 0.0, 0.0);
+
+    int3 cell = int3(floor(pi.Position / _CellSize));
+
+    for (int x = -1; x <= 1; x++)
+    for (int y = -1; y <= 1; y++)
+    for (int z = -1; z <= 1; z++)
+    {
+        int3 nCell = cell + int3(x, y, z);
+        uint hash = HashCell(nCell);
+
+        uint start = _HashOffsetBuffer[hash];
+        uint end   = _HashOffsetBuffer[hash + 1];
+
+        if (start == 0xFFFFFFFF || end == 0xFFFFFFFF || start >= end)
+            continue;
+
+        for (uint idx = start; idx < end; idx++)
+        {
+            uint2 entry = _HashBuffer[idx];
+            uint j = entry.y;
+            if (i == j) continue;
+
+            Particle pj = _Particles[j];
+            if (pj.IsActive == 0) continue;
+
+            float3 diff = pi.Position - pj.Position;
+            float r = length(diff);
+            if (r > 2.0 * h || r < 0.0001) continue;
+
+            float3 dir = diff / r;
+            float dWdr = dWdr_Cubic(r, h);
+            float3 gradW = dWdr * dir;
+
+            float kappa_j = pj.Pressure;
+            float rho_j = pj.Density;
+            if (rho_j < 1e-6) continue;
+
+            dv += pj.Mass * (kappa_i / rho_i + kappa_j / rho_j) * gradW;
+        }
+    }
+
+    // تطبيق التصحيح
+    pi.Velocity += dv * _DeltaTime;
+
+    // نصفّر Pressure لأنها كانت مؤقتة
+    pi.Pressure = 0.0;
+
+    _Particles[i] = pi;
+}

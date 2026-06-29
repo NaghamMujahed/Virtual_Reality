@@ -1,0 +1,179 @@
+// ═══════════════════════════════════════════
+// DensityPressure.compute
+// يحسب لكل جسيمة:
+//   1. الكثافة  ρ = Σ mⱼ · W(rᵢⱼ, h)
+//   2. معامل Alpha  (لـ DFSPH)
+//   3. الضغط (للتصحيح البصري)
+// ═══════════════════════════════════════════
+
+#pragma kernel ComputeDensityPressure
+
+// ───────────────────────────────────────────
+// يجب أن يطابق C# SPHParticleData byte-for-byte
+// الحجم: 96 bytes
+// ───────────────────────────────────────────
+struct Particle
+{
+    float3 Position;    float _pad0;
+    float3 Velocity;    float _pad1;
+    float3 Acceleration;float _pad2;
+    float Density;
+    float Pressure;
+    float Alpha;
+    float VelocityDivergence;
+    float Mass;
+    float SmoothingLength;
+    float Radius;
+    float Age;
+    float4 Color;
+    uint Phase;
+    uint IsActive;
+    uint ParticleIndex;
+    uint _pad3;
+};
+
+// ───────────────────────────────────────────
+// Buffers
+// ───────────────────────────────────────────
+RWStructuredBuffer<Particle> _Particles;
+
+// Spatial Hash (يجب أن يكون مرتباً من C#)
+StructuredBuffer<uint2> _HashBuffer;       // (hash, particleIndex) — مرتب حسب hash
+StructuredBuffer<uint>  _HashOffsetBuffer; // حجمه = _HashTableSize + 1
+                                           // [hash] = start, [hash+1] = end
+
+// ───────────────────────────────────────────
+// Constants
+// ───────────────────────────────────────────
+float  _CellSize;
+int    _HashTableSize;
+int    _MaxParticles;
+float  _SmoothingLength;
+float  _RestDensity;
+float  _PI;
+
+// ═══════════════════════════════════════════
+// Helper Functions
+// ═══════════════════════════════════════════
+
+uint HashCell(int3 cell)
+{
+    const uint p1 = 73856093u;
+    const uint p2 = 19349663u;
+    const uint p3 = 83492791u;
+    return ((uint)cell.x * p1 + (uint)cell.y * p2 + (uint)cell.z * p3) % (uint)_HashTableSize;
+}
+
+float W_Cubic(float r, float h)
+{
+    float q = r / h;
+    if (q > 2.0) return 0.0;
+
+    float factor = 1.0 / (_PI * h * h * h);
+    if (q <= 1.0)
+    {
+        return factor * (1.0 - 1.5 * q * q + 0.75 * q * q * q);
+    }
+    else
+    {
+        float t = 2.0 - q;
+        return factor * (0.25 * t * t * t);
+    }
+}
+
+float dWdr_Cubic(float r, float h)
+{
+    float q = r / h;
+    if (q > 2.0) return 0.0;
+
+    float factor = 1.0 / (_PI * h * h * h * h);
+    if (q <= 1.0)
+    {
+        return factor * (-3.0 * q + 2.25 * q * q);
+    }
+    else
+    {
+        float t = 2.0 - q;
+        return factor * (-0.75 * t * t);
+    }
+}
+
+// ═══════════════════════════════════════════
+// Kernel
+// ═══════════════════════════════════════════
+
+[numthreads(64, 1, 1)]
+void ComputeDensityPressure(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_MaxParticles) return;
+
+    Particle pi = _Particles[i];
+    if (pi.IsActive == 0) return;
+
+    float h = _SmoothingLength;
+    float density = 0.0;
+    float3 sumGradW = float3(0.0, 0.0, 0.0);
+    float sumGradWSq = 0.0;
+
+    int3 cell = int3(floor(pi.Position / _CellSize));
+
+    // نبحث في 27 خلية مجاورة (3×3×3)
+    for (int x = -1; x <= 1; x++)
+    for (int y = -1; y <= 1; y++)
+    for (int z = -1; z <= 1; z++)
+    {
+        int3 nCell = cell + int3(x, y, z);
+        uint hash = HashCell(nCell);
+
+        uint start = _HashOffsetBuffer[hash];
+        uint end   = _HashOffsetBuffer[hash + 1];
+
+        if (start == 0xFFFFFFFF || end == 0xFFFFFFFF || start >= end)
+            continue;
+
+        for (uint idx = start; idx < end; idx++)
+        {
+            uint2 entry = _HashBuffer[idx];
+            uint j = entry.y;
+            if (i == j) continue;
+
+            Particle pj = _Particles[j];
+            if (pj.IsActive == 0) continue;
+
+            float3 diff = pi.Position - pj.Position;
+            float r = length(diff);
+            if (r > 2.0 * h || r < 0.0001) continue;
+
+            // ── الكثافة ──
+            float W = W_Cubic(r, h);
+            density += pj.Mass * W;
+
+            // ── Gradient (لـ Alpha) ──
+            float3 dir = diff / r;
+            float dWdr = dWdr_Cubic(r, h);
+            float3 gradW = dWdr * dir;
+
+            sumGradW += gradW;
+            sumGradWSq += dot(gradW, gradW);
+        }
+    }
+
+    // ── Self contribution ──
+    float selfW = 1.0 / (_PI * h * h * h);
+    density += pi.Mass * selfW;
+
+    // ── Alpha = ρ / (Σ|∇W|² + |Σ∇W|²) ──
+    float denom = sumGradWSq + dot(sumGradW, sumGradW);
+    float alpha = (denom > 1e-6) ? (density / denom) : 0.0;
+
+    // ── ضغط بسيط (للتصحيح البصري) ──
+    float pressure = max(0.0, 7.0 * (density - _RestDensity));
+
+    // ── كتابة النتائج ──
+    pi.Density = density;
+    pi.Pressure = pressure;
+    pi.Alpha = alpha;
+
+    _Particles[i] = pi;
+}

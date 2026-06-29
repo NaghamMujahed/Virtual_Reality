@@ -1,0 +1,71 @@
+#pragma kernel Integrate
+
+struct Particle
+{
+    float3 Position;     float _pad0;
+    float3 Velocity;     float _pad1;
+    float3 Acceleration; float _pad2;
+    float Density;
+    float Pressure;
+    float Alpha;
+    float VelocityDivergence;
+    float Mass;
+    float SmoothingLength;
+    float Radius;
+    float Age;
+    float4 Color;
+    uint Phase;
+    uint IsActive;
+    uint ParticleIndex;
+    uint _pad3;
+};
+
+RWStructuredBuffer<Particle> _Particles;
+
+float3 _Gravity;
+float  _AirDensity;
+float3 _WindVelocity;
+float  _DeltaTime;
+int    _MaxParticles;
+
+[numthreads(64, 1, 1)]
+void Integrate(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_MaxParticles) return;
+
+    Particle p = _Particles[i];
+    if (p.IsActive == 0) return;
+    if (p.Phase == 1u) return;
+
+    // ── 1. Gravity ──
+    p.Acceleration += _Gravity;
+
+    // ── 2. Air Drag ──
+    float3 v_rel = p.Velocity - _WindVelocity;
+    float speed = length(v_rel);
+
+    if (speed > 0.001)
+    {
+        float Cd = 0.47;
+        float area = 3.14159265 * p.Radius * p.Radius;
+        float dragMag = 0.5 * _AirDensity * Cd * area * speed * speed;
+        float3 dragForce = -normalize(v_rel) * dragMag;
+
+        p.Acceleration += dragForce / p.Mass;
+    }
+
+    // ── 3. Update Velocity ──
+    p.Velocity += p.Acceleration * _DeltaTime;
+
+    // ── 4. Update Position ──
+    p.Position += p.Velocity * _DeltaTime;
+
+    // ── 5. Reset Acceleration ──
+    p.Acceleration = float3(0.0, 0.0, 0.0);
+
+    // ── 6. Age ──
+    p.Age += _DeltaTime;
+
+    _Particles[i] = p;
+}

@@ -1,0 +1,254 @@
+#pragma kernel CSMain
+
+struct SPHParticleData
+{
+    float3 Position; float _pad0;
+    float3 Velocity; float _pad1;
+    float3 Acceleration; float _pad2;
+
+    float Density;
+    float Pressure;
+    float Alpha;
+    float VelocityDivergence;
+
+    float Mass;
+    float SmoothingLength;
+    float Radius;
+    float Age;
+
+    float4 Color;
+
+    uint Phase;
+    uint IsActive;
+    uint ParticleIndex;
+    uint _pad3;
+};
+
+struct PaintCellData
+{
+    int    ThicknessInt;
+    float  Wetness;
+    float  Age;
+    uint   IsActive;
+    float4 Color;
+    float2 FlowVelocity;
+    float  PaintDensity;
+    float  _pad0;
+};
+
+RWStructuredBuffer<SPHParticleData> _ParticleBuffer;
+RWStructuredBuffer<PaintCellData>   _PaintCellBuffer;
+
+int _GridWidth;
+int _GridHeight;
+float _CellSize;
+float _GridOriginX;
+float _GridOriginZ;
+float _SurfaceY;
+int _ThicknessScale;
+
+float _PaintDensity;
+float _PaintViscosity;
+float _SurfaceTension;
+
+float _DepositionFraction;
+float _SplashMultiplier;
+float _AbsorptionRate;
+float _Roughness;
+uint  _SurfaceTypeID;
+
+#define PI 3.14159265f
+
+#define WE_DEPOSITION 5.0f
+#define WE_SPREAD     25.0f
+#define K_SPLASH      60.0f
+
+bool InBounds(int i, int j)
+{
+    return i >= 0 && i < _GridWidth && j >= 0 && j < _GridHeight;
+}
+
+void WriteCell(int i, int j, float weight, int thickness, float4 col, float density, float2 flow)
+{
+    if (!InBounds(i,j)) return;
+
+    int idx = j * _GridWidth + i;
+    int w = (int)(thickness * weight);
+    if (w <= 0) return;
+    float addedMass = thickness * weight;
+
+    InterlockedAdd(_PaintCellBuffer[idx].ThicknessInt, w);
+    InterlockedMax(_PaintCellBuffer[idx].IsActive, 1u);
+
+    _PaintCellBuffer[idx].Wetness = 1.0f;
+
+float4 oldColor = _PaintCellBuffer[idx].Color;
+
+float oldDensity = _PaintCellBuffer[idx].PaintDensity;
+float newDensity = addedMass;
+
+float total = oldDensity + newDensity;
+
+float4 blendedColor = (oldColor * oldDensity + col * newDensity) / max(total, 1e-5);
+
+_PaintCellBuffer[idx].Color = blendedColor;
+
+    _PaintCellBuffer[idx].PaintDensity += addedMass;
+
+    _PaintCellBuffer[idx].FlowVelocity =
+    _PaintCellBuffer[idx].FlowVelocity * 0.9 + flow * weight * 0.1;
+}
+
+[numthreads(64,1,1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    uint count, stride;
+    _ParticleBuffer.GetDimensions(count, stride);
+    if (i >= count) return;
+
+    SPHParticleData p = _ParticleBuffer[i];
+    if (p.IsActive == 0) return;
+
+    // 1) Surface collision check
+    float impactY = _SurfaceY + p.Radius;
+    if (p.Position.y > impactY) return;
+
+    float3 velDir = normalize(p.Velocity + 1e-5);
+    float speed = length(p.Velocity);
+
+    float localX = (p.Position.x - _GridOriginX) / _CellSize;
+    float localZ = (p.Position.z - _GridOriginZ) / _CellSize;
+
+    int baseX = (int)floor(localX);
+    int baseZ = (int)floor(localZ);
+
+    float fx = localX - baseX;
+    float fz = localZ - baseZ;
+
+    // 2) Physics numbers
+    float diameter = p.Radius * 2.0f;
+
+    float We = (_PaintDensity * speed * speed * diameter) / max(_SurfaceTension, 1e-5);
+    float Re = (_PaintDensity * speed * diameter) / max(_PaintViscosity, 1e-5);
+    float K  = We * sqrt(max(Re,0));
+
+    // 3) Regime selection & Deposition
+    uint regime = 0u;
+
+    if (We < WE_DEPOSITION)
+        regime = 0u;       
+    else if (We < WE_SPREAD)
+        regime = 1u;       
+    else if (K < K_SPLASH)
+        regime = 2u;       
+    else
+        regime = 3u;       
+
+    float depositionFraction = _DepositionFraction;
+
+    // تعديل حسب النظام (Regime)
+    if      (regime == 1u) depositionFraction *= 0.95f;
+    else if (regime == 2u) depositionFraction *= 0.70f;
+    else if (regime == 3u) depositionFraction *= 0.50f;
+    float absorbed = (1.0 - depositionFraction);
+    
+    // 4) Dynamic splat radius
+    float baseRadiusCells = 1.0 + sqrt(We) * 0.2;
+    float aspect = abs(velDir.x) + abs(velDir.z) + 1e-3;
+
+    float radiusX = baseRadiusCells * (1.0 + velDir.x * 2.0);
+    float radiusZ = baseRadiusCells * (1.0 + velDir.z * 2.0);
+
+    radiusX = clamp(radiusX, 1.0, 6.0);
+    radiusZ = clamp(radiusZ, 1.0, 6.0);
+
+    // 5) Volume -> thickness & Roughness
+    float volume = (4.0/3.0) * PI * p.Radius * p.Radius * p.Radius;
+    float thickness = volume / (_CellSize * _CellSize);
+    int thicknessInt = (int)(thickness * _ThicknessScale);
+
+    // تعديل حسب خشونة السطح
+    float roughnessMod = 1.0f + _Roughness * 0.5f;
+    int depositInt = (int)(thicknessInt * depositionFraction / roughnessMod);
+
+    // 6) Spread footprint (radial + directional)
+    for (int y = -6; y <= 6; y++)
+    {
+        for (int x = -6; x <= 6; x++)
+        {
+            int gx = baseX + x;
+            int gz = baseZ + y;
+
+            float dx = (float)x / radiusX;
+            float dz = (float)y / radiusZ;
+
+            float r2 = dx*dx + dz*dz;
+
+            if (r2 > 1.0) continue;
+
+            float w = exp(-r2 * 4.0);
+
+            float2 flow = velDir.xz * speed * 0.05;
+
+            WriteCell(gx, gz, w, depositInt, p.Color, p.Density, flow);
+        }
+    }
+
+    // 7) Energy loss + bounce model
+    float energy = saturate(We / 150.0);
+
+    float bounceFactor = 
+        (We < WE_DEPOSITION) ? 0.0 :
+        (We < WE_SPREAD)     ? 0.05 :
+        (We < K_SPLASH)      ? 0.2 : 
+                               0.5;
+
+    float MIN_SETTLE_VELOCITY = 0.5f; 
+    p.Velocity.y = abs(p.Velocity.y) * bounceFactor * energy;
+    p.Velocity.xz *= (1.0 - saturate(depositionFraction));
+
+    float2 jitter = float2(
+        frac(sin(p.Position.x * 12.3 + i) * 43758.5),
+        frac(sin(p.Position.z * 91.7 + i) * 23421.1)
+    ) - 0.5;
+
+    float splashStrength = saturate((We - WE_SPREAD) / 100.0) * max(_SplashMultiplier, 1.0f);
+    p.Velocity.xz += normalize(jitter) * splashStrength * speed * 0.03;
+
+    // 8) Reposition to avoid double collision
+    // لا تقم برفع الجسيمة إلا إذا كانت سترتد فعلياً. إذا كانت ستسكن، اتركها مكانها.
+    if (bounceFactor >= 0.05 && We >= WE_DEPOSITION)
+    {
+        p.Position.y = impactY + 1e-4; 
+    }
+    p.Velocity.xz *= 0.98;
+
+    // 9) State update
+    // إنقاص الكتلة بناءً على ما تم امتصاصه
+    p.Mass *= (1.0 - absorbed * _AbsorptionRate);
+    p.Mass = max(p.Mass, 0.0); 
+
+    float newVolume = p.Mass / max(p.Density, 1e-5);
+    p.Radius = pow((3.0 * newVolume) / (4.0 * PI), 0.3333);
+
+    if (We < WE_DEPOSITION || bounceFactor < 0.05 || abs(p.Velocity.y) < MIN_SETTLE_VELOCITY)
+    {
+        p.IsActive = 0u; 
+        p.Phase    = 1u; 
+        p.Velocity = float3(0,0,0);
+    }
+    else
+    {
+        p.Phase = 0u;
+    }
+
+    // 2. صمام أمان عام: إذا صغرت الجسيمة جداً من كثرة الارتدادات، اقتلها
+    if (p.Radius < 0.01f || p.Mass < 0.001f) 
+    {
+        p.IsActive = 0u; 
+    }
+
+    _ParticleBuffer[i] = p;
+}

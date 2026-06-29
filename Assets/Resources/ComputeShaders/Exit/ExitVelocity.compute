@@ -1,0 +1,69 @@
+// ═══════════════════════════════════════════
+// ExitVelocity.compute
+// يحسب معدلات التدفق من حالة الفتحة
+// ═══════════════════════════════════════════
+
+#pragma kernel ExitVelocity
+
+// ───────────────────────────────────────────
+// يجب أن يطابق C# OrificeExitState byte-for-byte
+// الحجم الكلي: 64 bytes
+// ───────────────────────────────────────────
+struct OrificeExitState
+{
+    float3 ExitPosition;
+    float  _pad0;               // 16 bytes
+
+    float3 ExitDirection;
+    float  _pad1;               // 16 bytes
+
+    float ExitSpeed;            // 4
+    float ExitRadius;           // 4
+    float VolumeFlowRate;       // 4
+    float MassFlowRate;         // 4 → 16 bytes
+
+    float DischargeCoefficient; // 4
+    float IsFlowing;            // 4 (1.0 = يتدفق, 0.0 = متوقف)
+    float _pad2;                // 4
+    float _pad3;                // 4 → 16 bytes
+};
+
+// ───────────────────────────────────────────
+// Buffers
+// ───────────────────────────────────────────
+RWStructuredBuffer<OrificeExitState> _ExitState;
+
+// ───────────────────────────────────────────
+// Constants (يضبطها C# قبل Dispatch)
+// ───────────────────────────────────────────
+float _PaintDensity;
+float _PI;
+
+// ───────────────────────────────────────────
+// 1 thread فقط — حالة فتحة واحدة
+// ───────────────────────────────────────────
+[numthreads(1, 1, 1)]
+void ExitVelocity(uint3 id : SV_DispatchThreadID)
+{
+    OrificeExitState state = _ExitState[0];
+
+    // إذا لا يوجد تدفق، نترك القيم كما هي (صفر)
+    if (state.IsFlowing < 0.5)
+    {
+        state.VolumeFlowRate = 0.0;
+        state.MassFlowRate   = 0.0;
+        _ExitState[0] = state;
+        return;
+    }
+
+    // A = π · r²
+    float area = _PI * state.ExitRadius * state.ExitRadius;
+
+    // Q = A · V
+    state.VolumeFlowRate = area * state.ExitSpeed;
+
+    // ṁ = ρ · Q
+    state.MassFlowRate = _PaintDensity * state.VolumeFlowRate;
+
+    _ExitState[0] = state;
+}

@@ -1,0 +1,114 @@
+// ═══════════════════════════════════════════
+// SpatialHash.compute
+// يبني جدول Hash للبحث المكاني عن الجيران
+// ═══════════════════════════════════════════
+
+#pragma kernel BuildHash
+#pragma kernel SortAndFindOffsets
+
+// ───────────────────────────────────────────
+// يجب أن يطابق C# SPHParticleData byte-for-byte
+// ───────────────────────────────────────────
+struct Particle
+{
+    float3 Position;
+    float  _pad0;
+
+    float3 Velocity;
+    float  _pad1;
+
+    float3 Acceleration;
+    float  _pad2;
+
+    float Density;
+    float Pressure;
+    float Alpha;
+    float VelocityDivergence;
+
+    float Mass;
+    float SmoothingLength;
+    float Radius;
+    float Age;
+
+    float4 Color;
+
+    uint Phase;
+    uint IsActive;
+    uint ParticleIndex;
+    uint _pad3;
+};
+
+// ───────────────────────────────────────────
+// Buffers
+// ───────────────────────────────────────────
+StructuredBuffer<Particle> _Particles;
+RWStructuredBuffer<uint2>  _HashBuffer;       // (cellHash, particleIndex)
+RWStructuredBuffer<uint>   _HashOffsetBuffer; // start index for each cell hash
+
+// ───────────────────────────────────────────
+// Constants
+// ───────────────────────────────────────────
+float _CellSize;
+int   _MaxParticles;
+int   _HashTableSize;
+
+// ───────────────────────────────────────────
+// Hash Function: 3D grid cell → 1D hash
+// ───────────────────────────────────────────
+uint HashCell(int3 cell)
+{
+    // Prime numbers for good distribution
+    const uint p1 = 73856093u;
+    const uint p2 = 19349663u;
+    const uint p3 = 83492791u;
+
+    return ((uint)cell.x * p1 + (uint)cell.y * p2 + (uint)cell.z * p3) % (uint)_HashTableSize;
+}
+
+// ───────────────────────────────────────────
+// Kernel 1: بناء جدول الـ Hash
+// كل thread = جسيمة واحدة
+// ───────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void BuildHash(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i >= (uint)_MaxParticles)
+        return;
+
+    Particle p = _Particles[i];
+
+    // إذا غير نشطة، نضع hash = 0xFFFFFFFF (مميز)
+    if (p.IsActive == 0)
+    {
+        _HashBuffer[i] = uint2(0xFFFFFFFF, i);
+        return;
+    }
+
+    // نحسب إحداثيات الخلية
+    int3 cell = int3(
+        floor(p.Position / _CellSize)
+    );
+
+    uint hash = HashCell(cell);
+
+    _HashBuffer[i] = uint2(hash, i);
+}
+
+// ───────────────────────────────────────────
+// Kernel 2: ترتيب + إيجاد Offsets
+// يستخدم Bitonic Sort (مبسط) أو يعتمد على C# لـ Sort
+// حالياً: نملأ Offset بـ 0xFFFFFFFF ثم C# يكمل
+// ───────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void SortAndFindOffsets(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i >= (uint)_HashTableSize)
+        return;
+
+    // نبدأ بـ 0xFFFFFFFF = لا يوجد جسيمات في هذه الخلية
+    _HashOffsetBuffer[i] = 0xFFFFFFFF;
+}
