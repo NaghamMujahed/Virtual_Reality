@@ -2,8 +2,6 @@
 
 namespace PaintBucketSim.Configs
 {
-    /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// 
-
     public enum GpuBucketTopMode
     {
         Open = 0,
@@ -26,7 +24,6 @@ namespace PaintBucketSim.Configs
         ThickPaint = 4,
         HeavyBodyPaint = 5
     }
-    /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
     [CreateAssetMenu(
         fileName = "GpuMpmSolverConfig",
@@ -69,7 +66,7 @@ namespace PaintBucketSim.Configs
         [Min(0.1f)]
         public float maxParticleSpeed = 10.0f;
 
-        [Header("Dense MPM Active Grid Bounds / G14")]
+        [Header("Dense MPM Active Grid Bounds")]
         [Tooltip("Restrict dense MPM grid clear/update to an active bucket AABB instead of dispatching over the full dense grid.")]
         public bool enableActiveMpmGridBounds = false;
 
@@ -85,7 +82,7 @@ namespace PaintBucketSim.Configs
         [Range(0.1f, 1.0f)]
         public float activeMpmGridMaxFullGridFraction = 0.95f;
 
-        [Header("Sparse/Tiled MPM Grid Foundation / G15")]
+        [Header("Sparse/Tiled MPM Grid")]
         [Tooltip("Build a GPU active-tile list from particle transfer support. This is the foundation for sparse/tiled MPM.")]
         public bool enableMpmTileOccupancy = false;
 
@@ -98,19 +95,19 @@ namespace PaintBucketSim.Configs
         [Tooltip("Experimental: execute the regular P2G transfer using particles ordered by tile. Physics stays unchanged while grid-memory locality can improve on some GPUs.")]
         public bool enableTiledP2G = false;
 
-        [Tooltip("Experimental G16: reuse the tile-ordered particle list across P2G, projection marking, G2P, post-collision, and deformation. This amortizes list construction and improves grid-memory locality.")]
+        [Tooltip("Reuse the tile-ordered particle list across P2G, projection marking, G2P, post-collision, and deformation. This amortizes list construction and improves grid-memory locality.")]
         public bool enableTileOrderedParticlePipeline = false;
 
-        [Tooltip("G16: aggregate owner-tile P2G contributions in group-shared memory and use global atomics only across tile edges.")]
+        [Tooltip("Aggregate owner-tile P2G contributions in group-shared memory and use global atomics only across tile edges.")]
         public bool enableHybridTiledP2G = true;
 
-        [Tooltip("G20: assign each particle to the tile containing the center of its 3x3x3 transfer stencil. This maximizes shared-memory contributions and reduces global atomics at tile edges.")]
+        [Tooltip("Assign each particle to the tile containing the center of its 3x3x3 transfer stencil. This maximizes shared-memory contributions and reduces global atomics at tile edges.")]
         public bool enableCenteredHybridP2GOwnerTile = true;
 
-        [Tooltip("G20: execute G2P/APIC advection and the required post-G2P bucket collision in one particle kernel, avoiding a second full particle-memory pass.")]
+        [Tooltip("Execute G2P/APIC advection and the required post-G2P bucket collision in one particle kernel, avoiding a second full particle-memory pass.")]
         public bool enableFusedG2PPostCollision = true;
 
-        [Tooltip("G20: fuse the pre-P2G bucket collision with active/owner tile marking when support-reference lists are not requested.")]
+        [Tooltip("Fuse the pre-P2G bucket collision with active/owner tile marking when support-reference lists are not requested.")]
         public bool enableFusedPreCollisionTileMark = true;
 
         [Header("Final Performance Transfer LOD")]
@@ -124,7 +121,7 @@ namespace PaintBucketSim.Configs
         [Min(0)]
         public int adaptiveTransferMinParticles = 200000;
 
-        [Tooltip("G20B: rebuild hybrid-P2G owner ordering every N substeps. Reused lists stay complete while previous owner tiles are explicitly kept active. Use 1 to rebuild every substep.")]
+        [Tooltip("Rebuild hybrid-P2G owner ordering every N substeps. Reused lists stay complete while previous owner tiles are explicitly kept active. Use 1 to rebuild every substep.")]
         [Range(1, 2)]
         public int ownerTileListRebuildInterval = 2;
 
@@ -137,10 +134,6 @@ namespace PaintBucketSim.Configs
         public int mpmTileSizeCells = 8;
 
         [Header("PIC/MPM Transfer")]
-        //[Tooltip("0 = keep particle velocity more, 1 = pure PIC grid velocity. For first prototype use 1.")]
-        //[Range(0.0f, 1.0f)]
-        //public float picBlend = 1.0f;
-
         [Tooltip("Fixed point scale for mass atomic adds.")]
         [Min(1000)]
         public int massFixedScale = 1000000;
@@ -148,12 +141,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("Fixed point scale for momentum atomic adds.")]
         [Min(1000)]
         public int momentumFixedScale = 1000000;
-
-        //[Header("Box Boundary Prototype")]
-        //public bool enableBoxBoundary = true;
-
-        //[Range(0.0f, 1.0f)]
-        //public float boundaryDamping = 0.2f;
 
         [Header("Debug")]
         public bool logLifecycle = true;
@@ -167,18 +154,7 @@ namespace PaintBucketSim.Configs
         [Min(1)]
         public int diagnosticsReadbackInterval = 15;
 
-        // G5 Changes //
         [Header("MLS-MPM Affine Transfer")]
-        //public bool enableApicTransfer = true;
-
-        //[Tooltip("How strongly APIC affine velocity contributes during P2G. 0 = PIC only, 1 = full APIC contribution.")]
-        //[Range(0.0f, 1.0f)]
-        //public float apicP2GStrength = 1.0f;
-
-        //[Tooltip("How strongly the reconstructed affine C matrix is written back in G2P.")]
-        //[Range(0.0f, 1.0f)]
-        //public float apicG2PStrength = 1.0f;
-
         [Tooltip("Damping applied to affine C each step to prevent early prototype instability.")]
         [Range(0.0f, 1.0f)]
         public float affineDamping = 0.02f;
@@ -192,7 +168,6 @@ namespace PaintBucketSim.Configs
 
         [Min(0.0001f)]
         public float manualApicDInverse = 625.0f;
-        // End G5 Changes //
 
         [Header("MLS-MPM Projection Grid Infrastructure")]
         public bool enableProjectionGridInfrastructure = true;
@@ -204,13 +179,13 @@ namespace PaintBucketSim.Configs
         [Min(1)]
         public int projectionSubstepInterval = 1;
 
-        [Tooltip("G16: build a compact GPU list of fluid projection cells and run pressure iterations only on that list.")]
+        [Tooltip("Build a compact GPU list of fluid projection cells and run pressure iterations only on that list.")]
         public bool enableSparseProjectionPressureDispatch = true;
 
-        [Tooltip("G19B: dispatch projection setup and correction kernels only over active 8^3 MPM tiles. Sparse pressure iterations remain on the compact fluid-cell list.")]
+        [Tooltip("Dispatch projection setup and correction kernels only over active 8^3 MPM tiles. Sparse pressure iterations remain on the compact fluid-cell list.")]
         public bool enableMpmTileProjectionDispatch = true;
 
-        [Tooltip("G19B: add a positive target divergence in over-dense cells so projection removes accumulated compression instead of correcting instantaneous divergence only.")]
+        [Tooltip("Add a positive target divergence in over-dense cells so projection removes accumulated compression instead of correcting instantaneous divergence only.")]
         public bool enableProjectionDensityDriftCorrection = true;
 
         [Tooltip("Fraction of excess grid density corrected per projection step.")]
@@ -225,7 +200,7 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float projectionDensityDriftMaxDivergence = 12.0f;
 
-        [Header("Adaptive Multi-Rate Simulation / G17")]
+        [Header("Adaptive Multi-Rate Simulation")]
         [Tooltip("Sample particle activity on the GPU and update calm interior deformation less often while keeping P2G mass transfer at full rate.")]
         public bool enableAdaptiveMultiRate = true;
 
@@ -305,7 +280,7 @@ namespace PaintBucketSim.Configs
         [Tooltip("If true, cells above the bucket top are treated as air. If false, top can behave like a temporary lid.")]
         public bool projectionTopOpen = true;
 
-        [Header("MLS-MPM Projection Active Bounds / G13")]
+        [Header("MLS-MPM Projection Active Bounds")]
         [Tooltip("Restrict projection-grid kernels to an active world-space bucket AABB instead of dispatching over the full dense grid.")]
         public bool enableActiveProjectionBounds = true;
 
@@ -321,12 +296,10 @@ namespace PaintBucketSim.Configs
         [Range(0.1f, 1.0f)]
         public float activeProjectionMaxFullGridFraction = 0.95f;
 
-        ////////////////    G6.A Changes   //////////////////
-
         [Header("MLS/MPM Material Prototype")]
         public bool enableMaterialStress = true;
 
-        [Header("Fast Density WC-MLS-MPM / G17.5")]
+        [Header("Fast Density WC-MLS-MPM")]
         [Tooltip("Use lattice-calibrated grid density/volume for the fast WC-MLS-MPM predictor. It can run alone or feed the sparse projection corrector.")]
         public bool enableReferenceDensityEosMode = true;
 
@@ -340,7 +313,7 @@ namespace PaintBucketSim.Configs
         [Tooltip("Run the sparse active-tile projection after Grid EOS. This hybrid is the validated high-volume-preservation path; disable it only for the fastest weakly-compressible mode.")]
         public bool referenceEnableProjectionFallback = true;
 
-        [Header("Grid-Centric Density EOS / G18")]
+        [Header("Grid-Centric Density EOS")]
         [Tooltip("Evaluate the reference-density EOS pressure gradient once per active grid node instead of gathering density and scattering pressure from every particle. Keeps APIC and paint viscosity in P2G while removing the second 27-node particle pass.")]
         public bool enableGridDensityEos = true;
 
@@ -379,9 +352,7 @@ namespace PaintBucketSim.Configs
         [Min(1.0f)]
         public float maxDeformationGradientValue = 5.0f;
 
-        ////////////////    End G6.A Changes   //////////////////
-
-        [Header("Professional Paint Material Presets / G22")]
+        [Header("Professional Paint Material Presets")]
         [Tooltip("High-level material preset. Custom leaves the numeric solver values editable; the named presets apply a consistent rheology, cohesion, and pressure-stability package.")]
         public GpuPaintMaterialPreset paintMaterialPreset =
             GpuPaintMaterialPreset.LatexPaint;
@@ -389,7 +360,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("When true, selecting a named material preset in the inspector drives the numeric rheology/cohesion/incompressibility fields. Turn off if you want to keep a named preset label while manually tuning values.")]
         public bool autoApplyPaintMaterialPreset = true;
 
-        ////////////////    G7 Changes   //////////////////
         [Header("Paint Rheology / Non-Newtonian Prototype")]
         public bool enablePaintRheology = true;
 
@@ -464,9 +434,7 @@ namespace PaintBucketSim.Configs
         [Tooltip("Additional per-substep velocity-correction clamp available only to NearHole/Jet cohesion.")]
         [Min(0.0f)]
         public float maxJetCohesionVelocityCorrection = 0.25f;
-        ////////////////    End G7 Changes   //////////////////
 
-        /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// 
         [Header("GPU Bucket Collision")]
         public bool enableGpuBucketCollision = true;
 
@@ -531,7 +499,7 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float jetStateDurationSeconds = 0.08f;
 
-        [Header("MLS-MPM Jet Collar / G19")]
+        [Header("MLS-MPM Jet Collar")]
         [Tooltip("Keep newly emitted Jet particles coupled to MLS-MPM for a short region outside each hole before switching to ballistic airborne advection.")]
         public bool enableJetMpmCollar = true;
 
@@ -554,9 +522,7 @@ namespace PaintBucketSim.Configs
         public float airborneKillBelowWorldY = -2.0f;
 
         public bool killAirborneBelowWorldY = false;
-        /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
-        /// /// /// /// /// /// /// <G8.B Changes> /// /// /// /// /// /// 
         [Header("Moving Bucket Boundary Velocity")]
         public bool enableMovingBucketBoundaryVelocity = true;
 
@@ -567,7 +533,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("Clamp wall velocity contribution to avoid extreme impulses during early testing.")]
         [Min(0.1f)]
         public float maxBucketBoundaryVelocity = 8.0f;
-        /// /// /// /// /// /// /// <End G8.B Changes> /// /// /// /// /// /// 
 
         [Header("MLS-MPM Projection Divergence")]
         public bool enableProjectionDivergenceComputation = true;
@@ -754,15 +719,11 @@ namespace PaintBucketSim.Configs
             if (momentumFixedScale < 1000)
                 momentumFixedScale = 1000;
 
-            // G5 Changes //
             if (maxAffineMagnitude < 0.1f)
                 maxAffineMagnitude = 0.1f;
 
             if (manualApicDInverse < 0.0001f)
                 manualApicDInverse = 0.0001f;
-            // End G5 Changes //
-
-            ////////////////    G6.A Changes   //////////////////
 
             if (bulkModulus < 0.0f)
                 bulkModulus = 0.0f;
@@ -798,10 +759,6 @@ namespace PaintBucketSim.Configs
 
             minJ = Mathf.Clamp(minJ, 0.1f, 1.0f);
             maxJ = Mathf.Clamp(maxJ, 1.0f, 3.0f);
-
-            ////////////////    End G6.A Changes   //////////////////
-
-            ////////////////    G7 Changes   //////////////////
 
             if (lowShearViscosity < 0.0f)
                 lowShearViscosity = 0.0f;
@@ -852,10 +809,6 @@ namespace PaintBucketSim.Configs
             if (maxJetCohesionVelocityCorrection < 0.0f)
                 maxJetCohesionVelocityCorrection = 0.0f;
 
-            ////////////////    End G7 Changes   //////////////////
-
-            /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// 
-
             if (bucketCollisionPadding < 0.0f)
                 bucketCollisionPadding = 0.0f;
 
@@ -894,12 +847,9 @@ namespace PaintBucketSim.Configs
 
             if (airborneLifetimeSeconds < 0.1f)
                 airborneLifetimeSeconds = 0.1f;
-            /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// 
 
-            /// /// /// /// /// /// /// <G8.B Changes> /// /// /// /// /// /// 
             if (maxBucketBoundaryVelocity < 0.1f)
                 maxBucketBoundaryVelocity = 0.1f;
-            /// /// /// /// /// /// /// <End G8.B Changes> /// /// /// /// /// /// 
             
             if (projectionMassFixedScale < 1)
                 projectionMassFixedScale = 1;
@@ -1023,7 +973,7 @@ namespace PaintBucketSim.Configs
                 pressureRedBlackSorIterations,
                 4
             );
-            materialStressStrength = 1.0f;
+            materialStressStrength = 0.65f;
             minJ = 0.65f;
             maxJ = 1.35f;
 
@@ -1082,29 +1032,29 @@ namespace PaintBucketSim.Configs
                     break;
 
                 case GpuPaintMaterialPreset.LatexPaint:
-                    bulkModulus = 1000.0f;
-                    maxStressMagnitude = 8000.0f;
-                    gridDensityEosPressureScale = 4.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.5f;
-                    projectionDensityDriftStrength = 0.2f;
+                    bulkModulus = 850.0f;
+                    maxStressMagnitude = 5200.0f;
+                    gridDensityEosPressureScale = 2.8f;
+                    gridDensityEosMaxVelocityCorrection = 1.1f;
+                    projectionDensityDriftStrength = 0.18f;
                     projectionDensityDriftMinRatio = 1.02f;
-                    projectionDensityDriftMaxDivergence = 12.0f;
-                    maxPressureVelocityCorrection = 3.0f;
-                    mpmViscosity = 0.16f;
-                    lowShearViscosity = 2.6f;
-                    highShearViscosity = 0.14f;
+                    projectionDensityDriftMaxDivergence = 10.0f;
+                    maxPressureVelocityCorrection = 2.2f;
+                    mpmViscosity = 0.28f;
+                    lowShearViscosity = 3.2f;
+                    highShearViscosity = 0.16f;
                     shearThinningRelaxationTime = 0.8f;
                     shearThinningPowerN = 0.55f;
                     carreauYasudaExponent = 2.2f;
-                    yieldStress = 0.0f;
+                    yieldStress = 0.08f;
                     yieldRegularizationRate = 25.0f;
                     maxYieldViscosityContribution = 3.0f;
-                    maxEffectiveViscosity = 8.0f;
-                    freeSurfaceNormalDampingPerSecond = 2.5f;
-                    freeSurfaceCohesionAcceleration = 0.75f;
-                    maxFreeSurfaceVelocityCorrection = 0.35f;
-                    jetCohesionAcceleration = 0.25f;
-                    maxJetCohesionVelocityCorrection = 0.12f;
+                    maxEffectiveViscosity = 9.0f;
+                    freeSurfaceNormalDampingPerSecond = 4.5f;
+                    freeSurfaceCohesionAcceleration = 0.25f;
+                    maxFreeSurfaceVelocityCorrection = 0.18f;
+                    jetCohesionAcceleration = 0.15f;
+                    maxJetCohesionVelocityCorrection = 0.08f;
                     break;
 
                 case GpuPaintMaterialPreset.ThickPaint:
