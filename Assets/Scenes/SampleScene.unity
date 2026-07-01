@@ -15933,12 +15933,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Canvas.MpmCanvasPaintSurface
   surfaceTransform: {fileID: 2030639909}
   targetRenderer: {fileID: 2030639914}
-  axisPreset: 2
+  axisPreset: 1
   customLocalTangent: {x: -1, y: 0, z: 0}
   customLocalBitangent: {x: 0, y: 0, z: -1}
   widthMeters: 10
   heightMeters: 10
   resolution: {x: 512, y: 512}
+  flipU: 1
+  flipV: 0
   materialPreset: 4
   autoApplyPreset: 1
   materialSettings:
@@ -16003,6 +16005,17 @@ MonoBehaviour:
   bounceRestitution: 0.18
   gravityAcceleration: 9.81
   gravityDirectionWorld: {x: 0, y: -1, z: 0}
+  enableVisibleParticleReuse: 1
+  splashVisibleReuseProbability: 0.72
+  strongSpreadVisibleReuseProbability: 0.24
+  bounceVisibleReuseProbability: 0.88
+  visibleDropletMassFraction: 0.18
+  visibleDropletRadiusScale: 0.42
+  visibleDropletVelocityDamping: 0.68
+  visibleDropletNormalBoost: 0.55
+  visibleDropletSurfaceOffsetRadii: 1.8
+  strongSpreadVisibleSpeed: 1.15
+  visibleDropletMinRadiusMeters: 0.00045
   enableDebugReadback: 0
   debugReadbackInterval: 15
   showDebugOverlay: 0
