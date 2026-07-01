@@ -1,0 +1,318 @@
+#pragma kernel KEvolveFilm
+
+struct MpmPaintFilmCell
+{
+    uint thickness;
+    uint wetness;
+    uint colorR;
+    uint colorG;
+    uint colorB;
+    uint deposited;
+    uint absorbed;
+    uint impactCount;
+    int flowU;
+    int flowV;
+    uint flags;
+    uint reserved;
+};
+
+StructuredBuffer<MpmPaintFilmCell> _SourceFilmCells;
+RWStructuredBuffer<MpmPaintFilmCell> _TargetFilmCells;
+
+int _GridWidth;
+int _GridHeight;
+int _ThicknessUnitsPerMeter;
+int _WetnessUnits;
+int _ColorWeightScale;
+float _DeltaTime;
+int _EnableDiffusion;
+int _EnableDrips;
+
+float _AbsorptionRate;
+float _SpreadFactor;
+float _DripFactor;
+float _DryingRate;
+float _WetnessRetention;
+float _Roughness;
+float _PaintViscosity;
+float _YieldStress;
+float _ViscosityDamping;
+float _MomentumFlowFactor;
+
+float3 _CanvasTangent;
+float3 _CanvasBitangent;
+float3 _CanvasNormal;
+float3 _GravityDirection;
+int _FlipU;
+int _FlipV;
+
+int IndexOf(int x, int y)
+{
+    x = clamp(x, 0, _GridWidth - 1);
+    y = clamp(y, 0, _GridHeight - 1);
+    return y * _GridWidth + x;
+}
+
+float ThicknessUnits(MpmPaintFilmCell cell)
+{
+    return (float)cell.thickness;
+}
+
+float Wetness01(MpmPaintFilmCell cell)
+{
+    return saturate((float)cell.wetness / max((float)_WetnessUnits, 1.0));
+}
+
+float3 CellColor(MpmPaintFilmCell cell)
+{
+    if (cell.deposited == 0u)
+        return float3(0.0, 0.0, 0.0);
+
+    float denom = max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
+    return saturate(float3(cell.colorR, cell.colorG, cell.colorB) / denom);
+}
+
+float2 CellFlow(MpmPaintFilmCell cell)
+{
+    return float2((float)cell.flowU, (float)cell.flowV) / 600.0;
+}
+
+float2 ApplyUvFlowFlip(float2 flow)
+{
+    return flow * float2(_FlipU != 0 ? -1.0 : 1.0, _FlipV != 0 ? -1.0 : 1.0);
+}
+
+MpmPaintFilmCell PackCell(
+    float thickness,
+    float wetness,
+    float3 color,
+    MpmPaintFilmCell source,
+    float absorbedAdd)
+{
+    MpmPaintFilmCell cell;
+    thickness = max(thickness, 0.0);
+    wetness = saturate(wetness);
+    color = saturate(color);
+
+    uint thicknessU = (uint)round(min(thickness, 4290000000.0));
+    uint depositedU = thicknessU;
+    uint colorScale = (uint)max(_ColorWeightScale, 1);
+
+    cell.thickness = thicknessU;
+    cell.wetness = (uint)round(wetness * (float)_WetnessUnits);
+    cell.colorR = (uint)round((float)depositedU * color.r * (float)colorScale);
+    cell.colorG = (uint)round((float)depositedU * color.g * (float)colorScale);
+    cell.colorB = (uint)round((float)depositedU * color.b * (float)colorScale);
+    cell.deposited = depositedU;
+    cell.absorbed = source.absorbed + (uint)round(max(absorbedAdd, 0.0));
+    cell.impactCount = source.impactCount;
+    cell.flowU = (int)round((float)source.flowU * 0.96);
+    cell.flowV = (int)round((float)source.flowV * 0.96);
+    cell.flags = thicknessU > 0u ? 1u : 0u;
+    cell.reserved = 0u;
+    return cell;
+}
+
+[numthreads(8, 8, 1)]
+void KEvolveFilm(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+    int idx = y * _GridWidth + x;
+
+    MpmPaintFilmCell self = _SourceFilmCells[idx];
+    MpmPaintFilmCell left = _SourceFilmCells[IndexOf(x - 1, y)];
+    MpmPaintFilmCell right = _SourceFilmCells[IndexOf(x + 1, y)];
+    MpmPaintFilmCell down = _SourceFilmCells[IndexOf(x, y - 1)];
+    MpmPaintFilmCell up = _SourceFilmCells[IndexOf(x, y + 1)];
+
+    float thickness = ThicknessUnits(self);
+    float wetness = Wetness01(self);
+    float3 color = CellColor(self);
+
+    float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
+    float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
+    float mobility = saturate(1.0 - viscosity01 * _ViscosityDamping - yield01 * 0.35);
+
+    float retention = max(_WetnessRetention, 0.05);
+    float dryFactor = exp(-max(_DryingRate, 0.0) * _DeltaTime / retention);
+    wetness *= dryFactor;
+    wetness -= saturate(_AbsorptionRate) * _DeltaTime * 0.08;
+    wetness = saturate(wetness);
+
+    float absorbed = thickness * saturate(_AbsorptionRate) * wetness * _DeltaTime * 0.018;
+    thickness = max(0.0, thickness - absorbed);
+
+    if (_EnableDiffusion != 0)
+    {
+        float leftThickness = ThicknessUnits(left);
+        float rightThickness = ThicknessUnits(right);
+        float downThickness = ThicknessUnits(down);
+        float upThickness = ThicknessUnits(up);
+        float neighborMass =
+            leftThickness +
+            rightThickness +
+            downThickness +
+            upThickness;
+        float neighborAverage = neighborMass * 0.25;
+
+        float diffusion =
+            saturate(_SpreadFactor) *
+            mobility *
+            max(wetness, neighborMass > 0.0 ? 0.35 : 0.0) *
+            (1.0 - saturate(_Roughness) * 0.45) *
+            _DeltaTime *
+            0.34;
+
+        float targetThickness = lerp(thickness, neighborAverage, saturate(diffusion));
+        float incoming = max(0.0, targetThickness - thickness);
+        if (incoming > 0.0 && neighborMass > 0.0)
+        {
+            float3 neighborColor =
+                (CellColor(left) * leftThickness +
+                 CellColor(right) * rightThickness +
+                 CellColor(down) * downThickness +
+                 CellColor(up) * upThickness) /
+                max(neighborMass, 1.0);
+            float neighborWetness =
+                (Wetness01(left) * leftThickness +
+                 Wetness01(right) * rightThickness +
+                 Wetness01(down) * downThickness +
+                 Wetness01(up) * upThickness) /
+                max(neighborMass, 1.0);
+
+            color = (color * thickness + neighborColor * incoming) /
+                max(targetThickness, 1.0);
+            wetness = max(wetness, neighborWetness);
+        }
+
+        thickness = targetThickness;
+    }
+
+    if (_MomentumFlowFactor > 0.0)
+    {
+        float2 selfFlow = CellFlow(self);
+        float selfFlowSpeed = saturate(length(selfFlow));
+        float flowStep =
+            max(_MomentumFlowFactor, 0.0) *
+            mobility *
+            _DeltaTime *
+            1.05;
+
+        float outflow =
+            thickness *
+            wetness *
+            selfFlowSpeed *
+            flowStep;
+
+        float incoming = 0.0;
+        float3 incomingColorSum = float3(0.0, 0.0, 0.0);
+        float incomingWetnessSum = 0.0;
+
+        float2 leftFlow = CellFlow(left);
+        float leftIn = saturate(max(leftFlow.x, 0.0)) *
+            ThicknessUnits(left) *
+            Wetness01(left) *
+            flowStep;
+        incoming += leftIn;
+        incomingColorSum += CellColor(left) * leftIn;
+        incomingWetnessSum += Wetness01(left) * leftIn;
+
+        float2 rightFlow = CellFlow(right);
+        float rightIn = saturate(max(-rightFlow.x, 0.0)) *
+            ThicknessUnits(right) *
+            Wetness01(right) *
+            flowStep;
+        incoming += rightIn;
+        incomingColorSum += CellColor(right) * rightIn;
+        incomingWetnessSum += Wetness01(right) * rightIn;
+
+        float2 downFlow = CellFlow(down);
+        float downIn = saturate(max(downFlow.y, 0.0)) *
+            ThicknessUnits(down) *
+            Wetness01(down) *
+            flowStep;
+        incoming += downIn;
+        incomingColorSum += CellColor(down) * downIn;
+        incomingWetnessSum += Wetness01(down) * downIn;
+
+        float2 upFlow = CellFlow(up);
+        float upIn = saturate(max(-upFlow.y, 0.0)) *
+            ThicknessUnits(up) *
+            Wetness01(up) *
+            flowStep;
+        incoming += upIn;
+        incomingColorSum += CellColor(up) * upIn;
+        incomingWetnessSum += Wetness01(up) * upIn;
+
+        float remaining = max(0.0, thickness - outflow);
+        float newThickness = remaining + incoming;
+        if (incoming > 0.0 && newThickness > 0.0)
+        {
+            float3 incomingColor = incomingColorSum / max(incoming, 1.0);
+            float incomingWetness = incomingWetnessSum / max(incoming, 1.0);
+            color = (color * remaining + incomingColor * incoming) / max(newThickness, 1.0);
+            wetness = max(wetness, incomingWetness * saturate(incoming / max(newThickness, 1.0)));
+        }
+
+        thickness = newThickness;
+    }
+
+    if (_EnableDrips != 0)
+    {
+        float3 gravity = normalize(_GravityDirection);
+        float2 gravityUv = float2(
+            dot(gravity, normalize(_CanvasTangent)),
+            dot(gravity, normalize(_CanvasBitangent))
+        );
+        gravityUv = ApplyUvFlowFlip(gravityUv);
+
+        float slope = saturate(length(gravityUv));
+        if (slope > 0.02)
+        {
+            int2 stepDir = abs(gravityUv.x) > abs(gravityUv.y)
+                ? int2(gravityUv.x >= 0.0 ? 1 : -1, 0)
+                : int2(0, gravityUv.y >= 0.0 ? 1 : -1);
+
+            MpmPaintFilmCell upstream =
+                _SourceFilmCells[IndexOf(x - stepDir.x, y - stepDir.y)];
+
+            float selfOut =
+                thickness *
+                wetness *
+                max(_DripFactor, 0.0) *
+                mobility *
+                slope *
+                _DeltaTime *
+                0.22;
+
+            float upstreamThickness = ThicknessUnits(upstream);
+            float upstreamWetness = Wetness01(upstream);
+            float incoming =
+                upstreamThickness *
+                upstreamWetness *
+                max(_DripFactor, 0.0) *
+                mobility *
+                slope *
+                _DeltaTime *
+                0.22;
+
+            float remaining = max(0.0, thickness - selfOut);
+            float newThickness = remaining + incoming;
+
+            if (incoming > 0.0)
+            {
+                float3 upstreamColor = CellColor(upstream);
+                color = (color * remaining + upstreamColor * incoming) / max(newThickness, 1.0);
+                wetness = max(wetness, upstreamWetness * saturate(incoming / max(newThickness, 1.0)));
+            }
+
+            thickness = newThickness;
+        }
+    }
+
+    _TargetFilmCells[idx] = PackCell(thickness, wetness, color, self, absorbed);
+}

@@ -1,0 +1,1118 @@
+#pragma kernel KClearDebugCounters
+#pragma kernel KCapturePreviousPositions
+#pragma kernel KDepositImpacts
+#pragma kernel KEvolveHybridParticles
+
+struct MpmPaintFilmCell
+{
+    uint thickness;
+    uint wetness;
+    uint colorR;
+    uint colorG;
+    uint colorB;
+    uint deposited;
+    uint absorbed;
+    uint impactCount;
+    int flowU;
+    int flowV;
+    uint flags;
+    uint reserved;
+};
+
+struct MpmCanvasHybridParticle
+{
+    float4 data0; // x=u01, y=v01, z=normal offset meters, w=radius cells
+    float4 data1; // x=vel U cells/s, y=vel V cells/s, z=normal vel m/s, w=thickness units
+    float4 data2; // rgb=color, a=wetness
+    float4 data3; // x=age, y=lifetime, z=kind, w=active
+};
+
+StructuredBuffer<float4> _ParticlePositionRadiusRead;
+RWStructuredBuffer<float4> _ParticlePositionRadius;
+RWStructuredBuffer<float4> _ParticleVelocityMass;
+StructuredBuffer<float4> _ParticleColor;
+RWStructuredBuffer<float4> _ParticleStateAgeId;
+StructuredBuffer<float4> _PreviousPositionRadius;
+RWStructuredBuffer<float4> _PreviousPositionRadiusWrite;
+RWStructuredBuffer<MpmPaintFilmCell> _FilmCells;
+RWStructuredBuffer<MpmCanvasHybridParticle> _SurfaceParticles;
+RWStructuredBuffer<MpmCanvasHybridParticle> _DropletParticles;
+RWStructuredBuffer<uint> _HybridCounters;
+RWStructuredBuffer<uint> _DebugCounters;
+
+int _ParticleCount;
+int _SurfaceParticleCapacity;
+int _DropletParticleCapacity;
+int _GridWidth;
+int _GridHeight;
+int _ThicknessUnitsPerMeter;
+int _WetnessUnits;
+int _ColorWeightScale;
+int _MaxDepositUnitsPerParticle;
+
+float3 _CanvasCurrentPosition;
+float3 _CanvasCurrentNormal;
+float3 _CanvasCurrentTangent;
+float3 _CanvasCurrentBitangent;
+float3 _CanvasPreviousPosition;
+float3 _CanvasPreviousNormal;
+float3 _CanvasLinearVelocity;
+float3 _CanvasAngularVelocity;
+int _FlipU;
+int _FlipV;
+float _CanvasWidth;
+float _CanvasHeight;
+float _CellSizeU;
+float _CellSizeV;
+float _DeltaTime;
+
+int _DoubleSidedCollision;
+float _CollisionSkin;
+float _MinimumImpactSpeed;
+float _DepositionEfficiency;
+
+float _BaseSplatRadiusCells;
+float _ImpactSpreadMultiplier;
+float _TangentialStretchMultiplier;
+int _MaxSplatRadiusCells;
+
+float _AbsorptionRate;
+float _SpreadFactor;
+float _DripFactor;
+float _Roughness;
+float _SplatSharpness;
+
+float _PaintDensity;
+float _PaintViscosity;
+float _SurfaceTension;
+float _YieldStress;
+int _ShrinkDepositedParticles;
+float _DepositedParticleRadius;
+
+int _EnableHybridParticles;
+float _SurfaceParticleLifetime;
+float _DropletLifetime;
+float _SurfaceParticleDepositRate;
+float _SurfaceParticleFriction;
+float _DropletDrag;
+float _SplashNormalSpeedThreshold;
+float _BounceNormalSpeedThreshold;
+float _SecondaryDropletMassFraction;
+float _SecondaryDropletVelocityBoost;
+int _MaxSecondaryDroplets;
+float _BounceRestitution;
+float _GravityAcceleration;
+float3 _GravityDirection;
+
+int _EnableVisibleParticleReuse;
+float _SplashVisibleReuseProbability;
+float _StrongSpreadVisibleReuseProbability;
+float _BounceVisibleReuseProbability;
+float _VisibleDropletMassFraction;
+float _VisibleDropletRadiusScale;
+float _VisibleDropletVelocityDamping;
+float _VisibleDropletNormalBoost;
+float _VisibleDropletSurfaceOffsetRadii;
+float _StrongSpreadVisibleSpeed;
+float _VisibleDropletMinRadius;
+
+static const int MAX_SPLAT_RADIUS = 12;
+static const int IMPACT_STICK = 0;
+static const int IMPACT_SPREAD = 1;
+static const int IMPACT_SPLASH = 2;
+static const int IMPACT_BOUNCE = 3;
+
+bool IsAirCanvasCandidate(int state)
+{
+    return state == 4 || state == 5 || state == 6 || state == 7;
+}
+
+bool InBounds(int x, int y)
+{
+    return x >= 0 && x < _GridWidth && y >= 0 && y < _GridHeight;
+}
+
+int FilmIndex(int x, int y)
+{
+    return y * _GridWidth + x;
+}
+
+float SafeLength(float3 v)
+{
+    return sqrt(max(dot(v, v), 0.0));
+}
+
+float2 SafeNormalize2(float2 v, float2 fallback)
+{
+    float lenSq = dot(v, v);
+    return lenSq > 1e-10 ? v * rsqrt(lenSq) : fallback;
+}
+
+float Random01(float seed)
+{
+    return frac(sin(seed * 12.9898 + 78.233) * 43758.5453);
+}
+
+float2 UvFlipSign()
+{
+    return float2(_FlipU != 0 ? -1.0 : 1.0, _FlipV != 0 ? -1.0 : 1.0);
+}
+
+float2 ApplyUvFlip(float2 uv01)
+{
+    if (_FlipU != 0)
+        uv01.x = 1.0 - uv01.x;
+
+    if (_FlipV != 0)
+        uv01.y = 1.0 - uv01.y;
+
+    return uv01;
+}
+
+float2 ApplyUvFlowFlip(float2 flow)
+{
+    return flow * UvFlipSign();
+}
+
+float ComputeSplatWeight(
+    int ox,
+    int oy,
+    float2 majorAxis,
+    float radiusLong,
+    float radiusShort,
+    float sharpness)
+{
+    float2 o = float2((float)ox, (float)oy);
+    float2 minorAxis = float2(-majorAxis.y, majorAxis.x);
+    float major = dot(o, majorAxis) / max(radiusLong, 1e-4);
+    float minor = dot(o, minorAxis) / max(radiusShort, 1e-4);
+    float r2 = major * major + minor * minor;
+
+    if (r2 > 1.0)
+        return 0.0;
+
+    return exp(-r2 * max(sharpness, 0.25));
+}
+
+void AddFilmCell(
+    int x,
+    int y,
+    uint units,
+    uint wetness,
+    float4 color,
+    float2 flowUv)
+{
+    if (units == 0 || !InBounds(x, y))
+        return;
+
+    int idx = FilmIndex(x, y);
+    uint colorScale = (uint)max(_ColorWeightScale, 1);
+
+    uint r = units * (uint)round(saturate(color.r) * (float)colorScale);
+    uint g = units * (uint)round(saturate(color.g) * (float)colorScale);
+    uint b = units * (uint)round(saturate(color.b) * (float)colorScale);
+
+    InterlockedAdd(_FilmCells[idx].thickness, units);
+    InterlockedMax(_FilmCells[idx].wetness, wetness);
+    InterlockedAdd(_FilmCells[idx].colorR, r);
+    InterlockedAdd(_FilmCells[idx].colorG, g);
+    InterlockedAdd(_FilmCells[idx].colorB, b);
+    InterlockedAdd(_FilmCells[idx].deposited, units);
+    InterlockedAdd(_FilmCells[idx].impactCount, 1u);
+    InterlockedMax(_FilmCells[idx].flags, 1u);
+
+    int flowU = (int)round(clamp(flowUv.x, -6000.0, 6000.0));
+    int flowV = (int)round(clamp(flowUv.y, -6000.0, 6000.0));
+    InterlockedAdd(_FilmCells[idx].flowU, flowU);
+    InterlockedAdd(_FilmCells[idx].flowV, flowV);
+}
+
+void DepositSplat(
+    float2 uv01,
+    uint totalUnits,
+    uint wetness,
+    float4 color,
+    float2 flowUv,
+    float2 majorAxis,
+    float radiusLong,
+    float radiusShort,
+    float sharpness,
+    int radiusLoop)
+{
+    if (totalUnits == 0)
+        return;
+
+    int baseX = (int)floor(saturate(uv01.x) * (float)_GridWidth);
+    int baseY = (int)floor(saturate(uv01.y) * (float)_GridHeight);
+    baseX = clamp(baseX, 0, _GridWidth - 1);
+    baseY = clamp(baseY, 0, _GridHeight - 1);
+
+    float weightSum = 0.0;
+    [loop]
+    for (int y = -MAX_SPLAT_RADIUS; y <= MAX_SPLAT_RADIUS; y++)
+    {
+        if (abs(y) > radiusLoop)
+            continue;
+
+        [loop]
+        for (int x = -MAX_SPLAT_RADIUS; x <= MAX_SPLAT_RADIUS; x++)
+        {
+            if (abs(x) > radiusLoop)
+                continue;
+
+            if (!InBounds(baseX + x, baseY + y))
+                continue;
+
+            weightSum += ComputeSplatWeight(
+                x,
+                y,
+                majorAxis,
+                radiusLong,
+                radiusShort,
+                sharpness
+            );
+        }
+    }
+
+    if (weightSum <= 1e-6)
+        return;
+
+    [loop]
+    for (int yy = -MAX_SPLAT_RADIUS; yy <= MAX_SPLAT_RADIUS; yy++)
+    {
+        if (abs(yy) > radiusLoop)
+            continue;
+
+        [loop]
+        for (int xx = -MAX_SPLAT_RADIUS; xx <= MAX_SPLAT_RADIUS; xx++)
+        {
+            if (abs(xx) > radiusLoop)
+                continue;
+
+            float w = ComputeSplatWeight(
+                xx,
+                yy,
+                majorAxis,
+                radiusLong,
+                radiusShort,
+                sharpness
+            );
+
+            if (w <= 0.0)
+                continue;
+
+            uint cellUnits = (uint)round((float)totalUnits * w / weightSum);
+            AddFilmCell(
+                baseX + xx,
+                baseY + yy,
+                cellUnits,
+                wetness,
+                color,
+                flowUv * w
+            );
+        }
+    }
+}
+
+void SpawnSurfaceParticle(
+    float2 uv01,
+    float radiusCells,
+    float2 velocityCells,
+    uint units,
+    float4 color,
+    float wetness)
+{
+    if (_EnableHybridParticles == 0 ||
+        _SurfaceParticleCapacity <= 0 ||
+        units == 0)
+    {
+        return;
+    }
+
+    uint rawSlot;
+    InterlockedAdd(_HybridCounters[0], 1u, rawSlot);
+    uint slot = rawSlot % (uint)_SurfaceParticleCapacity;
+
+    MpmCanvasHybridParticle particle;
+    particle.data0 = float4(saturate(uv01), 0.0, max(radiusCells, 0.5));
+    particle.data1 = float4(velocityCells, 0.0, (float)units);
+    particle.data2 = float4(saturate(color.rgb), saturate(wetness));
+    particle.data3 = float4(0.0, max(_SurfaceParticleLifetime, 0.05), 0.0, 1.0);
+    _SurfaceParticles[slot] = particle;
+
+    InterlockedAdd(_DebugCounters[10], 1u);
+}
+
+void SpawnDropletParticle(
+    float2 uv01,
+    float radiusCells,
+    float2 velocityCells,
+    float normalVelocity,
+    uint units,
+    float4 color,
+    float wetness,
+    float normalOffset)
+{
+    if (_EnableHybridParticles == 0 ||
+        _DropletParticleCapacity <= 0 ||
+        units == 0)
+    {
+        return;
+    }
+
+    uint rawSlot;
+    InterlockedAdd(_HybridCounters[1], 1u, rawSlot);
+    uint slot = rawSlot % (uint)_DropletParticleCapacity;
+
+    MpmCanvasHybridParticle particle;
+    particle.data0 = float4(saturate(uv01), max(normalOffset, 0.001), max(radiusCells, 0.35));
+    particle.data1 = float4(velocityCells, normalVelocity, (float)units);
+    particle.data2 = float4(saturate(color.rgb), saturate(wetness));
+    particle.data3 = float4(0.0, max(_DropletLifetime, 0.05), 1.0, 1.0);
+    _DropletParticles[slot] = particle;
+
+    InterlockedAdd(_DebugCounters[11], 1u);
+}
+
+int ClassifyImpact(
+    float normalSpeed,
+    float tangentialSpeed,
+    float speed,
+    float radius,
+    float mobility,
+    out float splash01,
+    out float bounce01)
+{
+    float absorption = saturate(_AbsorptionRate);
+    float roughness = saturate(_Roughness);
+    float surfaceTension = max(_SurfaceTension, 1e-5);
+    float weber = _PaintDensity * speed * speed * max(radius * 2.0, 1e-5) / surfaceTension;
+
+    splash01 =
+        saturate((normalSpeed - max(_SplashNormalSpeedThreshold, 0.05)) /
+        max(_SplashNormalSpeedThreshold, 0.05));
+    splash01 *= saturate(log2(1.0 + weber) / 8.0);
+    splash01 *= mobility * lerp(1.1, 0.42, roughness);
+
+    float grazing = saturate(tangentialSpeed / max(speed, 1e-5));
+    bounce01 =
+        saturate((normalSpeed - max(_BounceNormalSpeedThreshold, 0.05)) /
+        max(_BounceNormalSpeedThreshold, 0.05));
+    bounce01 *= grazing * (1.0 - absorption) * (1.0 - roughness);
+
+    if (bounce01 > 0.42 && absorption < 0.22)
+        return IMPACT_BOUNCE;
+
+    if (splash01 > 0.25 && _MaxSecondaryDroplets > 0)
+        return IMPACT_SPLASH;
+
+    if (normalSpeed > 0.35 || tangentialSpeed > 0.35)
+        return IMPACT_SPREAD;
+
+    return IMPACT_STICK;
+}
+
+bool ShouldReuseVisibleParticle(
+    int regime,
+    float normalSpeed,
+    float tangentialSpeed,
+    float splash01,
+    float bounce01,
+    float mobility,
+    uint particleIndex,
+    float ageSeed,
+    out float visibleFraction)
+{
+    visibleFraction = 0.0;
+
+    if (_EnableVisibleParticleReuse == 0)
+        return false;
+
+    float probability = 0.0;
+    float strength = 0.0;
+
+    if (regime == IMPACT_SPLASH)
+    {
+        probability = saturate(_SplashVisibleReuseProbability);
+        strength = saturate(0.35 + splash01);
+    }
+    else if (regime == IMPACT_BOUNCE)
+    {
+        probability = saturate(_BounceVisibleReuseProbability);
+        strength = saturate(0.55 + bounce01);
+    }
+    else if (regime == IMPACT_SPREAD)
+    {
+        float spreadSpeed = max(normalSpeed, tangentialSpeed);
+        float strongSpread = saturate(
+            (spreadSpeed - max(_StrongSpreadVisibleSpeed, 0.05)) /
+            max(_StrongSpreadVisibleSpeed, 0.05)
+        );
+        probability = saturate(_StrongSpreadVisibleReuseProbability) * strongSpread;
+        strength = strongSpread * 0.65;
+    }
+
+    probability *= lerp(1.0, 0.38, saturate(_AbsorptionRate));
+    probability *= lerp(1.0, 0.72, saturate(_Roughness));
+
+    float seed =
+        (float)particleIndex * 31.37 +
+        ageSeed * 11.91 +
+        normalSpeed * 3.17 +
+        tangentialSpeed * 1.73;
+    if (Random01(seed) > probability)
+        return false;
+
+    visibleFraction = saturate(
+        _VisibleDropletMassFraction *
+        strength *
+        (0.55 + 0.45 * mobility)
+    );
+
+    return visibleFraction > 0.006;
+}
+
+void ReuseOriginalAsVisibleDroplet(
+    uint particleIndex,
+    int regime,
+    float visibleFraction,
+    float3 impactPoint,
+    float3 normal,
+    float3 tangent,
+    float3 bitangent,
+    float3 canvasVelocity,
+    float3 relativeVelocity,
+    float3 tangentialVelocity,
+    float normalSpeed,
+    float splash01,
+    float bounce01,
+    float radius,
+    float4 velocityMass,
+    inout float4 stateAgeId)
+{
+    float seed = (float)particleIndex * 17.23 + stateAgeId.y * 5.91 + normalSpeed;
+    float sideA = Random01(seed) * 2.0 - 1.0;
+    float sideB = Random01(seed + 4.7) * 2.0 - 1.0;
+    float3 sideJitter = normalize(tangent * sideA + bitangent * sideB + normal * 0.05);
+
+    float3 reflectedRelative =
+        relativeVelocity -
+        (1.0 + saturate(_BounceRestitution)) *
+        dot(relativeVelocity, normal) *
+        normal;
+
+    float3 outgoingRelative = reflectedRelative * saturate(_VisibleDropletVelocityDamping);
+
+    if (regime == IMPACT_SPLASH)
+    {
+        outgoingRelative =
+            tangentialVelocity * (0.42 + 0.28 * Random01(seed + 1.3)) +
+            normal * (normalSpeed * max(_VisibleDropletNormalBoost, 0.0) + _SecondaryDropletVelocityBoost * splash01) +
+            sideJitter * (0.12 + 0.28 * splash01) * max(normalSpeed, 0.2);
+    }
+    else if (regime == IMPACT_SPREAD)
+    {
+        outgoingRelative =
+            tangentialVelocity * (0.52 + 0.20 * Random01(seed + 2.9)) +
+            normal * (normalSpeed * max(_VisibleDropletNormalBoost, 0.0) * 0.45 + 0.08) +
+            sideJitter * 0.10 * max(normalSpeed, 0.2);
+    }
+    else if (regime == IMPACT_BOUNCE)
+    {
+        outgoingRelative =
+            reflectedRelative * (0.55 + 0.30 * bounce01) +
+            sideJitter * 0.08 * max(normalSpeed, 0.2);
+    }
+
+    float visibleRadius = clamp(
+        radius * max(_VisibleDropletRadiusScale, 0.05) * (0.75 + 0.45 * Random01(seed + 6.1)),
+        max(_VisibleDropletMinRadius, 1e-6),
+        max(radius * 0.95, max(_VisibleDropletMinRadius, 1e-6))
+    );
+    float visibleMass = max(velocityMass.w * saturate(visibleFraction), 0.0);
+    float offset = max(
+        visibleRadius * max(_VisibleDropletSurfaceOffsetRadii, 0.5),
+        radius + max(_CollisionSkin, 1e-4)
+    );
+
+    _ParticlePositionRadius[particleIndex] = float4(impactPoint + normal * offset, visibleRadius);
+    _ParticleVelocityMass[particleIndex] = float4(canvasVelocity + outgoingRelative, visibleMass);
+
+    stateAgeId.x = 6.0;
+    stateAgeId.y = 0.0;
+    stateAgeId.z = 0.0;
+    _ParticleStateAgeId[particleIndex] = stateAgeId;
+
+    InterlockedAdd(_DebugCounters[14], 1u);
+    if (regime == IMPACT_SPLASH)
+        InterlockedAdd(_DebugCounters[15], 1u);
+    else if (regime == IMPACT_BOUNCE)
+        InterlockedAdd(_DebugCounters[16], 1u);
+    else if (regime == IMPACT_SPREAD)
+        InterlockedAdd(_DebugCounters[17], 1u);
+}
+
+[numthreads(32, 1, 1)]
+void KClearDebugCounters(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < 32)
+        _DebugCounters[id.x] = 0u;
+}
+
+[numthreads(256, 1, 1)]
+void KCapturePreviousPositions(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    _PreviousPositionRadiusWrite[particleIndex] = _ParticlePositionRadiusRead[particleIndex];
+}
+
+[numthreads(256, 1, 1)]
+void KDepositImpacts(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    InterlockedAdd(_DebugCounters[0], 1u);
+
+    float4 stateAgeId = _ParticleStateAgeId[particleIndex];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsAirCanvasCandidate(state))
+        return;
+
+    InterlockedAdd(_DebugCounters[1], 1u);
+
+    float4 currentPr = _ParticlePositionRadius[particleIndex];
+    float4 previousPr = _PreviousPositionRadius[particleIndex];
+    float4 velocityMass = _ParticleVelocityMass[particleIndex];
+
+    float radius = max(currentPr.w, 1e-6);
+    float3 currentPosition = currentPr.xyz;
+    float3 previousPosition = previousPr.xyz;
+
+    float previousSigned = dot(
+        previousPosition - _CanvasPreviousPosition,
+        normalize(_CanvasPreviousNormal)
+    );
+    float currentSigned = dot(
+        currentPosition - _CanvasCurrentPosition,
+        normalize(_CanvasCurrentNormal)
+    );
+
+    float contactBand = radius + max(_CollisionSkin, 0.0);
+    bool crossed = false;
+
+    if (_DoubleSidedCollision != 0)
+    {
+        crossed =
+            previousSigned * currentSigned <= 0.0 ||
+            abs(currentSigned) <= contactBand;
+    }
+    else
+    {
+        crossed =
+            previousSigned > contactBand &&
+            currentSigned <= contactBand;
+    }
+
+    if (!crossed)
+        return;
+
+    float denom = previousSigned - currentSigned;
+    float t = abs(denom) > 1e-6
+        ? saturate(previousSigned / denom)
+        : 1.0;
+
+    float3 impactPoint = lerp(previousPosition, currentPosition, t);
+    float3 normal = normalize(_CanvasCurrentNormal);
+    float3 tangent = normalize(_CanvasCurrentTangent);
+    float3 bitangent = normalize(_CanvasCurrentBitangent);
+
+    float3 canvasVelocity =
+        _CanvasLinearVelocity +
+        cross(_CanvasAngularVelocity, impactPoint - _CanvasCurrentPosition);
+
+    float3 relativeVelocity = velocityMass.xyz - canvasVelocity;
+    float signedNormalVelocity = dot(relativeVelocity, normal);
+
+    if (_DoubleSidedCollision != 0 && signedNormalVelocity > 0.0)
+        normal = -normal;
+
+    float normalSpeed = abs(dot(relativeVelocity, normal));
+    float speed = SafeLength(relativeVelocity);
+
+    if (speed < _MinimumImpactSpeed && abs(currentSigned) > contactBand)
+        return;
+
+    InterlockedAdd(_DebugCounters[2], 1u);
+
+    float3 localDelta = impactPoint - _CanvasCurrentPosition;
+    float uMeters = dot(localDelta, tangent);
+    float vMeters = dot(localDelta, bitangent);
+
+    float halfW = _CanvasWidth * 0.5;
+    float halfH = _CanvasHeight * 0.5;
+    if (uMeters < -halfW || uMeters > halfW || vMeters < -halfH || vMeters > halfH)
+        return;
+
+    float2 uv01 = float2(
+        uMeters / max(_CanvasWidth, 1e-6) + 0.5,
+        vMeters / max(_CanvasHeight, 1e-6) + 0.5
+    );
+    uv01 = ApplyUvFlip(uv01);
+
+    int baseX = (int)floor(saturate(uv01.x) * (float)_GridWidth);
+    int baseY = (int)floor(saturate(uv01.y) * (float)_GridHeight);
+    baseX = clamp(baseX, 0, _GridWidth - 1);
+    baseY = clamp(baseY, 0, _GridHeight - 1);
+
+    InterlockedAdd(_DebugCounters[3], 1u);
+
+    float density = max(_PaintDensity, 1.0);
+    float mass = max(velocityMass.w, 0.0);
+    float volume = mass / density;
+    float cellArea = max(_CellSizeU * _CellSizeV, 1e-10);
+    float baseThickness = volume / cellArea;
+
+    float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
+    float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
+    float mobility = saturate(1.0 - viscosity01 * 0.62 - yield01 * 0.38);
+
+    float availableUnitsF =
+        baseThickness *
+        (float)_ThicknessUnitsPerMeter *
+        max(_DepositionEfficiency, 0.0);
+
+    uint availableUnits = (uint)round(
+        clamp(availableUnitsF, 0.0, (float)max(_MaxDepositUnitsPerParticle, 1))
+    );
+
+    if (availableUnits == 0)
+        return;
+
+    float3 normalComponent = normal * dot(relativeVelocity, normal);
+    float3 tangentialVelocity = relativeVelocity - normalComponent;
+    float tangentialSpeed = SafeLength(tangentialVelocity);
+    float speedSafe = max(speed, 1e-5);
+
+    float2 tangentialUvVelocity = float2(
+        dot(tangentialVelocity, tangent) / max(_CellSizeU, 1e-6),
+        dot(tangentialVelocity, bitangent) / max(_CellSizeV, 1e-6)
+    );
+    tangentialUvVelocity = ApplyUvFlowFlip(tangentialUvVelocity);
+
+    float splash01;
+    float bounce01;
+    int regime = ClassifyImpact(
+        normalSpeed,
+        tangentialSpeed,
+        speedSafe,
+        radius,
+        mobility,
+        splash01,
+        bounce01
+    );
+
+    if (regime == IMPACT_STICK)
+        InterlockedAdd(_DebugCounters[6], 1u);
+    else if (regime == IMPACT_SPREAD)
+        InterlockedAdd(_DebugCounters[7], 1u);
+    else if (regime == IMPACT_SPLASH)
+        InterlockedAdd(_DebugCounters[8], 1u);
+    else
+        InterlockedAdd(_DebugCounters[9], 1u);
+
+    float visibleReuseFraction;
+    bool reuseVisibleParticle = ShouldReuseVisibleParticle(
+        regime,
+        normalSpeed,
+        tangentialSpeed,
+        splash01,
+        bounce01,
+        mobility,
+        particleIndex,
+        stateAgeId.y,
+        visibleReuseFraction
+    );
+
+    float depositFraction = 0.88;
+    float surfaceFraction = 0.0;
+    float dropletFraction = 0.0;
+
+    if (regime == IMPACT_STICK)
+    {
+        depositFraction = lerp(0.94, 0.82, saturate(_AbsorptionRate));
+        surfaceFraction = 0.03 * mobility;
+    }
+    else if (regime == IMPACT_SPREAD)
+    {
+        depositFraction = lerp(0.44, 0.30, mobility);
+        surfaceFraction = 0.24 + 0.28 * mobility;
+    }
+    else if (regime == IMPACT_SPLASH)
+    {
+        depositFraction = lerp(0.30, 0.16, splash01);
+        surfaceFraction = 0.16 + 0.18 * mobility;
+        dropletFraction = saturate(_SecondaryDropletMassFraction * (0.55 + splash01));
+    }
+    else
+    {
+        depositFraction = lerp(0.18, 0.08, bounce01);
+        surfaceFraction = 0.04 * mobility;
+    }
+
+    float fractionSum = max(depositFraction + surfaceFraction + dropletFraction, 1e-5);
+    float maxNonVisibleFraction = max(0.08, 0.98 - (reuseVisibleParticle ? visibleReuseFraction : 0.0));
+    if (fractionSum > maxNonVisibleFraction)
+    {
+        float scale = maxNonVisibleFraction / fractionSum;
+        depositFraction *= scale;
+        surfaceFraction *= scale;
+        dropletFraction *= scale;
+    }
+
+    uint depositUnits = (uint)round((float)availableUnits * saturate(depositFraction));
+    uint surfaceUnits = (uint)round((float)availableUnits * saturate(surfaceFraction));
+    uint dropletUnits = (uint)round((float)availableUnits * saturate(dropletFraction));
+
+    float angleGrazing = saturate(tangentialSpeed / speedSafe);
+    float impactEnergy = saturate(normalSpeed * 0.28);
+    float particleRadiusCells = radius / max(min(_CellSizeU, _CellSizeV), 1e-6);
+    float roughnessClamp = lerp(1.10, 0.78, saturate(_Roughness));
+    float radiusShort =
+        max(_BaseSplatRadiusCells, particleRadiusCells * 0.65) +
+        impactEnergy *
+        _ImpactSpreadMultiplier *
+        max(_SpreadFactor, 0.0) *
+        mobility;
+
+    radiusShort *= roughnessClamp;
+    radiusShort = clamp(radiusShort, 0.75, (float)MAX_SPLAT_RADIUS);
+
+    float radiusLong =
+        radiusShort *
+        (1.0 + angleGrazing * _TangentialStretchMultiplier * mobility);
+    radiusLong = clamp(radiusLong, radiusShort, (float)MAX_SPLAT_RADIUS);
+
+    float2 majorAxis = SafeNormalize2(tangentialUvVelocity, float2(1.0, 0.0));
+    int radiusLoop = min(MAX_SPLAT_RADIUS, max(_MaxSplatRadiusCells, 1));
+    float sharpness = max(_SplatSharpness, 0.25);
+    float wetnessF =
+        saturate(0.35 + 0.65 * normalSpeed / speedSafe) *
+        lerp(1.0, 0.62, saturate(_AbsorptionRate));
+    uint wetness = (uint)round(wetnessF * (float)_WetnessUnits);
+    float4 color = saturate(_ParticleColor[particleIndex]);
+
+    DepositSplat(
+        uv01,
+        depositUnits,
+        wetness,
+        color,
+        tangentialUvVelocity * 0.28,
+        majorAxis,
+        radiusLong,
+        radiusShort,
+        sharpness,
+        radiusLoop
+    );
+
+    uint absorbedUnits = (uint)round((float)depositUnits * saturate(_AbsorptionRate) * 0.35);
+    if (absorbedUnits > 0)
+        InterlockedAdd(_FilmCells[FilmIndex(baseX, baseY)].absorbed, absorbedUnits);
+
+    if (surfaceUnits > 0)
+    {
+        SpawnSurfaceParticle(
+            uv01,
+            radiusShort,
+            tangentialUvVelocity * (0.30 + 0.38 * mobility),
+            surfaceUnits,
+            color,
+            wetnessF
+        );
+    }
+
+    if (dropletUnits > 0 && _MaxSecondaryDroplets > 0)
+    {
+        int dropletCount = min(8, max(1, min(_MaxSecondaryDroplets, 1 + (int)floor(splash01 * (float)_MaxSecondaryDroplets))));
+        uint perDropletUnits = max(1u, dropletUnits / (uint)dropletCount);
+
+        [loop]
+        for (int i = 0; i < 8; i++)
+        {
+            if (i >= dropletCount)
+                continue;
+
+            float seed = (float)particleIndex * 19.37 + (float)i * 7.13;
+            float a = Random01(seed) * 6.2831853;
+            float r = 0.35 + Random01(seed + 3.1) * 0.65;
+            float2 jitter = float2(cos(a), sin(a));
+            float2 dropletUv = uv01 + jitter * r * radiusShort / float2(max(_GridWidth, 1), max(_GridHeight, 1));
+            float2 dropletVelocity =
+                tangentialUvVelocity * (0.18 + Random01(seed + 1.7) * 0.22) +
+                jitter * _SecondaryDropletVelocityBoost * (3.0 + 8.0 * splash01);
+            float normalVelocity =
+                max(0.10, normalSpeed * (0.10 + 0.22 * Random01(seed + 2.9)) +
+                _SecondaryDropletVelocityBoost * splash01 * 0.18);
+
+            SpawnDropletParticle(
+                dropletUv,
+                max(0.35, radiusShort * 0.28),
+                dropletVelocity,
+                normalVelocity,
+                perDropletUnits,
+                color,
+                wetnessF,
+                max(_CollisionSkin, radius * 0.25)
+            );
+        }
+    }
+
+    bool mostlyAbsorbed = saturate(_AbsorptionRate) > 0.72 && wetnessF < 0.55;
+
+    if (reuseVisibleParticle)
+    {
+        ReuseOriginalAsVisibleDroplet(
+            particleIndex,
+            regime,
+            visibleReuseFraction,
+            impactPoint,
+            normal,
+            tangent,
+            bitangent,
+            canvasVelocity,
+            relativeVelocity,
+            tangentialVelocity,
+            normalSpeed,
+            splash01,
+            bounce01,
+            radius,
+            velocityMass,
+            stateAgeId
+        );
+        return;
+    }
+
+    if (regime == IMPACT_BOUNCE)
+    {
+        float3 reflectedRelative =
+            relativeVelocity -
+            (1.0 + saturate(_BounceRestitution)) *
+            dot(relativeVelocity, normal) *
+            normal;
+        reflectedRelative -= tangentialVelocity * saturate(_Roughness * 0.45 + _AbsorptionRate * 0.35);
+
+        _ParticleVelocityMass[particleIndex] =
+            float4(canvasVelocity + reflectedRelative, velocityMass.w);
+        _ParticlePositionRadius[particleIndex] =
+            float4(impactPoint + normal * (radius + max(_CollisionSkin, 1e-4)), radius);
+        stateAgeId.x = 6.0;
+        stateAgeId.y = 0.0;
+        stateAgeId.z = 0.0;
+        _ParticleStateAgeId[particleIndex] = stateAgeId;
+        return;
+    }
+
+    stateAgeId.x = mostlyAbsorbed ? 9.0 : 8.0;
+    stateAgeId.z = 0.0;
+    _ParticleStateAgeId[particleIndex] = stateAgeId;
+    _ParticleVelocityMass[particleIndex] = float4(0.0, 0.0, 0.0, velocityMass.w);
+
+    if (_ShrinkDepositedParticles != 0)
+        currentPr = float4(impactPoint + normal * max(_CollisionSkin, 1e-4), max(_DepositedParticleRadius, 1e-6));
+    else
+        currentPr = float4(impactPoint + normal * max(radius, _CollisionSkin), radius);
+
+    _ParticlePositionRadius[particleIndex] = currentPr;
+
+    if (mostlyAbsorbed)
+        InterlockedAdd(_DebugCounters[5], 1u);
+    else
+        InterlockedAdd(_DebugCounters[4], 1u);
+}
+
+void DepositHybridParticleAt(
+    float2 uv01,
+    float radiusCells,
+    uint units,
+    float4 color,
+    float wetness,
+    float2 flowCells,
+    bool droplet)
+{
+    if (units == 0)
+        return;
+
+    DepositSplat(
+        uv01,
+        units,
+        (uint)round(saturate(wetness) * (float)_WetnessUnits),
+        color,
+        flowCells * 0.09,
+        SafeNormalize2(flowCells, float2(1.0, 0.0)),
+        max(radiusCells * 1.25, 0.75),
+        max(radiusCells * 0.75, 0.50),
+        max(_SplatSharpness, 0.25),
+        min(MAX_SPLAT_RADIUS, max(1, (int)ceil(radiusCells * 1.5)))
+    );
+
+    if (droplet)
+        InterlockedAdd(_DebugCounters[13], 1u);
+    else
+        InterlockedAdd(_DebugCounters[12], 1u);
+}
+
+MpmCanvasHybridParticle KillHybridParticle()
+{
+    MpmCanvasHybridParticle particle;
+    particle.data0 = float4(0.0, 0.0, 0.0, 0.0);
+    particle.data1 = float4(0.0, 0.0, 0.0, 0.0);
+    particle.data2 = float4(0.0, 0.0, 0.0, 0.0);
+    particle.data3 = float4(0.0, 0.0, 0.0, 0.0);
+    return particle;
+}
+
+[numthreads(256, 1, 1)]
+void KEvolveHybridParticles(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+    float dt = max(_DeltaTime, 1e-5);
+    float3 gravity = normalize(_GravityDirection) * max(_GravityAcceleration, 0.0);
+    float2 gravityUv = float2(
+        dot(gravity, normalize(_CanvasCurrentTangent)) / max(_CellSizeU, 1e-6),
+        dot(gravity, normalize(_CanvasCurrentBitangent)) / max(_CellSizeV, 1e-6)
+    );
+    gravityUv = ApplyUvFlowFlip(gravityUv);
+    float gravityNormal = dot(gravity, normalize(_CanvasCurrentNormal));
+
+    float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
+    float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
+    float mobility = saturate(1.0 - viscosity01 * 0.60 - yield01 * 0.35);
+
+    if (index < (uint)_SurfaceParticleCapacity)
+    {
+        MpmCanvasHybridParticle p = _SurfaceParticles[index];
+        if (p.data3.w > 0.5)
+        {
+            InterlockedAdd(_DebugCounters[18], 1u);
+
+            float2 uv = p.data0.xy;
+            float radiusCells = max(p.data0.w, 0.5);
+            float2 velocityCells = p.data1.xy;
+            float unitsF = max(p.data1.w, 0.0);
+            float wetness = saturate(p.data2.a);
+            float age = p.data3.x + dt;
+            float lifetime = max(p.data3.y, 0.05);
+
+            velocityCells += gravityUv * max(_DripFactor, 0.0) * mobility * dt * 0.10;
+            velocityCells *= exp(-max(_SurfaceParticleFriction, 0.0) * dt * (0.35 + viscosity01));
+            uv += velocityCells * dt / float2(max(_GridWidth, 1), max(_GridHeight, 1));
+
+            float depositFraction =
+                1.0 -
+                exp(-max(_SurfaceParticleDepositRate, 0.0) *
+                dt *
+                (0.25 + wetness + saturate(_AbsorptionRate) * 0.75));
+            uint depositUnits = (uint)round(unitsF * saturate(depositFraction));
+
+            bool outside =
+                uv.x < -0.02 ||
+                uv.x > 1.02 ||
+                uv.y < -0.02 ||
+                uv.y > 1.02;
+            bool expired = age >= lifetime || unitsF <= 1.0 || outside;
+
+            if (expired)
+                depositUnits = (uint)round(unitsF);
+
+            if (depositUnits > 0)
+            {
+                DepositHybridParticleAt(
+                    saturate(uv),
+                    radiusCells,
+                    depositUnits,
+                    float4(p.data2.rgb, 1.0),
+                    wetness,
+                    velocityCells,
+                    false
+                );
+                unitsF = max(0.0, unitsF - (float)depositUnits);
+            }
+
+            if (expired || unitsF <= 1.0)
+            {
+                _SurfaceParticles[index] = KillHybridParticle();
+            }
+            else
+            {
+                p.data0.xy = saturate(uv);
+                p.data1.xy = velocityCells;
+                p.data1.w = unitsF;
+                p.data2.a = saturate(wetness - saturate(_AbsorptionRate) * dt * 0.12);
+                p.data3.x = age;
+                _SurfaceParticles[index] = p;
+            }
+        }
+    }
+
+    if (index < (uint)_DropletParticleCapacity)
+    {
+        MpmCanvasHybridParticle p = _DropletParticles[index];
+        if (p.data3.w > 0.5)
+        {
+            InterlockedAdd(_DebugCounters[19], 1u);
+
+            float2 uv = p.data0.xy;
+            float normalOffset = p.data0.z;
+            float radiusCells = max(p.data0.w, 0.35);
+            float2 velocityCells = p.data1.xy;
+            float normalVelocity = p.data1.z;
+            float unitsF = max(p.data1.w, 0.0);
+            float wetness = saturate(p.data2.a);
+            float age = p.data3.x + dt;
+            float lifetime = max(p.data3.y, 0.05);
+
+            float drag = exp(-max(_DropletDrag, 0.0) * dt);
+            velocityCells *= drag;
+            normalVelocity = normalVelocity * drag + gravityNormal * dt;
+            uv += velocityCells * dt / float2(max(_GridWidth, 1), max(_GridHeight, 1));
+            normalOffset += normalVelocity * dt;
+
+            bool landed = normalOffset <= 0.0;
+            bool outside =
+                uv.x < -0.05 ||
+                uv.x > 1.05 ||
+                uv.y < -0.05 ||
+                uv.y > 1.05;
+            bool expired = age >= lifetime || unitsF <= 1.0 || outside;
+
+            if (landed || expired)
+            {
+                DepositHybridParticleAt(
+                    saturate(uv),
+                    radiusCells * 1.25,
+                    (uint)round(unitsF),
+                    float4(p.data2.rgb, 1.0),
+                    wetness,
+                    velocityCells,
+                    true
+                );
+                _DropletParticles[index] = KillHybridParticle();
+            }
+            else
+            {
+                p.data0.xy = saturate(uv);
+                p.data0.z = normalOffset;
+                p.data1.xy = velocityCells;
+                p.data1.z = normalVelocity;
+                p.data2.a = saturate(wetness - dt * 0.04);
+                p.data3.x = age;
+                _DropletParticles[index] = p;
+            }
+        }
+    }
+}

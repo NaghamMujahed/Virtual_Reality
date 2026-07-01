@@ -2695,6 +2695,7 @@ Transform:
   m_Children:
   - {fileID: 1435666627}
   - {fileID: 1657576615}
+  - {fileID: 2030639909}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &303841544
@@ -15852,6 +15853,239 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1952818705}
   m_Mesh: {fileID: 10206, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &2030639908
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2030639909}
+  - component: {fileID: 2030639915}
+  - component: {fileID: 2030639914}
+  - component: {fileID: 2030639913}
+  - component: {fileID: 2030639912}
+  - component: {fileID: 2030639911}
+  - component: {fileID: 2030639910}
+  m_Layer: 0
+  m_Name: PaintPlane
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2030639909
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.79, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 303841543}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2030639910
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 09bfdb62f85ab6a40b154982a9778bcd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Canvas.MpmPaintSurfaceRenderer
+  surface: {fileID: 2030639911}
+  paintFluidSystem: {fileID: 303841553}
+  paintFilmBakerCompute: {fileID: 7200000, guid: 8a1a7be73b1119d408894b6d33dad703, type: 3}
+  paintFilmEvolverCompute: {fileID: 7200000, guid: 397ab284f3fe6974c862d3a953cada84, type: 3}
+  bakeEveryFrame: 1
+  debugView: 0
+  maxVisibleThicknessMeters: 0.0015
+  wetDarkening: 0.18
+  wetGlossBoost: 0.2
+  pigmentContrast: 0.22
+  enableEvolution: 1
+  enableDiffusion: 1
+  enableDrips: 1
+  evolutionRate: 1
+  viscosityDamping: 0.55
+  momentumFlowFactor: 0.75
+  gravityDirectionWorld: {x: 0, y: -1, z: 0}
+--- !u!114 &2030639911
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2de781a74e6e0924ea51a76ce694ad76, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Canvas.MpmCanvasPaintSurface
+  surfaceTransform: {fileID: 2030639909}
+  targetRenderer: {fileID: 2030639914}
+  axisPreset: 2
+  customLocalTangent: {x: -1, y: 0, z: 0}
+  customLocalBitangent: {x: 0, y: 0, z: -1}
+  widthMeters: 10
+  heightMeters: 10
+  resolution: {x: 512, y: 512}
+  materialPreset: 4
+  autoApplyPreset: 1
+  materialSettings:
+    absorptionRate: 0.03
+    spreadFactor: 1.55
+    dripFactor: 1.35
+    dryingRate: 0.08
+    wetnessRetention: 1.45
+    roughness: 0.06
+    splatSharpness: 5.8
+    glossResponse: 0.82
+  backgroundColor: {r: 0.92, g: 0.9, b: 0.84, a: 1}
+  applyTextureToTargetRenderer: 1
+  baseMapProperty: _BaseMap
+  mainTextureProperty: _MainTex
+  drawBoundsGizmo: 1
+  drawAxesGizmo: 1
+  boundsGizmoColor: {r: 0.1, g: 0.85, b: 1, a: 1}
+--- !u!114 &2030639912
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3281a92d6db17a40b9a2a1bdd26c0c7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Canvas.MpmCanvasDepositor
+  surface: {fileID: 2030639911}
+  gpuBufferSet: {fileID: 303841555}
+  paintFluidSystem: {fileID: 303841553}
+  canvasImpactCompute: {fileID: 7200000, guid: 6c993fa5c029977488ba12aa17193fa5, type: 3}
+  enableDeposition: 1
+  requireGpuMpmSolver: 1
+  dispatchEveryNFrames: 1
+  doubleSidedCollision: 1
+  collisionSkinMeters: 0.0015
+  minimumImpactSpeed: 0.03
+  depositionEfficiency: 0.92
+  baseSplatRadiusCells: 1.2
+  impactSpreadMultiplier: 2.2
+  tangentialStretchMultiplier: 3.4
+  maxSplatRadiusCells: 8
+  maxDepositUnitsPerParticle: 600000
+  shrinkDepositedParticles: 1
+  depositedParticleRadiusMeters: 0.00005
+  enableHybridParticles: 1
+  surfaceParticleCapacity: 8192
+  dropletParticleCapacity: 4096
+  surfaceParticleLifetimeSeconds: 1.35
+  dropletLifetimeSeconds: 0.9
+  surfaceParticleDepositRate: 0.9
+  surfaceParticleFrictionPerSecond: 4
+  dropletDragPerSecond: 2.2
+  splashNormalSpeedThreshold: 2
+  bounceNormalSpeedThreshold: 1.2
+  secondaryDropletMassFraction: 0.18
+  secondaryDropletVelocityBoost: 1.4
+  maxSecondaryDropletsPerImpact: 4
+  bounceRestitution: 0.18
+  gravityAcceleration: 9.81
+  gravityDirectionWorld: {x: 0, y: -1, z: 0}
+  enableDebugReadback: 0
+  debugReadbackInterval: 15
+  showDebugOverlay: 0
+  debugOverlayPosition: {x: 470, y: 15}
+--- !u!64 &2030639913
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!23 &2030639914
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &2030639915
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030639908}
+  m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
 --- !u!21 &2033629639
 Material:
   serializedVersion: 8

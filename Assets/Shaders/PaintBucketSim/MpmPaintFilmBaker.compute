@@ -1,0 +1,126 @@
+#pragma kernel KBakeFilm
+
+struct MpmPaintFilmCell
+{
+    uint thickness;
+    uint wetness;
+    uint colorR;
+    uint colorG;
+    uint colorB;
+    uint deposited;
+    uint absorbed;
+    uint impactCount;
+    int flowU;
+    int flowV;
+    uint flags;
+    uint reserved;
+};
+
+StructuredBuffer<MpmPaintFilmCell> _FilmCells;
+RWTexture2D<float4> _OutputTexture;
+
+int _GridWidth;
+int _GridHeight;
+int _ThicknessUnitsPerMeter;
+int _WetnessUnits;
+int _ColorWeightScale;
+float _MaxVisibleThickness;
+float4 _BackgroundColor;
+float _WetDarkening;
+float _WetGlossBoost;
+float _PigmentContrast;
+int _DebugView;
+
+float3 Heatmap(float t)
+{
+    t = saturate(t);
+    float3 blue = float3(0.05, 0.20, 0.95);
+    float3 cyan = float3(0.00, 0.80, 0.95);
+    float3 yellow = float3(1.00, 0.86, 0.10);
+    float3 red = float3(0.95, 0.05, 0.02);
+
+    float3 a = lerp(blue, cyan, saturate(t * 3.0));
+    float3 b = lerp(cyan, yellow, saturate((t - 0.33) * 3.0));
+    float3 c = lerp(yellow, red, saturate((t - 0.66) * 3.0));
+
+    return t < 0.33 ? a : (t < 0.66 ? b : c);
+}
+
+[numthreads(8, 8, 1)]
+void KBakeFilm(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int index = (int)id.y * _GridWidth + (int)id.x;
+    MpmPaintFilmCell cell = _FilmCells[index];
+
+    float thicknessMeters =
+        (float)cell.thickness / max((float)_ThicknessUnitsPerMeter, 1.0);
+    float coverage = saturate(thicknessMeters / max(_MaxVisibleThickness, 1e-7));
+    coverage = 1.0 - exp(-coverage * 2.25);
+
+    float wetness = saturate((float)cell.wetness / max((float)_WetnessUnits, 1.0));
+
+    float3 paintColor = _BackgroundColor.rgb;
+    if (cell.deposited > 0u)
+    {
+        float denom = max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
+        paintColor = float3(cell.colorR, cell.colorG, cell.colorB) / denom;
+        paintColor = saturate(paintColor);
+    }
+
+    if (_DebugView == 1)
+    {
+        _OutputTexture[id.xy] = float4(Heatmap(saturate(thicknessMeters / max(_MaxVisibleThickness, 1e-7))), 1.0);
+        return;
+    }
+
+    if (_DebugView == 2)
+    {
+        _OutputTexture[id.xy] = float4(Heatmap(wetness), 1.0);
+        return;
+    }
+
+    if (_DebugView == 3)
+    {
+        float impact = saturate(log2(1.0 + (float)cell.impactCount) / 6.0);
+        _OutputTexture[id.xy] = float4(Heatmap(impact), 1.0);
+        return;
+    }
+
+    if (_DebugView == 4)
+    {
+        float2 uv = float2(
+            (float)id.x / max((float)(_GridWidth - 1), 1.0),
+            (float)id.y / max((float)(_GridHeight - 1), 1.0)
+        );
+        float gridLine =
+            step(frac(uv.x * 16.0), 0.025) +
+            step(frac(uv.y * 16.0), 0.025);
+        float3 uvColor = float3(uv.x, uv.y, 0.2);
+        uvColor = lerp(uvColor, float3(1.0, 1.0, 1.0), saturate(gridLine));
+        _OutputTexture[id.xy] = float4(uvColor, 1.0);
+        return;
+    }
+
+    if (_DebugView == 5)
+    {
+        float2 flow = float2((float)cell.flowU, (float)cell.flowV) / 6000.0;
+        float mag = saturate(length(flow));
+        float3 dirColor = float3(flow.x * 0.5 + 0.5, flow.y * 0.5 + 0.5, 0.18 + 0.82 * mag);
+        _OutputTexture[id.xy] = float4(lerp(float3(0.02, 0.02, 0.025), saturate(dirColor), mag), 1.0);
+        return;
+    }
+
+    float3 pigment = paintColor;
+    pigment = lerp(pigment, saturate((pigment - 0.5) * (1.0 + _PigmentContrast) + 0.5), coverage);
+
+    float3 color = lerp(_BackgroundColor.rgb, pigment, coverage);
+    color *= lerp(1.0, 1.0 - saturate(_WetDarkening), wetness * coverage);
+
+    float gloss = wetness * coverage * saturate(_WetGlossBoost);
+    color = lerp(color, min(color + 0.18, float3(1.0, 1.0, 1.0)), gloss);
+
+    _OutputTexture[id.xy] = float4(saturate(color), 1.0);
+}
