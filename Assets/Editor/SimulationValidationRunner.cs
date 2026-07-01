@@ -287,11 +287,6 @@ namespace PaintBucketSim.Editor
                 $"referenceProjectionFallback={stats.gpuReferenceProjectionFallbackUsed}, " +
                 $"calmDeformationInterval={stats.gpuCalmInteriorDeformationInterval}, " +
                 $"gridContainsBucket={stats.gpuGridContainsBucket}, " +
-                $"activeMpmGrid={stats.gpuActiveMpmGridBoundsUsed}, " +
-                $"activeMpmGridNodes={stats.gpuActiveMpmGridNodeCount}, " +
-                $"activeMpmGridFraction={stats.gpuActiveMpmGridNodeFraction:F3}, " +
-                $"activeMpmGridMin=({stats.gpuActiveMpmGridMinX},{stats.gpuActiveMpmGridMinY},{stats.gpuActiveMpmGridMinZ}), " +
-                $"activeMpmGridSize=({stats.gpuActiveMpmGridSizeX},{stats.gpuActiveMpmGridSizeY},{stats.gpuActiveMpmGridSizeZ}), " +
                 $"mpmTiles={stats.gpuMpmTileOccupancyUsed}, " +
                 $"tiledMpmDispatch={stats.gpuTiledMpmGridDispatchUsed}, " +
                 $"mpmTileSize={stats.gpuMpmTileSizeCells}, " +
@@ -299,20 +294,14 @@ namespace PaintBucketSim.Editor
                 $"mpmActiveTiles={stats.gpuMpmActiveTileCount}, " +
                 $"mpmActiveTileFraction={stats.gpuMpmActiveTileFraction:F3}, " +
                 $"mpmParticleLists={stats.gpuMpmParticleTileListsUsed}, " +
+                $"supportMaskTopology={stats.gpuMpmSupportMaskTopologyUsed}, " +
                 $"ownerListInterval={stats.gpuOwnerTileListRebuildInterval}, " +
                 $"ownerListRebuilt={stats.gpuOwnerTileListRebuilt}, " +
                 $"ownerListReused={stats.gpuOwnerTileListReused}, " +
-                $"tiledP2G={stats.gpuTiledP2GUsed}, " +
-                $"tileOrderedPipeline={stats.gpuTileOrderedParticlePipelineUsed}, " +
                 $"hybridTiledP2G={stats.gpuHybridTiledP2GUsed}, " +
-                $"centeredP2GOwner={stats.gpuCenteredHybridP2GOwnerEnabled}, " +
                 $"fusedG2PCollision={stats.gpuFusedG2PPostCollisionUsed}, " +
                 $"fusedPreCollisionMark={stats.gpuFusedPreCollisionTileMarkUsed}, " +
                 $"adaptiveTransferStencil={stats.gpuAdaptiveTransferStencilUsed}, " +
-                $"mpmTileParticleRefs={stats.gpuMpmTileParticleReferenceCount}, " +
-                $"mpmTileMaxRefs={stats.gpuMpmTileMaxParticleReferences}, " +
-                $"mpmTileListCapacity={stats.gpuMpmTileParticleListCapacity}, " +
-                $"mpmTileListOverflow={stats.gpuMpmTileParticleListOverflowCount}, " +
                 $"active={stats.gpuActiveParticleCount}, " +
                 $"partialGridSupport={stats.gpuOutOfGridParticleCount}, " +
                 $"noGridSupport={stats.gpuNoGridSupportParticleCount}, " +
@@ -650,109 +639,6 @@ namespace PaintBucketSim.Editor
                     "-paintValidationCellSize",
                     baseConfig.cellSizeMeters
                 );
-                if (HasFlag(args, "-paintValidationEnableActiveMpmGridBounds"))
-                {
-                    baseConfig.enableActiveMpmGridBounds = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableActiveMpmGridBounds"))
-                {
-                    baseConfig.enableActiveMpmGridBounds = false;
-                }
-                baseConfig.activeMpmGridBoundsPaddingMeters = GetFloatArgument(
-                    args,
-                    "-paintValidationActiveMpmGridPadding",
-                    baseConfig.activeMpmGridBoundsPaddingMeters
-                );
-                baseConfig.activeMpmGridBoundsPaddingCells = Mathf.Max(
-                    0,
-                    GetRawIntArgument(
-                        args,
-                        "-paintValidationActiveMpmGridPaddingCells",
-                        baseConfig.activeMpmGridBoundsPaddingCells
-                    )
-                );
-                baseConfig.activeMpmGridMaxFullGridFraction = GetFloatArgument(
-                    args,
-                    "-paintValidationActiveMpmGridMaxFraction",
-                    baseConfig.activeMpmGridMaxFullGridFraction
-                );
-                if (HasFlag(args, "-paintValidationEnableMpmTileOccupancy"))
-                {
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableMpmTileOccupancy"))
-                {
-                    baseConfig.enableMpmTileOccupancy = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableTiledMpmGridDispatch"))
-                {
-                    baseConfig.enableTiledMpmGridDispatch = true;
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableTiledMpmGridDispatch"))
-                {
-                    baseConfig.enableTiledMpmGridDispatch = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableMpmParticleTileLists"))
-                {
-                    baseConfig.enableMpmParticleTileLists = true;
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableMpmParticleTileLists"))
-                {
-                    baseConfig.enableMpmParticleTileLists = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableTiledP2G"))
-                {
-                    baseConfig.enableTiledP2G = true;
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableTiledP2G"))
-                {
-                    baseConfig.enableTiledP2G = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableTileOrderedPipeline"))
-                {
-                    baseConfig.enableTileOrderedParticlePipeline = true;
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableTileOrderedPipeline"))
-                {
-                    baseConfig.enableTileOrderedParticlePipeline = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableHybridTiledP2G"))
-                {
-                    baseConfig.enableHybridTiledP2G = true;
-                    baseConfig.enableMpmTileOccupancy = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableHybridTiledP2G"))
-                {
-                    baseConfig.enableHybridTiledP2G = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableCenteredP2GOwner"))
-                {
-                    baseConfig.enableCenteredHybridP2GOwnerTile = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableCenteredP2GOwner"))
-                {
-                    baseConfig.enableCenteredHybridP2GOwnerTile = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableFusedG2PCollision"))
-                {
-                    baseConfig.enableFusedG2PPostCollision = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableFusedG2PCollision"))
-                {
-                    baseConfig.enableFusedG2PPostCollision = false;
-                }
-                if (HasFlag(args, "-paintValidationEnableFusedPreCollisionMark"))
-                {
-                    baseConfig.enableFusedPreCollisionTileMark = true;
-                }
-                else if (HasFlag(args, "-paintValidationDisableFusedPreCollisionMark"))
-                {
-                    baseConfig.enableFusedPreCollisionTileMark = false;
-                }
                 if (HasFlag(args, "-paintValidationEnableAdaptiveTransferStencil"))
                 {
                     baseConfig.enableAdaptiveTransferStencil = true;

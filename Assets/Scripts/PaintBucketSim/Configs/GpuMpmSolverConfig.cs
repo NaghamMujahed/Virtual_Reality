@@ -66,50 +66,6 @@ namespace PaintBucketSim.Configs
         [Min(0.1f)]
         public float maxParticleSpeed = 10.0f;
 
-        [Header("Dense MPM Active Grid Bounds")]
-        [Tooltip("Restrict dense MPM grid clear/update to an active bucket AABB instead of dispatching over the full dense grid.")]
-        public bool enableActiveMpmGridBounds = false;
-
-        [Tooltip("Extra padding around the rotated bucket AABB for MPM grid clear/update and particle transfer support.")]
-        [Min(0.0f)]
-        public float activeMpmGridBoundsPaddingMeters = 0.04f;
-
-        [Tooltip("Extra integer-cell padding around active MPM grid bounds. Keep at least 2 for quadratic transfer support.")]
-        [Min(0)]
-        public int activeMpmGridBoundsPaddingCells = 2;
-
-        [Tooltip("If active MPM bounds cover more than this fraction of the full grid, fall back to full-grid MPM dispatch.")]
-        [Range(0.1f, 1.0f)]
-        public float activeMpmGridMaxFullGridFraction = 0.95f;
-
-        [Header("Sparse/Tiled MPM Grid")]
-        [Tooltip("Build a GPU active-tile list from particle transfer support. This is the foundation for sparse/tiled MPM.")]
-        public bool enableMpmTileOccupancy = false;
-
-        [Tooltip("Use the GPU active-tile list for grid clear/update dispatch. Experimental until full sparse P2G/G2P is implemented.")]
-        public bool enableTiledMpmGridDispatch = false;
-
-        [Tooltip("Build compact per-tile particle support lists on the GPU. Required for tiled P2G and later sparse/tiled kernels.")]
-        public bool enableMpmParticleTileLists = false;
-
-        [Tooltip("Experimental: execute the regular P2G transfer using particles ordered by tile. Physics stays unchanged while grid-memory locality can improve on some GPUs.")]
-        public bool enableTiledP2G = false;
-
-        [Tooltip("Reuse the tile-ordered particle list across P2G, projection marking, G2P, post-collision, and deformation. This amortizes list construction and improves grid-memory locality.")]
-        public bool enableTileOrderedParticlePipeline = false;
-
-        [Tooltip("Aggregate owner-tile P2G contributions in group-shared memory and use global atomics only across tile edges.")]
-        public bool enableHybridTiledP2G = true;
-
-        [Tooltip("Assign each particle to the tile containing the center of its 3x3x3 transfer stencil. This maximizes shared-memory contributions and reduces global atomics at tile edges.")]
-        public bool enableCenteredHybridP2GOwnerTile = true;
-
-        [Tooltip("Execute G2P/APIC advection and the required post-G2P bucket collision in one particle kernel, avoiding a second full particle-memory pass.")]
-        public bool enableFusedG2PPostCollision = true;
-
-        [Tooltip("Fuse the pre-P2G bucket collision with active/owner tile marking when support-reference lists are not requested.")]
-        public bool enableFusedPreCollisionTileMark = true;
-
         [Header("Final Performance Transfer LOD")]
         [Tooltip("Use a cheaper 2x2x2 linear transfer stencil for calm interior particles while preserving the full 3x3x3 MLS/APIC stencil for priority particles near surfaces, walls, holes, or fast motion.")]
         public bool enableAdaptiveTransferStencil = true;
@@ -857,18 +813,6 @@ namespace PaintBucketSim.Configs
             if (minFluidCellMass < 0.0f)
                 minFluidCellMass = 0.0f;
 
-            if (activeMpmGridBoundsPaddingMeters < 0.0f)
-                activeMpmGridBoundsPaddingMeters = 0.0f;
-
-            if (activeMpmGridBoundsPaddingCells < 0)
-                activeMpmGridBoundsPaddingCells = 0;
-
-            activeMpmGridMaxFullGridFraction = Mathf.Clamp(
-                activeMpmGridMaxFullGridFraction,
-                0.1f,
-                1.0f
-            );
-
             mpmTileSizeCells = NormalizeTileSizeCells(mpmTileSizeCells);
             ownerTileListRebuildInterval = Mathf.Clamp(
                 ownerTileListRebuildInterval,
@@ -879,21 +823,6 @@ namespace PaintBucketSim.Configs
                 0,
                 ownerTileListReuseMinParticles
             );
-            if (enableTiledMpmGridDispatch)
-                enableMpmTileOccupancy = true;
-
-            if (enableTiledP2G)
-                enableMpmTileOccupancy = true;
-
-            if (enableTileOrderedParticlePipeline)
-                enableMpmTileOccupancy = true;
-
-            if (enableHybridTiledP2G)
-                enableMpmTileOccupancy = true;
-
-            if (enableMpmParticleTileLists)
-                enableMpmTileOccupancy = true;
-
             if (activeProjectionBoundsPaddingMeters < 0.0f)
                 activeProjectionBoundsPaddingMeters = 0.0f;
 

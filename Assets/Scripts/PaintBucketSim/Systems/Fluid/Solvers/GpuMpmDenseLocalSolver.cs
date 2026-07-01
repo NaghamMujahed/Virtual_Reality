@@ -32,17 +32,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private GraphicsBuffer _mpmTileFlagsBuffer;
         private GraphicsBuffer _mpmActiveTileIndicesBuffer;
         private GraphicsBuffer _mpmTileDispatchArgsBuffer;
-        private GraphicsBuffer _mpmTileParticleCountsBuffer;
-        private GraphicsBuffer _mpmTileParticleWriteCountsBuffer;
-        private GraphicsBuffer _mpmTileParticleOffsetsBuffer;
-        private GraphicsBuffer _mpmTileParticleIndicesBuffer;
-        private GraphicsBuffer _mpmTileParticleMetaBuffer;
         private GraphicsBuffer _mpmTileOwnerParticleCountsBuffer;
         private GraphicsBuffer _mpmTileOwnerParticleWriteCountsBuffer;
         private GraphicsBuffer _mpmTileOwnerParticleOffsetsBuffer;
-        private GraphicsBuffer _mpmTileOrderedParticleIndicesBuffer;
-        private GraphicsBuffer _mpmTileOrderedParticleDispatchArgsBuffer;
-        private GraphicsBuffer _mpmTileOrderedParticleMetaBuffer;
+        private GraphicsBuffer _mpmTileOwnerParticleIndicesBuffer;
+        private GraphicsBuffer _mpmTileSupportMasksBuffer;
         private GraphicsBuffer _bucketHoleData0Buffer;
         private GraphicsBuffer _bucketHoleData1Buffer;
         private GraphicsBuffer _bucketHoleData2Buffer;
@@ -56,38 +50,28 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private Vector4[] _bucketHoleData4;
         private int _uploadedBucketHoleCount;
 
-        private int _kernelClearGrid         = -1;
         private int _kernelClearMpmDiagnostics = -1;
         private int _kernelClearAdaptiveActivity = -1;
         private int _kernelClassifyAdaptiveActivity = -1;
-        private int _kernelP2G               = -1;
-        private int _kernelGridUpdate        = -1;
         private int _kernelClearMpmTileData = -1;
-        private int _kernelClearMpmTileOrderedData = -1;
         private int _kernelMarkMpmActiveTiles = -1;
-        private int _kernelMarkMpmOwnerTilesActive = -1;
+        private int _kernelExpandMpmTileSupportMasks = -1;
         private int _kernelBucketCollisionMarkMpmActiveTiles = -1;
-        private int _kernelBuildMpmTileParticleOffsets = -1;
         private int _kernelBuildMpmTileOwnerOffsets = -1;
-        private int _kernelFillMpmTileParticleLists = -1;
+        private int _kernelFillMpmTileOwnerParticleList = -1;
         private int _kernelClearGridActiveTiles = -1;
         private int _kernelGridUpdateActiveTiles = -1;
-        private int _kernelP2GTileOrdered = -1;
         private int _kernelP2GHybridTiled = -1;
         private int _kernelP2GReferenceDensityStressHybrid = -1;
         //private int _kernelG2P               = -1;
         private int _kernelG2PVelocityApic   = -1;
-        private int _kernelG2PVelocityApicTileOrdered = -1;
         private int _kernelG2PVelocityApicBucketCollision = -1;
-        private int _kernelG2PVelocityApicBucketCollisionTileOrdered = -1;
         private int _kernelUpdateDeformation = -1;
-        private int _kernelUpdateDeformationTileOrdered = -1;
         private int _kernelApplyMovingBucketProjectionBoundaryVelocity = -1;
 
         private int _kernelClearProjectionGrid = -1;
         private int _kernelMarkBucketProjectionSolids = -1;
         private int _kernelMarkProjectionFluidCells = -1;
-        private int _kernelMarkProjectionFluidCellsTileOrdered = -1;
         private int _kernelFinalizeProjectionGrid = -1;
         private int _kernelClearProjectionFluidCellList = -1;
         private int _kernelBuildProjectionFluidCellDispatchArgs = -1;
@@ -104,7 +88,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelBucketCollision = -1;
-        private int _kernelBucketCollisionTileOrdered = -1;
         /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelStepAirborneParticles = -1;
 
@@ -113,25 +96,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private readonly Stopwatch _cpuDispatchWatch = new Stopwatch();
         private readonly Stopwatch _gpuStageProfileWatch = new Stopwatch();
         private Vector3 _runtimeGridOriginWorld;
-        private Vector3Int _activeMpmGridMin;
-        private Vector3Int _activeMpmGridSize;
-        private int _activeMpmGridNodeCount;
-        private bool _useActiveMpmGridBoundsThisStep;
         private Vector3Int _mpmTileResolution;
         private int _mpmTileCount;
         private int _mpmTileSizeCells = 8;
         private int _mpmTileSizeShift = 3;
-        private int _mpmTileParticleListCapacity;
         private bool _useMpmTileOccupancyThisStep;
         private bool _useTiledMpmGridDispatchThisStep;
         private bool _useMpmParticleTileListsThisStep;
-        private bool _buildMpmSupportParticleTileListsThisStep;
         private bool _rebuildMpmOwnerParticleListsThisStep;
         private bool _mpmOwnerParticleListsReady;
         private int _mpmOwnerParticleListParticleCount;
         private int _effectiveOwnerTileListRebuildInterval = 1;
-        private bool _useTiledP2GThisStep;
-        private bool _useTileOrderedParticlePipelineThisStep;
         private bool _useHybridTiledP2GThisStep;
         private bool _useReferenceDensityEosThisStep;
         private bool _useGridDensityEosThisStep;
@@ -147,6 +122,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private bool _useMpmTileProjectionDispatchThisStep;
         private bool _gridContainsBucket;
         private bool _gridCoverageErrorLogged;
+        private bool _tiledPathErrorLogged;
         private bool _diagnosticsReadbackPending;
         private bool _adaptiveActivityReadbackPending;
         private bool _adaptiveActivityReady;
@@ -172,7 +148,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
 
-        private const int DiagnosticsValueCount = 35;
+        private const int DiagnosticsValueCount = 31;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 1000.0f;
@@ -189,12 +165,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private const int DiagnosticSpeedMax = 26;
         private const int DiagnosticMpmActiveTiles = 27;
         private const int DiagnosticMpmTileCount = 28;
-        private const int DiagnosticMpmTileParticleRefs = 30;
-        private const int DiagnosticMpmTileMaxParticleRefs = 31;
-        private const int DiagnosticMpmTileParticleListOverflow = 32;
-        private const int DiagnosticMpmTileParticleListCapacity = 33;
-        private const int DiagnosticJetMpmCollarParticles = 34;
-        private const int MaxMpmSupportTilesPerParticle = 8;
+        private const int DiagnosticJetMpmCollarParticles = 30;
 
         public FluidSolverType SolverType => FluidSolverType.GpuSparseMpmPrototype;
         public bool IsInitialized { get; private set; }
@@ -377,36 +348,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _mpmTileDispatchArgsBuffer = null;
             }
 
-            if (_mpmTileParticleCountsBuffer != null)
-            {
-                _mpmTileParticleCountsBuffer.Release();
-                _mpmTileParticleCountsBuffer = null;
-            }
-
-            if (_mpmTileParticleWriteCountsBuffer != null)
-            {
-                _mpmTileParticleWriteCountsBuffer.Release();
-                _mpmTileParticleWriteCountsBuffer = null;
-            }
-
-            if (_mpmTileParticleOffsetsBuffer != null)
-            {
-                _mpmTileParticleOffsetsBuffer.Release();
-                _mpmTileParticleOffsetsBuffer = null;
-            }
-
-            if (_mpmTileParticleIndicesBuffer != null)
-            {
-                _mpmTileParticleIndicesBuffer.Release();
-                _mpmTileParticleIndicesBuffer = null;
-            }
-
-            if (_mpmTileParticleMetaBuffer != null)
-            {
-                _mpmTileParticleMetaBuffer.Release();
-                _mpmTileParticleMetaBuffer = null;
-            }
-
             if (_mpmTileOwnerParticleCountsBuffer != null)
             {
                 _mpmTileOwnerParticleCountsBuffer.Release();
@@ -425,22 +366,16 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _mpmTileOwnerParticleOffsetsBuffer = null;
             }
 
-            if (_mpmTileOrderedParticleIndicesBuffer != null)
+            if (_mpmTileOwnerParticleIndicesBuffer != null)
             {
-                _mpmTileOrderedParticleIndicesBuffer.Release();
-                _mpmTileOrderedParticleIndicesBuffer = null;
+                _mpmTileOwnerParticleIndicesBuffer.Release();
+                _mpmTileOwnerParticleIndicesBuffer = null;
             }
 
-            if (_mpmTileOrderedParticleDispatchArgsBuffer != null)
+            if (_mpmTileSupportMasksBuffer != null)
             {
-                _mpmTileOrderedParticleDispatchArgsBuffer.Release();
-                _mpmTileOrderedParticleDispatchArgsBuffer = null;
-            }
-
-            if (_mpmTileOrderedParticleMetaBuffer != null)
-            {
-                _mpmTileOrderedParticleMetaBuffer.Release();
-                _mpmTileOrderedParticleMetaBuffer = null;
+                _mpmTileSupportMasksBuffer.Release();
+                _mpmTileSupportMasksBuffer = null;
             }
 
             if (_bucketHoleData0Buffer != null)
@@ -486,25 +421,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _diagnosticsRequestedStepIndex = 0;
             _lastDiagnosticsReadbackStep = 0;
             _stepIndex = 0;
-            _activeMpmGridMin = Vector3Int.zero;
-            _activeMpmGridSize = Vector3Int.zero;
-            _activeMpmGridNodeCount = 0;
-            _useActiveMpmGridBoundsThisStep = false;
             _mpmTileResolution = Vector3Int.zero;
             _mpmTileCount = 0;
             _mpmTileSizeCells = 8;
             _mpmTileSizeShift = 3;
-            _mpmTileParticleListCapacity = 0;
             _useMpmTileOccupancyThisStep = false;
             _useTiledMpmGridDispatchThisStep = false;
             _useMpmParticleTileListsThisStep = false;
-            _buildMpmSupportParticleTileListsThisStep = false;
             _rebuildMpmOwnerParticleListsThisStep = false;
             _mpmOwnerParticleListsReady = false;
             _mpmOwnerParticleListParticleCount = 0;
             _effectiveOwnerTileListRebuildInterval = 1;
-            _useTiledP2GThisStep = false;
-            _useTileOrderedParticlePipelineThisStep = false;
             _useHybridTiledP2GThisStep = false;
             _useReferenceDensityEosThisStep = false;
             _useGridDensityEosThisStep = false;
@@ -535,6 +462,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _useActiveProjectionBoundsThisStep = false;
             _useFusedG2PPostCollisionThisStep = false;
             _useFusedPreCollisionTileMarkThisStep = false;
+            _tiledPathErrorLogged = false;
             IsInitialized = false;
         }
 
@@ -566,8 +494,24 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ComputeShader compute = solverContext.GpuMpmConfig.denseLocalMpmCompute;
 
             UpdateRuntimeGridPlacement(solverContext);
-            UpdateActiveMpmGridBounds(solverContext);
             UpdateMpmTileDispatchMode(solverContext);
+            if (!_useMpmTileOccupancyThisStep ||
+                !_useMpmParticleTileListsThisStep ||
+                !_useHybridTiledP2GThisStep ||
+                !_useTiledMpmGridDispatchThisStep)
+            {
+                _stats.status = FluidSolverStatus.Error;
+                if (!_tiledPathErrorLogged)
+                {
+                    _tiledPathErrorLogged = true;
+                    UnityEngine.Debug.LogError(
+                        "GpuMpmDenseLocalSolver: The required tiled MLS-MPM path " +
+                        "is unavailable. The rejected particle-ordering and dense " +
+                        "P2G fallbacks are intentionally disabled."
+                    );
+                }
+                return;
+            }
             bool projectionPathEnabled =
                 solverContext.GpuMpmConfig.enableProjectionGridInfrastructure &&
                 (
@@ -662,15 +606,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 );
             _useFusedG2PPostCollisionThisStep =
                 runPostBucketCollision &&
-                solverContext.GpuMpmConfig.enableFusedG2PPostCollision &&
-                _kernelG2PVelocityApicBucketCollision >= 0 &&
-                _kernelG2PVelocityApicBucketCollisionTileOrdered >= 0;
+                _kernelG2PVelocityApicBucketCollision >= 0;
             _useFusedPreCollisionTileMarkThisStep =
                 runBucketCollision &&
-                solverContext.GpuMpmConfig.enableFusedPreCollisionTileMark &&
                 _useMpmTileOccupancyThisStep &&
                 _useMpmParticleTileListsThisStep &&
-                !_buildMpmSupportParticleTileListsThisStep &&
                 _kernelBucketCollisionMarkMpmActiveTiles >= 0;
 
             bool runGpuDiagnostics =
@@ -698,44 +638,19 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _useFusedPreCollisionTileMarkThisStep
             );
 
-            BindClearGrid(compute);
-            if (_useTiledMpmGridDispatchThisStep)
-            {
-                BindClearGridActiveTiles(compute);
-                DispatchMpmActiveTileKernel(compute, _kernelClearGridActiveTiles);
-            }
-            else
-            {
-                DispatchMpmGridKernel(compute, _kernelClearGrid, solverContext);
-            }
+            BindClearGridActiveTiles(compute);
+            DispatchMpmActiveTileKernel(compute, _kernelClearGridActiveTiles);
 
             float gpuMpmSetupMilliseconds =
                 profileGpuStages
                     ? CompleteGpuStageProfileSegment()
                     : 0.0f;
 
-            if (_useHybridTiledP2GThisStep)
-            {
-                BindP2GHybridTiled(compute, solverContext);
-                DispatchMpmActiveTileKernel(
-                    compute,
-                    _kernelP2GHybridTiled
-                );
-            }
-            else if (_useTiledP2GThisStep)
-            {
-                BindP2GTileOrdered(compute, solverContext);
-                compute.DispatchIndirect(
-                    _kernelP2GTileOrdered,
-                    _mpmTileOrderedParticleDispatchArgsBuffer,
-                    0
-                );
-            }
-            else
-            {
-                BindP2G(compute, solverContext);
-                compute.Dispatch(_kernelP2G, Groups(particleCount), 1, 1);
-            }
+            BindP2GHybridTiled(compute, solverContext);
+            DispatchMpmActiveTileKernel(
+                compute,
+                _kernelP2GHybridTiled
+            );
 
             int referenceDensityDispatches = 0;
             if (_useReferenceDensityEosThisStep &&
@@ -757,16 +672,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     ? CompleteGpuStageProfileSegment()
                     : 0.0f;
 
-            BindGridUpdate(compute);
-            if (_useTiledMpmGridDispatchThisStep)
-            {
-                BindGridUpdateActiveTiles(compute);
-                DispatchMpmActiveTileKernel(compute, _kernelGridUpdateActiveTiles);
-            }
-            else
-            {
-                DispatchMpmGridKernel(compute, _kernelGridUpdate, solverContext);
-            }
+            BindGridUpdateActiveTiles(compute);
+            DispatchMpmActiveTileKernel(compute, _kernelGridUpdateActiveTiles);
 
             float gpuGridUpdateMilliseconds =
                 profileGpuStages
@@ -812,19 +719,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             //BindG2P(compute, solverContext);
             //compute.Dispatch(_kernelG2P, Groups(particleCount), 1, 1);
-            int g2pKernel;
-            if (_useFusedG2PPostCollisionThisStep)
-            {
-                g2pKernel = _useTileOrderedParticlePipelineThisStep
-                    ? _kernelG2PVelocityApicBucketCollisionTileOrdered
-                    : _kernelG2PVelocityApicBucketCollision;
-            }
-            else
-            {
-                g2pKernel = _useTileOrderedParticlePipelineThisStep
-                    ? _kernelG2PVelocityApicTileOrdered
-                    : _kernelG2PVelocityApic;
-            }
+            int g2pKernel = _useFusedG2PPostCollisionThisStep
+                ? _kernelG2PVelocityApicBucketCollision
+                : _kernelG2PVelocityApic;
             BindG2PVelocityApic(compute, solverContext, g2pKernel);
             if (_useFusedG2PPostCollisionThisStep)
             {
@@ -837,32 +734,12 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             DispatchParticleKernel(
                 compute,
                 g2pKernel,
-                particleCount,
-                _useTileOrderedParticlePipelineThisStep
+                particleCount
             );
 
             /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// /// ///
-            /// 
-            if (runPostBucketCollision &&
-                !_useFusedG2PPostCollisionThisStep)
-            {
-                int postCollisionKernel =
-                    _useTileOrderedParticlePipelineThisStep
-                        ? _kernelBucketCollisionTileOrdered
-                        : _kernelBucketCollision;
-                BindBucketCollision(
-                    compute,
-                    solverContext,
-                    postCollisionKernel
-                );
-                DispatchParticleKernel(
-                    compute,
-                    postCollisionKernel,
-                    particleCount,
-                    _useTileOrderedParticlePipelineThisStep
-                );
-            }
-            else if (!runBucketCollision)
+            ///
+            if (!runBucketCollision)
             {
                 UnityEngine.Debug.LogWarning(
                     "MLS-MPM solver is running without real bucket collision. " +
@@ -876,20 +753,15 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             int deformationDispatches = 0;
             if (!_useReferenceDensityEosThisStep)
             {
-                int deformationKernel =
-                    _useTileOrderedParticlePipelineThisStep
-                        ? _kernelUpdateDeformationTileOrdered
-                        : _kernelUpdateDeformation;
                 BindUpdateDeformation(
                     compute,
                     solverContext,
-                    deformationKernel
+                    _kernelUpdateDeformation
                 );
                 DispatchParticleKernel(
                     compute,
-                    deformationKernel,
-                    particleCount,
-                    _useTileOrderedParticlePipelineThisStep
+                    _kernelUpdateDeformation,
+                    particleCount
                 );
                 deformationDispatches = 1;
             }
@@ -928,26 +800,12 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             int baseDispatches = runGpuDiagnostics ? 5 : 4;
             // Optional ClearDiagnostics, ClearGrid, P2G, GridUpdate, G2P
 
-            int bucketDispatches =
-                (
-                    runBucketCollision &&
-                    !_useFusedPreCollisionTileMarkThisStep
-                        ? 1
-                        : 0
-                ) +
-                (
-                    runPostBucketCollision &&
-                    !_useFusedG2PPostCollisionThisStep
-                        ? 1
-                        : 0
-                );
             _stats.gpuDispatchCount =
                 baseDispatches +
                 adaptiveDispatches +
                 tileDispatches +
                 referenceDensityDispatches +
                 projectionDispatches +
-                bucketDispatches +
                 deformationDispatches +
                 airborneDispatches;
             _stats.gpuStageProfilingEnabled = profileGpuStages;
@@ -992,41 +850,18 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.gpuReferenceProjectionFallbackUsed =
                 _useReferenceDensityEosThisStep &&
                 runProjection;
-            _stats.gpuActiveMpmGridBoundsEnabled =
-                solverContext.GpuMpmConfig.enableActiveMpmGridBounds;
-            _stats.gpuActiveMpmGridBoundsUsed =
-                _useActiveMpmGridBoundsThisStep;
-            _stats.gpuActiveMpmGridNodeCount =
-                GetMpmGridDispatchNodeCount(gridNodeCount);
-            _stats.gpuActiveMpmGridNodeFraction =
-                gridNodeCount > 0
-                    ? (float)_stats.gpuActiveMpmGridNodeCount / gridNodeCount
-                    : 1.0f;
-            _stats.gpuActiveMpmGridMinX = _activeMpmGridMin.x;
-            _stats.gpuActiveMpmGridMinY = _activeMpmGridMin.y;
-            _stats.gpuActiveMpmGridMinZ = _activeMpmGridMin.z;
-            _stats.gpuActiveMpmGridSizeX = _activeMpmGridSize.x;
-            _stats.gpuActiveMpmGridSizeY = _activeMpmGridSize.y;
-            _stats.gpuActiveMpmGridSizeZ = _activeMpmGridSize.z;
-            _stats.gpuMpmTileOccupancyEnabled =
-                solverContext.GpuMpmConfig.enableMpmTileOccupancy ||
-                solverContext.GpuMpmConfig.enableTiledMpmGridDispatch ||
-                solverContext.GpuMpmConfig.enableTiledP2G ||
-                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline ||
-                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuMpmTileOccupancyEnabled = true;
             _stats.gpuMpmTileOccupancyUsed =
                 _useMpmTileOccupancyThisStep;
-            _stats.gpuTiledMpmGridDispatchEnabled =
-                solverContext.GpuMpmConfig.enableTiledMpmGridDispatch;
+            _stats.gpuTiledMpmGridDispatchEnabled = true;
             _stats.gpuTiledMpmGridDispatchUsed =
                 _useTiledMpmGridDispatchThisStep;
-            _stats.gpuMpmParticleTileListsEnabled =
-                solverContext.GpuMpmConfig.enableMpmParticleTileLists ||
-                solverContext.GpuMpmConfig.enableTiledP2G ||
-                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline ||
-                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuMpmParticleTileListsEnabled = true;
             _stats.gpuMpmParticleTileListsUsed =
                 _useMpmParticleTileListsThisStep;
+            _stats.gpuMpmSupportMaskTopologyUsed =
+                _mpmTileSupportMasksBuffer != null &&
+                _kernelExpandMpmTileSupportMasks >= 0;
             _stats.gpuOwnerTileListRebuildInterval =
                 _effectiveOwnerTileListRebuildInterval;
             _stats.gpuOwnerTileListRebuilt =
@@ -1034,27 +869,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.gpuOwnerTileListReused =
                 _useMpmParticleTileListsThisStep &&
                 !_rebuildMpmOwnerParticleListsThisStep;
-            _stats.gpuTiledP2GEnabled =
-                solverContext.GpuMpmConfig.enableTiledP2G ||
-                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline;
-            _stats.gpuTiledP2GUsed =
-                _useTiledP2GThisStep;
-            _stats.gpuTileOrderedParticlePipelineEnabled =
-                solverContext.GpuMpmConfig.enableTileOrderedParticlePipeline;
-            _stats.gpuTileOrderedParticlePipelineUsed =
-                _useTileOrderedParticlePipelineThisStep;
-            _stats.gpuHybridTiledP2GEnabled =
-                solverContext.GpuMpmConfig.enableHybridTiledP2G;
+            _stats.gpuHybridTiledP2GEnabled = true;
             _stats.gpuHybridTiledP2GUsed =
                 _useHybridTiledP2GThisStep;
-            _stats.gpuCenteredHybridP2GOwnerEnabled =
-                solverContext.GpuMpmConfig.enableCenteredHybridP2GOwnerTile;
-            _stats.gpuFusedG2PPostCollisionEnabled =
-                solverContext.GpuMpmConfig.enableFusedG2PPostCollision;
+            _stats.gpuFusedG2PPostCollisionEnabled = true;
             _stats.gpuFusedG2PPostCollisionUsed =
                 _useFusedG2PPostCollisionThisStep;
-            _stats.gpuFusedPreCollisionTileMarkEnabled =
-                solverContext.GpuMpmConfig.enableFusedPreCollisionTileMark;
+            _stats.gpuFusedPreCollisionTileMarkEnabled = true;
             _stats.gpuFusedPreCollisionTileMarkUsed =
                 _useFusedPreCollisionTileMarkThisStep;
             _stats.gpuAdaptiveTransferStencilEnabled =
@@ -1066,8 +887,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.gpuMpmTileResolutionY = _mpmTileResolution.y;
             _stats.gpuMpmTileResolutionZ = _mpmTileResolution.z;
             _stats.gpuMpmTileCount = _mpmTileCount;
-            _stats.gpuMpmTileParticleListCapacity =
-                _mpmTileParticleListCapacity;
             _stats.gpuAdaptiveMultiRateEnabled =
                 solverContext.GpuMpmConfig.enableAdaptiveMultiRate &&
                 (
@@ -1315,50 +1134,37 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         {
             ComputeShader compute = context.GpuMpmConfig.denseLocalMpmCompute;
 
-            _kernelClearGrid = compute.FindKernel("KClearGrid");
             _kernelClearMpmDiagnostics = compute.FindKernel("KClearMpmDiagnostics");
             _kernelClearAdaptiveActivity = compute.FindKernel("KClearAdaptiveActivity");
             _kernelClassifyAdaptiveActivity = compute.FindKernel("KClassifyAdaptiveActivity");
-            _kernelP2G = compute.FindKernel("KP2G");
-            _kernelGridUpdate = compute.FindKernel("KGridUpdate");
             _kernelClearMpmTileData = compute.FindKernel("KClearMpmTileData");
-            _kernelClearMpmTileOrderedData = compute.FindKernel("KClearMpmTileOrderedData");
             _kernelMarkMpmActiveTiles = compute.FindKernel("KMarkMpmActiveTiles");
-            _kernelMarkMpmOwnerTilesActive =
-                compute.FindKernel("KMarkMpmOwnerTilesActive");
+            _kernelExpandMpmTileSupportMasks =
+                compute.FindKernel("KExpandMpmTileSupportMasks");
             _kernelBucketCollisionMarkMpmActiveTiles =
                 compute.FindKernel("KBucketCollisionMarkMpmActiveTiles");
-            _kernelBuildMpmTileParticleOffsets = compute.FindKernel("KBuildMpmTileParticleOffsets");
             _kernelBuildMpmTileOwnerOffsets = compute.FindKernel("KBuildMpmTileOwnerOffsets");
-            _kernelFillMpmTileParticleLists = compute.FindKernel("KFillMpmTileParticleLists");
+            _kernelFillMpmTileOwnerParticleList =
+                compute.FindKernel("KFillMpmTileOwnerParticleList");
             _kernelClearGridActiveTiles = compute.FindKernel("KClearGridActiveTiles");
             _kernelGridUpdateActiveTiles = compute.FindKernel("KGridUpdateActiveTiles");
-            _kernelP2GTileOrdered = compute.FindKernel("KP2GTileOrdered");
             _kernelP2GHybridTiled = compute.FindKernel("KP2GHybridTiled");
             _kernelP2GReferenceDensityStressHybrid =
                 compute.FindKernel("KP2GReferenceDensityStressHybrid");
             _kernelG2PVelocityApic = compute.FindKernel("KG2PVelocityApic");
-            _kernelG2PVelocityApicTileOrdered = compute.FindKernel("KG2PVelocityApicTileOrdered");
             _kernelG2PVelocityApicBucketCollision =
                 compute.FindKernel("KG2PVelocityApicBucketCollision");
-            _kernelG2PVelocityApicBucketCollisionTileOrdered =
-                compute.FindKernel(
-                    "KG2PVelocityApicBucketCollisionTileOrdered"
-                );
 
             /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// 
             _kernelBucketCollision = compute.FindKernel("KBucketCollision");
-            _kernelBucketCollisionTileOrdered = compute.FindKernel("KBucketCollisionTileOrdered");
             /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// 
             _kernelStepAirborneParticles = compute.FindKernel("KStepAirborneParticles");
             
             _kernelUpdateDeformation = compute.FindKernel("KUpdateDeformation");
-            _kernelUpdateDeformationTileOrdered = compute.FindKernel("KUpdateDeformationTileOrdered");
 
             _kernelClearProjectionGrid = compute.FindKernel("KClearProjectionGrid");
             _kernelMarkBucketProjectionSolids = compute.FindKernel("KMarkBucketProjectionSolids");
             _kernelMarkProjectionFluidCells = compute.FindKernel("KMarkProjectionFluidCells");
-            _kernelMarkProjectionFluidCellsTileOrdered = compute.FindKernel("KMarkProjectionFluidCellsTileOrdered");
             _kernelFinalizeProjectionGrid = compute.FindKernel("KFinalizeProjectionGrid");
             _kernelClearProjectionFluidCellList = compute.FindKernel("KClearProjectionFluidCellList");
             _kernelBuildProjectionFluidCellDispatchArgs = compute.FindKernel("KBuildProjectionFluidCellDispatchArgs");
@@ -1377,31 +1183,22 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private bool HasValidKernels(FluidSolverContext context)
         {
             bool baseKernelsValid =
-                _kernelClearGrid >= 0 &&
                 _kernelClearMpmDiagnostics >= 0 &&
                 _kernelClearAdaptiveActivity >= 0 &&
                 _kernelClassifyAdaptiveActivity >= 0 &&
-                _kernelP2G >= 0 &&
-                _kernelGridUpdate >= 0 &&
                 _kernelClearMpmTileData >= 0 &&
-                _kernelClearMpmTileOrderedData >= 0 &&
                 _kernelMarkMpmActiveTiles >= 0 &&
-                _kernelMarkMpmOwnerTilesActive >= 0 &&
+                _kernelExpandMpmTileSupportMasks >= 0 &&
                 _kernelBucketCollisionMarkMpmActiveTiles >= 0 &&
-                _kernelBuildMpmTileParticleOffsets >= 0 &&
                 _kernelBuildMpmTileOwnerOffsets >= 0 &&
-                _kernelFillMpmTileParticleLists >= 0 &&
+                _kernelFillMpmTileOwnerParticleList >= 0 &&
                 _kernelClearGridActiveTiles >= 0 &&
                 _kernelGridUpdateActiveTiles >= 0 &&
-                _kernelP2GTileOrdered >= 0 &&
                 _kernelP2GHybridTiled >= 0 &&
                 _kernelP2GReferenceDensityStressHybrid >= 0 &&
                 _kernelG2PVelocityApic >= 0 &&
-                _kernelG2PVelocityApicTileOrdered >= 0 &&
                 _kernelG2PVelocityApicBucketCollision >= 0 &&
-                _kernelG2PVelocityApicBucketCollisionTileOrdered >= 0 &&
                 _kernelUpdateDeformation >= 0 &&
-                _kernelUpdateDeformationTileOrdered >= 0 &&
                 _kernelStepAirborneParticles >= 0;
 
             if (!baseKernelsValid)
@@ -1416,7 +1213,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     _kernelClearProjectionGrid >= 0 &&
                     _kernelMarkBucketProjectionSolids >= 0 &&
                     _kernelMarkProjectionFluidCells >= 0 &&
-                    _kernelMarkProjectionFluidCellsTileOrdered >= 0 &&
                     _kernelFinalizeProjectionGrid >= 0 &&
                     _kernelClearProjectionFluidCellList >= 0 &&
                     _kernelBuildProjectionFluidCellDispatchArgs >= 0 &&
@@ -1440,8 +1236,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.useRealBucketCollision;
 
             if (bucketRequested &&
-                (_kernelBucketCollision < 0 ||
-                 _kernelBucketCollisionTileOrdered < 0))
+                _kernelBucketCollision < 0)
                 return false;
 
             return true;
@@ -1556,24 +1351,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 sizeof(uint)
             );
 
-            _mpmTileParticleCountsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _mpmTileCount,
-                sizeof(uint)
-            );
-
-            _mpmTileParticleWriteCountsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _mpmTileCount,
-                sizeof(uint)
-            );
-
-            _mpmTileParticleOffsetsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _mpmTileCount,
-                sizeof(uint)
-            );
-
             int particleCount = Mathf.Max(
                 1,
                 context.GpuBufferSet != null
@@ -1593,29 +1370,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 sizeof(uint)
             );
 
-            long particleListCapacityLong =
-                (long)particleCount * MaxMpmSupportTilesPerParticle;
-            _mpmTileParticleListCapacity =
-                Mathf.Max(
-                    1,
-                    (int)System.Math.Min(
-                        particleListCapacityLong,
-                        int.MaxValue
-                    )
-                );
-
-            _mpmTileParticleIndicesBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _mpmTileParticleListCapacity,
-                sizeof(uint)
-            );
-
-            _mpmTileParticleMetaBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                4,
-                sizeof(uint)
-            );
-
             _mpmTileOwnerParticleCountsBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 _mpmTileCount,
@@ -1624,7 +1378,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _mpmTileOwnerParticleWriteCountsBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
-                _mpmTileCount + 1,
+                _mpmTileCount,
                 sizeof(uint)
             );
 
@@ -1634,22 +1388,15 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 sizeof(uint)
             );
 
-            _mpmTileOrderedParticleIndicesBuffer = new GraphicsBuffer(
+            _mpmTileOwnerParticleIndicesBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 particleCount,
                 sizeof(uint)
             );
 
-            _mpmTileOrderedParticleDispatchArgsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured |
-                GraphicsBuffer.Target.IndirectArguments,
-                3,
-                sizeof(uint)
-            );
-
-            _mpmTileOrderedParticleMetaBuffer = new GraphicsBuffer(
+            _mpmTileSupportMasksBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
-                4,
+                _mpmTileCount,
                 sizeof(uint)
             );
 
@@ -1746,30 +1493,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetVector("_GridOrigin", _runtimeGridOriginWorld);
 
             compute.SetInt(
-                "_EnableActiveMpmGridBounds",
-                _useActiveMpmGridBoundsThisStep ? 1 : 0
-            );
-
-            compute.SetInts(
-                "_ActiveMpmGridMin",
-                _activeMpmGridMin.x,
-                _activeMpmGridMin.y,
-                _activeMpmGridMin.z
-            );
-
-            compute.SetInts(
-                "_ActiveMpmGridSize",
-                _activeMpmGridSize.x,
-                _activeMpmGridSize.y,
-                _activeMpmGridSize.z
-            );
-
-            compute.SetInt(
-                "_ActiveMpmGridNodeCount",
-                GetMpmGridDispatchNodeCount(context.GpuMpmConfig.GridNodeCount)
-            );
-
-            compute.SetInt(
                 "_EnableMpmTileOccupancy",
                 _useMpmTileOccupancyThisStep ? 1 : 0
             );
@@ -1784,20 +1507,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _rebuildMpmOwnerParticleListsThisStep ? 1 : 0
             );
             compute.SetInt(
-                "_EnableCenteredHybridP2GOwnerTile",
-                context.GpuMpmConfig.enableCenteredHybridP2GOwnerTile
-                    ? 1
-                    : 0
-            );
-
-            compute.SetInt(
-                "_EnableMpmSupportParticleTileLists",
-                _buildMpmSupportParticleTileListsThisStep ? 1 : 0
-            );
-            compute.SetInt(
                 "_EnableTiledP2G",
-                (_useTiledP2GThisStep ||
-                 _useHybridTiledP2GThisStep) ? 1 : 0
+                _useHybridTiledP2GThisStep ? 1 : 0
             );
 
             compute.SetInt(
@@ -1911,11 +1622,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetInt("_MpmTileCount", _mpmTileCount);
             compute.SetInt("_MpmTileSizeCells", _mpmTileSizeCells);
             compute.SetInt("_MpmTileSizeShift", _mpmTileSizeShift);
-            compute.SetInt(
-                "_MpmTileParticleListCapacity",
-                _mpmTileParticleListCapacity
-            );
-
             float cellSize = context.GpuMpmConfig.cellSizeMeters;
 
             compute.SetFloat("_CellSize", cellSize);
@@ -2091,12 +1797,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
         }
 
-        private void BindClearGrid(ComputeShader compute)
-        {
-            compute.SetBuffer(_kernelClearGrid, "_GridAccumInt", _gridAccumIntBuffer);
-            compute.SetBuffer(_kernelClearGrid, "_GridVelocityMass", _gridVelocityMassBuffer);
-        }
-
         private void BindClearGridActiveTiles(ComputeShader compute)
         {
             compute.SetBuffer(
@@ -2143,18 +1843,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
 
             int dispatches = 1;
-            if (_useMpmParticleTileListsThisStep &&
-                _rebuildMpmOwnerParticleListsThisStep)
-            {
-                BindClearMpmTileOrderedData(compute);
-                compute.Dispatch(
-                    _kernelClearMpmTileOrderedData,
-                    Groups64(Mathf.Max(_mpmTileCount, 4)),
-                    1,
-                    1
-                );
-                dispatches++;
-            }
 
             if (fusePreCollision)
             {
@@ -2184,30 +1872,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (!_useMpmParticleTileListsThisStep)
                 return dispatches;
 
-            if (!_rebuildMpmOwnerParticleListsThisStep)
-            {
-                BindMarkMpmOwnerTilesActive(compute);
-                compute.Dispatch(
-                    _kernelMarkMpmOwnerTilesActive,
-                    Groups64(_mpmTileCount),
-                    1,
-                    1
-                );
-                dispatches++;
-                return dispatches;
-            }
+            BindExpandMpmTileSupportMasks(compute);
+            compute.Dispatch(
+                _kernelExpandMpmTileSupportMasks,
+                Groups64(_mpmTileCount),
+                1,
+                1
+            );
+            dispatches++;
 
-            if (_buildMpmSupportParticleTileListsThisStep)
-            {
-                BindBuildMpmTileParticleOffsets(compute);
-                compute.Dispatch(
-                    _kernelBuildMpmTileParticleOffsets,
-                    1,
-                    1,
-                    1
-                );
-                dispatches++;
-            }
+            if (!_rebuildMpmOwnerParticleListsThisStep)
+                return dispatches;
 
             BindBuildMpmTileOwnerOffsets(compute);
             compute.Dispatch(
@@ -2218,9 +1893,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             dispatches++;
 
-            BindFillMpmTileParticleLists(compute, context);
+            BindFillMpmTileOwnerParticleList(compute, context);
             compute.Dispatch(
-                _kernelFillMpmTileParticleLists,
+                _kernelFillMpmTileOwnerParticleList,
                 Groups(particleCount),
                 1,
                 1
@@ -2252,34 +1927,29 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 _kernelClearMpmTileData,
-                "_MpmDiagnostics",
-                _diagnosticsBuffer
+                "_MpmTileOwnerParticleCounts",
+                _mpmTileOwnerParticleCountsBuffer
             );
             compute.SetBuffer(
                 _kernelClearMpmTileData,
-                "_MpmTileParticleCounts",
-                _mpmTileParticleCountsBuffer
+                "_MpmTileOwnerParticleWriteCounts",
+                _mpmTileOwnerParticleWriteCountsBuffer
             );
             compute.SetBuffer(
                 _kernelClearMpmTileData,
-                "_MpmTileParticleWriteCounts",
-                _mpmTileParticleWriteCountsBuffer
+                "_MpmTileOwnerParticleOffsets",
+                _mpmTileOwnerParticleOffsetsBuffer
             );
             compute.SetBuffer(
                 _kernelClearMpmTileData,
-                "_MpmTileParticleOffsets",
-                _mpmTileParticleOffsetsBuffer
-            );
-            compute.SetBuffer(
-                _kernelClearMpmTileData,
-                "_MpmTileParticleMeta",
-                _mpmTileParticleMetaBuffer
+                "_MpmTileSupportMasks",
+                _mpmTileSupportMasksBuffer
             );
         }
 
-        private void BindMarkMpmOwnerTilesActive(ComputeShader compute)
+        private void BindExpandMpmTileSupportMasks(ComputeShader compute)
         {
-            int kernel = _kernelMarkMpmOwnerTilesActive;
+            int kernel = _kernelExpandMpmTileSupportMasks;
             compute.SetBuffer(
                 kernel,
                 "_MpmTileFlags",
@@ -2302,42 +1972,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 kernel,
-                "_MpmDiagnostics",
-                _diagnosticsBuffer
+                "_MpmTileSupportMasks",
+                _mpmTileSupportMasksBuffer
             );
             compute.SetBuffer(
                 kernel,
-                "_MpmTileDispatchArgs",
-                _mpmTileDispatchArgsBuffer
-            );
-        }
-
-        private void BindClearMpmTileOrderedData(ComputeShader compute)
-        {
-            compute.SetBuffer(
-                _kernelClearMpmTileOrderedData,
-                "_MpmTileOwnerParticleCounts",
-                _mpmTileOwnerParticleCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelClearMpmTileOrderedData,
-                "_MpmTileOwnerParticleWriteCounts",
-                _mpmTileOwnerParticleWriteCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelClearMpmTileOrderedData,
-                "_MpmTileOwnerParticleOffsets",
-                _mpmTileOwnerParticleOffsetsBuffer
-            );
-            compute.SetBuffer(
-                _kernelClearMpmTileOrderedData,
-                "_MpmTileOrderedParticleDispatchArgs",
-                _mpmTileOrderedParticleDispatchArgsBuffer
-            );
-            compute.SetBuffer(
-                _kernelClearMpmTileOrderedData,
-                "_MpmTileOrderedParticleMeta",
-                _mpmTileOrderedParticleMetaBuffer
+                "_MpmDiagnostics",
+                _diagnosticsBuffer
             );
         }
 
@@ -2364,33 +2005,18 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 _kernelMarkMpmActiveTiles,
-                "_MpmTileFlags",
-                _mpmTileFlagsBuffer
-            );
-            compute.SetBuffer(
-                _kernelMarkMpmActiveTiles,
-                "_MpmActiveTileIndices",
-                _mpmActiveTileIndicesBuffer
-            );
-            compute.SetBuffer(
-                _kernelMarkMpmActiveTiles,
-                "_MpmTileDispatchArgs",
-                _mpmTileDispatchArgsBuffer
-            );
-            compute.SetBuffer(
-                _kernelMarkMpmActiveTiles,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
             );
             compute.SetBuffer(
                 _kernelMarkMpmActiveTiles,
-                "_MpmTileParticleCounts",
-                _mpmTileParticleCountsBuffer
+                "_MpmTileOwnerParticleCounts",
+                _mpmTileOwnerParticleCountsBuffer
             );
             compute.SetBuffer(
                 _kernelMarkMpmActiveTiles,
-                "_MpmTileOwnerParticleCounts",
-                _mpmTileOwnerParticleCountsBuffer
+                "_MpmTileSupportMasks",
+                _mpmTileSupportMasksBuffer
             );
         }
 
@@ -2402,52 +2028,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             BindBucketCollision(compute, context, kernel);
             compute.SetBuffer(
                 kernel,
-                "_MpmTileFlags",
-                _mpmTileFlagsBuffer
-            );
-            compute.SetBuffer(
-                kernel,
-                "_MpmActiveTileIndices",
-                _mpmActiveTileIndicesBuffer
-            );
-            compute.SetBuffer(
-                kernel,
-                "_MpmTileDispatchArgs",
-                _mpmTileDispatchArgsBuffer
-            );
-            compute.SetBuffer(
-                kernel,
                 "_MpmTileOwnerParticleCounts",
                 _mpmTileOwnerParticleCountsBuffer
             );
-        }
-
-        private void BindBuildMpmTileParticleOffsets(ComputeShader compute)
-        {
             compute.SetBuffer(
-                _kernelBuildMpmTileParticleOffsets,
-                "_MpmTileParticleCounts",
-                _mpmTileParticleCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelBuildMpmTileParticleOffsets,
-                "_MpmTileParticleWriteCounts",
-                _mpmTileParticleWriteCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelBuildMpmTileParticleOffsets,
-                "_MpmTileParticleOffsets",
-                _mpmTileParticleOffsetsBuffer
-            );
-            compute.SetBuffer(
-                _kernelBuildMpmTileParticleOffsets,
-                "_MpmTileParticleMeta",
-                _mpmTileParticleMetaBuffer
-            );
-            compute.SetBuffer(
-                _kernelBuildMpmTileParticleOffsets,
-                "_MpmDiagnostics",
-                _diagnosticsBuffer
+                kernel,
+                "_MpmTileSupportMasks",
+                _mpmTileSupportMasksBuffer
             );
         }
 
@@ -2468,171 +2055,38 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_MpmTileOwnerParticleOffsets",
                 _mpmTileOwnerParticleOffsetsBuffer
             );
-            compute.SetBuffer(
-                _kernelBuildMpmTileOwnerOffsets,
-                "_MpmTileOrderedParticleDispatchArgs",
-                _mpmTileOrderedParticleDispatchArgsBuffer
-            );
-            compute.SetBuffer(
-                _kernelBuildMpmTileOwnerOffsets,
-                "_MpmTileOrderedParticleMeta",
-                _mpmTileOrderedParticleMetaBuffer
-            );
         }
 
-        private void BindFillMpmTileParticleLists(
+        private void BindFillMpmTileOwnerParticleList(
             ComputeShader compute,
             FluidSolverContext context)
         {
             GpuFluidBufferSet buffers = context.GpuBufferSet;
 
             compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
+                _kernelFillMpmTileOwnerParticleList,
                 "_ParticlePositionRadiusRead",
                 buffers.PositionRadiusBuffer
             );
             compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
+                _kernelFillMpmTileOwnerParticleList,
                 "_ParticleStateAgeIdRead",
                 buffers.StateAgeIdBuffer
             );
             compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmTileParticleCounts",
-                _mpmTileParticleCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmTileParticleWriteCounts",
-                _mpmTileParticleWriteCountsBuffer
-            );
-            compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmTileParticleOffsets",
-                _mpmTileParticleOffsetsBuffer
-            );
-            compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmTileParticleIndices",
-                _mpmTileParticleIndicesBuffer
-            );
-            compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmDiagnostics",
-                _diagnosticsBuffer
-            );
-            compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
+                _kernelFillMpmTileOwnerParticleList,
                 "_MpmTileOwnerParticleWriteCounts",
                 _mpmTileOwnerParticleWriteCountsBuffer
             );
             compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
+                _kernelFillMpmTileOwnerParticleList,
                 "_MpmTileOwnerParticleOffsets",
                 _mpmTileOwnerParticleOffsetsBuffer
             );
             compute.SetBuffer(
-                _kernelFillMpmTileParticleLists,
-                "_MpmTileOrderedParticleIndices",
-                _mpmTileOrderedParticleIndicesBuffer
-            );
-        }
-
-        private void BindP2G(ComputeShader compute, FluidSolverContext context)
-        {
-            GpuFluidBufferSet buffers = context.GpuBufferSet;
-
-            compute.SetBuffer(_kernelP2G, "_ParticlePositionRadius", buffers.PositionRadiusBuffer);
-            compute.SetBuffer(_kernelP2G, "_ParticleVelocityMass", buffers.VelocityMassBuffer);
-            compute.SetBuffer(_kernelP2G, "_ParticleStateAgeIdRead", buffers.StateAgeIdBuffer);
-
-            ////////// G5 Changes ////////////
-            compute.SetBuffer(_kernelP2G, "_ParticleAffineC0", buffers.AffineC0Buffer);
-            compute.SetBuffer(_kernelP2G, "_ParticleAffineC1", buffers.AffineC1Buffer);
-            compute.SetBuffer(_kernelP2G, "_ParticleAffineC2", buffers.AffineC2Buffer);
-            ////////// End G5 Changes ////////////
-
-            ////////// G6.A Changes ////////////
-            compute.SetBuffer(_kernelP2G, "_ParticleVolumeJRead", buffers.VolumeJBuffer);
-            //compute.SetBuffer(_kernelP2G, "_ParticleF0", buffers.DeformationF0Buffer);
-            //compute.SetBuffer(_kernelP2G, "_ParticleF1", buffers.DeformationF1Buffer);
-            //compute.SetBuffer(_kernelP2G, "_ParticleF2", buffers.DeformationF2Buffer);
-            ////////// End G6.A Changes ////////////
-
-            compute.SetBuffer(_kernelP2G, "_GridAccumInt", _gridAccumIntBuffer);
-            compute.SetBuffer(_kernelP2G, "_MpmDiagnostics", _diagnosticsBuffer);
-            compute.SetBuffer(
-                _kernelP2G,
-                "_AdaptiveParticlePriorityRead",
-                _adaptiveParticlePriorityBuffer
-            );
-        }
-
-        private void BindP2GTileOrdered(
-            ComputeShader compute,
-            FluidSolverContext context)
-        {
-            GpuFluidBufferSet buffers = context.GpuBufferSet;
-
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticlePositionRadius",
-                buffers.PositionRadiusBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleVelocityMass",
-                buffers.VelocityMassBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleStateAgeIdRead",
-                buffers.StateAgeIdBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleAffineC0",
-                buffers.AffineC0Buffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleAffineC1",
-                buffers.AffineC1Buffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleAffineC2",
-                buffers.AffineC2Buffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_ParticleVolumeJRead",
-                buffers.VolumeJBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_GridAccumInt",
-                _gridAccumIntBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_MpmTileOrderedParticleIndicesRead",
-                _mpmTileOrderedParticleIndicesBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_MpmTileOrderedParticleMetaRead",
-                _mpmTileOrderedParticleMetaBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_MpmDiagnostics",
-                _diagnosticsBuffer
-            );
-            compute.SetBuffer(
-                _kernelP2GTileOrdered,
-                "_AdaptiveParticlePriorityRead",
-                _adaptiveParticlePriorityBuffer
+                _kernelFillMpmTileOwnerParticleList,
+                "_MpmTileOwnerParticleIndices",
+                _mpmTileOwnerParticleIndicesBuffer
             );
         }
 
@@ -2695,23 +2149,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 kernel,
-                "_MpmTileOwnerParticleWriteCountsRead",
-                _mpmTileOwnerParticleWriteCountsBuffer
-            );
-            compute.SetBuffer(
-                kernel,
                 "_MpmTileOwnerParticleOffsetsRead",
                 _mpmTileOwnerParticleOffsetsBuffer
             );
             compute.SetBuffer(
                 kernel,
-                "_MpmTileOrderedParticleIndicesRead",
-                _mpmTileOrderedParticleIndicesBuffer
-            );
-            compute.SetBuffer(
-                kernel,
-                "_MpmTileParticleIndicesRead",
-                _mpmTileParticleIndicesBuffer
+                "_MpmTileOwnerParticleIndicesRead",
+                _mpmTileOwnerParticleIndicesBuffer
             );
             compute.SetBuffer(
                 kernel,
@@ -2789,22 +2233,14 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 kernel,
-                "_MpmTileOrderedParticleIndicesRead",
-                _mpmTileOrderedParticleIndicesBuffer
+                "_MpmTileOwnerParticleIndicesRead",
+                _mpmTileOwnerParticleIndicesBuffer
             );
             compute.SetBuffer(
                 kernel,
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
             );
-        }
-
-        private void BindGridUpdate(ComputeShader compute)
-        {
-            compute.SetBuffer(_kernelGridUpdate, "_GridAccumInt", _gridAccumIntBuffer);
-            compute.SetBuffer(_kernelGridUpdate, "_GridVelocityMass", _gridVelocityMassBuffer);
-            compute.SetBuffer(_kernelGridUpdate, "_MpmTileFlags", _mpmTileFlagsBuffer);
-            compute.SetBuffer(_kernelGridUpdate, "_MpmDiagnostics", _diagnosticsBuffer);
         }
 
         private void BindGridUpdateActiveTiles(ComputeShader compute)
@@ -2826,13 +2262,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
             compute.SetBuffer(
                 _kernelGridUpdateActiveTiles,
-                "_MpmTileFlags",
-                _mpmTileFlagsBuffer
+                "_MpmActiveTileIndices",
+                _mpmActiveTileIndicesBuffer
             );
             compute.SetBuffer(
                 _kernelGridUpdateActiveTiles,
-                "_MpmActiveTileIndices",
-                _mpmActiveTileIndicesBuffer
+                "_MpmTileFlagsRead",
+                _mpmTileFlagsBuffer
             );
         }
 
@@ -2867,7 +2303,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_AdaptiveParticlePriorityRead",
                 _adaptiveParticlePriorityBuffer
             );
-            BindTileOrderedParticleLookup(compute, kernel);
         }
 
         private void BindUpdateDeformation(
@@ -2899,26 +2334,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _adaptiveParticlePriorityBuffer
             );
 
-            BindTileOrderedParticleLookup(compute, kernel);
-        }
-
-        private void BindTileOrderedParticleLookup(
-            ComputeShader compute,
-            int kernel)
-        {
-            if (!_useTileOrderedParticlePipelineThisStep)
-                return;
-
-            compute.SetBuffer(
-                kernel,
-                "_MpmTileOrderedParticleIndicesRead",
-                _mpmTileOrderedParticleIndicesBuffer
-            );
-            compute.SetBuffer(
-                kernel,
-                "_MpmTileOrderedParticleMetaRead",
-                _mpmTileOrderedParticleMetaBuffer
-            );
         }
 
         private void BindStepAirborneParticles(ComputeShader compute, FluidSolverContext context)
@@ -3130,19 +2545,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private void DispatchParticleKernel(
             ComputeShader compute,
             int kernel,
-            int particleCount,
-            bool tileOrdered)
+            int particleCount)
         {
-            if (tileOrdered)
-            {
-                compute.DispatchIndirect(
-                    kernel,
-                    _mpmTileOrderedParticleDispatchArgsBuffer,
-                    0
-                );
-                return;
-            }
-
             compute.Dispatch(kernel, Groups(particleCount), 1, 1);
         }
 
@@ -3312,18 +2716,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         {
             GpuMpmSolverConfig config = context.GpuMpmConfig;
 
-            bool supportParticleListsRequested =
-                config.enableMpmParticleTileLists;
-            bool particleListsRequested =
-                supportParticleListsRequested ||
-                config.enableTiledP2G ||
-                config.enableTileOrderedParticlePipeline ||
-                config.enableHybridTiledP2G;
+            const bool particleListsRequested = true;
 
             _useMpmTileOccupancyThisStep =
-                (config.enableMpmTileOccupancy ||
-                 config.enableTiledMpmGridDispatch ||
-                 particleListsRequested) &&
+                particleListsRequested &&
                 _mpmTileFlagsBuffer != null &&
                 _mpmActiveTileIndicesBuffer != null &&
                 _mpmTileDispatchArgsBuffer != null &&
@@ -3332,34 +2728,15 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _useMpmParticleTileListsThisStep =
                 _useMpmTileOccupancyThisStep &&
                 particleListsRequested &&
-                _mpmTileParticleCountsBuffer != null &&
-                _mpmTileParticleWriteCountsBuffer != null &&
-                _mpmTileParticleOffsetsBuffer != null &&
-                _mpmTileParticleIndicesBuffer != null &&
-                _mpmTileParticleMetaBuffer != null &&
                 _mpmTileOwnerParticleCountsBuffer != null &&
                 _mpmTileOwnerParticleWriteCountsBuffer != null &&
                 _mpmTileOwnerParticleOffsetsBuffer != null &&
-                _mpmTileOrderedParticleIndicesBuffer != null &&
-                _mpmTileOrderedParticleDispatchArgsBuffer != null &&
-                _mpmTileOrderedParticleMetaBuffer != null &&
-                _mpmTileParticleListCapacity > 0;
-
-            _buildMpmSupportParticleTileListsThisStep =
-                _useMpmParticleTileListsThisStep &&
-                supportParticleListsRequested;
-            _useTiledP2GThisStep =
-                _useMpmParticleTileListsThisStep &&
-                (config.enableTiledP2G ||
-                 config.enableTileOrderedParticlePipeline);
-
-            _useTileOrderedParticlePipelineThisStep =
-                _useTiledP2GThisStep &&
-                config.enableTileOrderedParticlePipeline;
+                _mpmTileOwnerParticleIndicesBuffer != null &&
+                _mpmTileSupportMasksBuffer != null;
 
             _useHybridTiledP2GThisStep =
                 _useMpmParticleTileListsThisStep &&
-                config.enableHybridTiledP2G;
+                _kernelP2GHybridTiled >= 0;
 
             int currentParticleCount =
                 context.GpuBufferSet.UploadedParticleCount;
@@ -3378,7 +2755,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _effectiveOwnerTileListRebuildInterval = ownerListInterval;
             bool hybridOwnerListReuseAvailable =
                 _useHybridTiledP2GThisStep &&
-                !_buildMpmSupportParticleTileListsThisStep &&
                 ownerListInterval > 1 &&
                 _mpmOwnerParticleListsReady &&
                 _mpmOwnerParticleListParticleCount == currentParticleCount;
@@ -3416,39 +2792,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _useTiledMpmGridDispatchThisStep =
                 _useMpmTileOccupancyThisStep &&
-                (config.enableTiledMpmGridDispatch ||
-                 _useTiledP2GThisStep ||
-                 _useHybridTiledP2GThisStep) &&
-                !_useActiveMpmGridBoundsThisStep;
+                _useHybridTiledP2GThisStep;
 
-        }
-
-        private int GridGroups(int count)
-        {
-            return Mathf.CeilToInt(count / 8.0f);
-        }
-
-        private Vector3Int GetMpmGridDispatchSize(FluidSolverContext context)
-        {
-            if (_useActiveMpmGridBoundsThisStep)
-                return _activeMpmGridSize;
-
-            return context.GpuMpmConfig.gridResolution;
-        }
-
-        private void DispatchMpmGridKernel(
-            ComputeShader compute,
-            int kernel,
-            FluidSolverContext context)
-        {
-            Vector3Int dispatchSize = GetMpmGridDispatchSize(context);
-
-            compute.Dispatch(
-                kernel,
-                GridGroups(Mathf.Max(dispatchSize.x, 1)),
-                GridGroups(Mathf.Max(dispatchSize.y, 1)),
-                GridGroups(Mathf.Max(dispatchSize.z, 1))
-            );
         }
 
         private void DispatchMpmActiveTileKernel(
@@ -3456,13 +2801,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             int kernel)
         {
             compute.DispatchIndirect(kernel, _mpmTileDispatchArgsBuffer, 0);
-        }
-
-        private int GetMpmGridDispatchNodeCount(int gridNodeCount)
-        {
-            return _useActiveMpmGridBoundsThisStep
-                ? Mathf.Max(_activeMpmGridNodeCount, 0)
-                : gridNodeCount;
         }
 
         private int ProjectionGroups(int count)
@@ -3599,146 +2937,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 requiredMax.z <= gridMax.z;
 
             _stats.gpuRequiredGridExtent = 2.0f * bucketBoundingRadius;
-        }
-
-        private void UpdateActiveMpmGridBounds(FluidSolverContext context)
-        {
-            GpuMpmSolverConfig config = context.GpuMpmConfig;
-            Vector3Int resolution = config.gridResolution;
-            int gridNodeCount = config.GridNodeCount;
-
-            _activeMpmGridMin = Vector3Int.zero;
-            _activeMpmGridSize = resolution;
-            _activeMpmGridNodeCount = gridNodeCount;
-            _useActiveMpmGridBoundsThisStep = false;
-
-            if (!config.enableActiveMpmGridBounds ||
-                context.BucketSystem == null ||
-                !context.BucketSystem.IsInitialized ||
-                context.BucketSystem.Config == null)
-            {
-                return;
-            }
-
-            var bucket = context.BucketSystem;
-            var bucketConfig = bucket.Config;
-            var bucketState = bucket.State;
-
-            float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
-            float maxRadius = Mathf.Max(
-                bucketConfig.topRadiusMeters,
-                bucketConfig.bottomRadiusMeters
-            );
-
-            float padding =
-                Mathf.Max(config.activeMpmGridBoundsPaddingMeters, 0.0f) +
-                Mathf.Max(config.activeMpmGridBoundsPaddingCells, 0) *
-                Mathf.Max(config.cellSizeMeters, 1e-6f);
-
-            Matrix4x4 localToWorld = Matrix4x4.TRS(
-                bucketState.position,
-                bucketState.rotation,
-                Vector3.one
-            );
-
-            Vector3 localMin = new Vector3(
-                -maxRadius,
-                -halfHeight,
-                -maxRadius
-            );
-            Vector3 localMax = new Vector3(
-                maxRadius,
-                halfHeight,
-                maxRadius
-            );
-
-            Vector3 worldMin = new Vector3(
-                float.PositiveInfinity,
-                float.PositiveInfinity,
-                float.PositiveInfinity
-            );
-            Vector3 worldMax = new Vector3(
-                float.NegativeInfinity,
-                float.NegativeInfinity,
-                float.NegativeInfinity
-            );
-
-            for (int z = 0; z <= 1; z++)
-            {
-                for (int y = 0; y <= 1; y++)
-                {
-                    for (int x = 0; x <= 1; x++)
-                    {
-                        Vector3 localCorner = new Vector3(
-                            x == 0 ? localMin.x : localMax.x,
-                            y == 0 ? localMin.y : localMax.y,
-                            z == 0 ? localMin.z : localMax.z
-                        );
-
-                        Vector3 worldCorner =
-                            localToWorld.MultiplyPoint3x4(localCorner);
-
-                        worldMin = Vector3.Min(worldMin, worldCorner);
-                        worldMax = Vector3.Max(worldMax, worldCorner);
-                    }
-                }
-            }
-
-            worldMin -= Vector3.one * padding;
-            worldMax += Vector3.one * padding;
-
-            float invCellSize = 1.0f / Mathf.Max(config.cellSizeMeters, 1e-6f);
-            Vector3 minGrid = (worldMin - _runtimeGridOriginWorld) * invCellSize;
-            Vector3 maxGrid = (worldMax - _runtimeGridOriginWorld) * invCellSize;
-
-            Vector3Int minCell = new Vector3Int(
-                Mathf.Clamp(Mathf.FloorToInt(minGrid.x), 0, resolution.x),
-                Mathf.Clamp(Mathf.FloorToInt(minGrid.y), 0, resolution.y),
-                Mathf.Clamp(Mathf.FloorToInt(minGrid.z), 0, resolution.z)
-            );
-
-            Vector3Int maxCellExclusive = new Vector3Int(
-                Mathf.Clamp(Mathf.CeilToInt(maxGrid.x) + 1, 0, resolution.x),
-                Mathf.Clamp(Mathf.CeilToInt(maxGrid.y) + 1, 0, resolution.y),
-                Mathf.Clamp(Mathf.CeilToInt(maxGrid.z) + 1, 0, resolution.z)
-            );
-
-            Vector3Int size = maxCellExclusive - minCell;
-
-            if (size.x <= 0 ||
-                size.y <= 0 ||
-                size.z <= 0)
-            {
-                return;
-            }
-
-            long activeNodeCountLong =
-                (long)size.x *
-                size.y *
-                size.z;
-
-            if (activeNodeCountLong <= 0 ||
-                activeNodeCountLong > int.MaxValue)
-            {
-                return;
-            }
-
-            int activeNodeCount = (int)activeNodeCountLong;
-            float activeFraction =
-                gridNodeCount > 0
-                    ? (float)activeNodeCount / gridNodeCount
-                    : 1.0f;
-
-            if (activeFraction >=
-                Mathf.Clamp(config.activeMpmGridMaxFullGridFraction, 0.1f, 1.0f))
-            {
-                return;
-            }
-
-            _activeMpmGridMin = minCell;
-            _activeMpmGridSize = size;
-            _activeMpmGridNodeCount = activeNodeCount;
-            _useActiveMpmGridBoundsThisStep = true;
         }
 
         private void UpdateActiveProjectionBounds(FluidSolverContext context)
@@ -3900,7 +3098,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             FluidSolverContext context)
         {
             _useMpmTileProjectionDispatchThisStep =
-                context.GpuMpmConfig.enableMpmTileProjectionDispatch &&
                 _useMpmTileOccupancyThisStep &&
                 _mpmTileSizeCells == 8 &&
                 _mpmTileSizeShift == 3 &&
@@ -4189,7 +3386,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
 
             BindBucketHoleBuffers(compute, kernel);
-            BindTileOrderedParticleLookup(compute, kernel);
         }
 
         private void BindBucketHoleBuffers(ComputeShader compute, int kernel)
@@ -4486,7 +3682,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _projectionCellMassIntBuffer
             );
 
-            BindTileOrderedParticleLookup(compute, kernel);
         }
 
         private void BindFinalizeProjectionGrid(ComputeShader compute)
@@ -4572,20 +3767,15 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.useMpmGridForProjection;
             if (!useMpmGridMass)
             {
-                int markFluidKernel =
-                    _useTileOrderedParticlePipelineThisStep
-                        ? _kernelMarkProjectionFluidCellsTileOrdered
-                        : _kernelMarkProjectionFluidCells;
                 BindMarkProjectionFluidCells(
                     compute,
                     context,
-                    markFluidKernel
+                    _kernelMarkProjectionFluidCells
                 );
                 DispatchParticleKernel(
                     compute,
-                    markFluidKernel,
-                    particleCount,
-                    _useTileOrderedParticlePipelineThisStep
+                    _kernelMarkProjectionFluidCells,
+                    particleCount
                 );
             }
 
@@ -5274,25 +4464,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                           _stats.gpuGridNodeCount
                         : 0.0f;
             }
-            _stats.gpuMpmTileParticleReferenceCount =
-                values.Length > DiagnosticMpmTileParticleRefs
-                    ? (int)values[DiagnosticMpmTileParticleRefs]
-                    : 0;
-            _stats.gpuMpmTileMaxParticleReferences =
-                values.Length > DiagnosticMpmTileMaxParticleRefs
-                    ? (int)values[DiagnosticMpmTileMaxParticleRefs]
-                    : 0;
-            _stats.gpuMpmTileParticleListOverflowCount =
-                values.Length > DiagnosticMpmTileParticleListOverflow
-                    ? (int)values[DiagnosticMpmTileParticleListOverflow]
-                    : 0;
-            if (values.Length > DiagnosticMpmTileParticleListCapacity &&
-                values[DiagnosticMpmTileParticleListCapacity] > 0)
-            {
-                _stats.gpuMpmTileParticleListCapacity =
-                    (int)values[DiagnosticMpmTileParticleListCapacity];
-            }
-
             _stats.projectionFluidCellCount = fluidCells;
             _stats.projectionSparsePressureCellCount = fluidCells;
             _stats.projectionSparsePressureCellFraction =

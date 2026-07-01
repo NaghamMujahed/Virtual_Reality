@@ -23,19 +23,6 @@ MonoBehaviour:
   gravityScale: 1
   velocityDampingPerSecond: 1.1
   maxParticleSpeed: 3
-  enableActiveMpmGridBounds: 0
-  activeMpmGridBoundsPaddingMeters: 0.04
-  activeMpmGridBoundsPaddingCells: 2
-  activeMpmGridMaxFullGridFraction: 0.95
-  enableMpmTileOccupancy: 1
-  enableTiledMpmGridDispatch: 0
-  enableMpmParticleTileLists: 0
-  enableTiledP2G: 0
-  enableTileOrderedParticlePipeline: 0
-  enableHybridTiledP2G: 1
-  enableCenteredHybridP2GOwnerTile: 1
-  enableFusedG2PPostCollision: 1
-  enableFusedPreCollisionTileMark: 1
   enableAdaptiveTransferStencil: 1
   enableAdaptiveG2PTransferStencil: 0
   adaptiveTransferMinParticles: 200000
