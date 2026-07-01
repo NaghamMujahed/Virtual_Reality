@@ -38,6 +38,10 @@ float _PaintViscosity;
 float _YieldStress;
 float _ViscosityDamping;
 float _MomentumFlowFactor;
+float _HeightGradientFlowFactor;
+float _RivuletFactor;
+float _EdgeDrainFactor;
+float _EdgeDripThreshold;
 
 float3 _CanvasTangent;
 float3 _CanvasBitangent;
@@ -82,12 +86,20 @@ float2 ApplyUvFlowFlip(float2 flow)
     return flow * float2(_FlipU != 0 ? -1.0 : 1.0, _FlipV != 0 ? -1.0 : 1.0);
 }
 
+float Hash21(float2 p)
+{
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+
 MpmPaintFilmCell PackCell(
     float thickness,
     float wetness,
     float3 color,
     MpmPaintFilmCell source,
-    float absorbedAdd)
+    float absorbedAdd,
+    float2 flowAdd)
 {
     MpmPaintFilmCell cell;
     thickness = max(thickness, 0.0);
@@ -106,8 +118,9 @@ MpmPaintFilmCell PackCell(
     cell.deposited = depositedU;
     cell.absorbed = source.absorbed + (uint)round(max(absorbedAdd, 0.0));
     cell.impactCount = source.impactCount;
-    cell.flowU = (int)round((float)source.flowU * 0.96);
-    cell.flowV = (int)round((float)source.flowV * 0.96);
+    float2 flow = float2((float)source.flowU, (float)source.flowV) * 0.96 + flowAdd;
+    cell.flowU = (int)round(clamp(flow.x, -8000.0, 8000.0));
+    cell.flowV = (int)round(clamp(flow.y, -8000.0, 8000.0));
     cell.flags = thicknessU > 0u ? 1u : 0u;
     cell.reserved = 0u;
     return cell;
@@ -132,6 +145,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
     float thickness = ThicknessUnits(self);
     float wetness = Wetness01(self);
     float3 color = CellColor(self);
+    float2 flowAdd = float2(0.0, 0.0);
 
     float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
     float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
@@ -190,6 +204,63 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
         }
 
         thickness = targetThickness;
+    }
+
+    if (_HeightGradientFlowFactor > 0.0)
+    {
+        float leftThickness = ThicknessUnits(left);
+        float rightThickness = ThicknessUnits(right);
+        float downThickness = ThicknessUnits(down);
+        float upThickness = ThicknessUnits(up);
+
+        float pressureStep =
+            max(_HeightGradientFlowFactor, 0.0) *
+            mobility *
+            max(wetness, 0.18) *
+            saturate(_SpreadFactor) *
+            (1.0 - saturate(_Roughness) * 0.52) *
+            _DeltaTime *
+            0.42;
+
+        float selfOut =
+            max(thickness - leftThickness, 0.0) +
+            max(thickness - rightThickness, 0.0) +
+            max(thickness - downThickness, 0.0) +
+            max(thickness - upThickness, 0.0);
+        selfOut *= pressureStep * 0.25;
+
+        float inLeft = max(leftThickness - thickness, 0.0) * pressureStep * 0.25;
+        float inRight = max(rightThickness - thickness, 0.0) * pressureStep * 0.25;
+        float inDown = max(downThickness - thickness, 0.0) * pressureStep * 0.25;
+        float inUp = max(upThickness - thickness, 0.0) * pressureStep * 0.25;
+        float incoming = inLeft + inRight + inDown + inUp;
+
+        float remaining = max(0.0, thickness - selfOut);
+        float newThickness = remaining + incoming;
+
+        if (incoming > 0.0 && newThickness > 0.0)
+        {
+            float3 incomingColor =
+                CellColor(left) * inLeft +
+                CellColor(right) * inRight +
+                CellColor(down) * inDown +
+                CellColor(up) * inUp;
+            incomingColor /= max(incoming, 1.0);
+
+            float incomingWetness =
+                Wetness01(left) * inLeft +
+                Wetness01(right) * inRight +
+                Wetness01(down) * inDown +
+                Wetness01(up) * inUp;
+            incomingWetness /= max(incoming, 1.0);
+
+            color = (color * remaining + incomingColor * incoming) / max(newThickness, 1.0);
+            wetness = max(wetness, incomingWetness);
+        }
+
+        float2 heightPush = float2(leftThickness - rightThickness, downThickness - upThickness);
+        flowAdd += clamp(heightPush * pressureStep * 0.24, -1500.0, 1500.0);
+        thickness = newThickness;
     }
 
     if (_MomentumFlowFactor > 0.0)
@@ -287,10 +358,17 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
                 mobility *
                 slope *
                 _DeltaTime *
-                0.22;
+                0.28;
 
             float upstreamThickness = ThicknessUnits(upstream);
             float upstreamWetness = Wetness01(upstream);
+            float rivuletNoise = Hash21(float2(x, y) * 0.37 + gravityUv * 17.0);
+            float rivuletBand = smoothstep(0.18, 0.72, rivuletNoise);
+            float rivuletGain =
+                1.0 +
+                max(_RivuletFactor, 0.0) *
+                rivuletBand *
+                saturate(upstreamThickness / max((float)_ThicknessUnitsPerMeter * 0.0015, 1.0));
             float incoming =
                 upstreamThickness *
                 upstreamWetness *
@@ -298,7 +376,8 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
                 mobility *
                 slope *
                 _DeltaTime *
-                0.22;
+                0.28 *
+                rivuletGain;
 
             float remaining = max(0.0, thickness - selfOut);
             float newThickness = remaining + incoming;
@@ -311,8 +390,32 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
             }
 
             thickness = newThickness;
+            flowAdd += gravityUv * (selfOut + incoming) * 0.0035;
+
+            bool onDrainEdge =
+                (gravityUv.x < -0.15 && x == 0) ||
+                (gravityUv.x > 0.15 && x == _GridWidth - 1) ||
+                (gravityUv.y < -0.15 && y == 0) ||
+                (gravityUv.y > 0.15 && y == _GridHeight - 1);
+
+            float thresholdUnits =
+                max(_EdgeDripThreshold, 0.0) *
+                max((float)_ThicknessUnitsPerMeter, 1.0);
+            if (onDrainEdge && thickness > thresholdUnits)
+            {
+                float drain =
+                    (thickness - thresholdUnits) *
+                    wetness *
+                    max(_EdgeDrainFactor, 0.0) *
+                    slope *
+                    mobility *
+                    _DeltaTime *
+                    0.85;
+                thickness = max(0.0, thickness - drain);
+                absorbed += drain * 0.18;
+            }
         }
     }
 
-    _TargetFilmCells[idx] = PackCell(thickness, wetness, color, self, absorbed);
+    _TargetFilmCells[idx] = PackCell(thickness, wetness, color, self, absorbed, flowAdd);
 }

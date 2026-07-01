@@ -35,6 +35,10 @@ namespace PaintBucketSim.Configs
         [Tooltip("Visual-only particle scale. Values above 1 help adjacent particles read as a connected liquid surface.")]
         public float visualRadiusScale = 1.18f;
 
+        [Min(0.00001f)]
+        [Tooltip("Visual-only minimum radius so reused splash droplets remain readable without changing simulation radius.")]
+        public float minimumVisualRadiusMeters = 0.0010f;
+
         [Range(0.05f, 2.0f)]
         [Tooltip("Only used by CameraFacingSplat. Higher values make each splat shade more like a rounded droplet.")]
         public float splatNormalStrength = 0.85f;
@@ -80,6 +84,9 @@ namespace PaintBucketSim.Configs
 
             if (visualRadiusScale < 0.001f)
                 visualRadiusScale = 0.001f;
+
+            if (minimumVisualRadiusMeters < 0.00001f)
+                minimumVisualRadiusMeters = 0.00001f;
 
             splatNormalStrength = Mathf.Clamp(splatNormalStrength, 0.05f, 2.0f);
             splatEdgeSoftness = Mathf.Clamp01(splatEdgeSoftness);

@@ -18,6 +18,9 @@ struct MpmPaintFilmCell
 
 StructuredBuffer<MpmPaintFilmCell> _FilmCells;
 RWTexture2D<float4> _OutputTexture;
+RWTexture2D<float4> _NormalTexture;
+RWTexture2D<float4> _MaterialTexture;
+RWTexture2D<float4> _HeightTexture;
 
 int _GridWidth;
 int _GridHeight;
@@ -29,6 +32,10 @@ float4 _BackgroundColor;
 float _WetDarkening;
 float _WetGlossBoost;
 float _PigmentContrast;
+float _NormalFromThicknessStrength;
+float _VisualHeightScale;
+float _SurfaceRoughness;
+float _GlossResponse;
 int _DebugView;
 
 float3 Heatmap(float t)
@@ -46,6 +53,19 @@ float3 Heatmap(float t)
     return t < 0.33 ? a : (t < 0.66 ? b : c);
 }
 
+int IndexOf(int x, int y)
+{
+    x = clamp(x, 0, _GridWidth - 1);
+    y = clamp(y, 0, _GridHeight - 1);
+    return y * _GridWidth + x;
+}
+
+float ThicknessMetersAt(int x, int y)
+{
+    MpmPaintFilmCell cell = _FilmCells[IndexOf(x, y)];
+    return (float)cell.thickness / max((float)_ThicknessUnitsPerMeter, 1.0);
+}
+
 [numthreads(8, 8, 1)]
 void KBakeFilm(uint3 id : SV_DispatchThreadID)
 {
@@ -61,6 +81,22 @@ void KBakeFilm(uint3 id : SV_DispatchThreadID)
     coverage = 1.0 - exp(-coverage * 2.25);
 
     float wetness = saturate((float)cell.wetness / max((float)_WetnessUnits, 1.0));
+    float leftThickness = ThicknessMetersAt((int)id.x - 1, (int)id.y);
+    float rightThickness = ThicknessMetersAt((int)id.x + 1, (int)id.y);
+    float downThickness = ThicknessMetersAt((int)id.x, (int)id.y - 1);
+    float upThickness = ThicknessMetersAt((int)id.x, (int)id.y + 1);
+    float2 heightGradient =
+        float2(rightThickness - leftThickness, upThickness - downThickness) *
+        max(_NormalFromThicknessStrength, 0.0) *
+        64.0;
+    float3 tangentNormal = normalize(float3(-heightGradient.x, -heightGradient.y, 1.0));
+    float height01 = saturate(thicknessMeters / max(_VisualHeightScale, 1e-6));
+    float smoothness = saturate(lerp(0.08, 0.86, wetness) + _WetGlossBoost * wetness + _GlossResponse * 0.25);
+    float roughness = saturate(lerp(_SurfaceRoughness, 0.04, wetness));
+
+    _NormalTexture[id.xy] = float4(tangentNormal * 0.5 + 0.5, 1.0);
+    _MaterialTexture[id.xy] = float4(0.0, wetness, roughness, smoothness);
+    _HeightTexture[id.xy] = float4(height01, height01, height01, 1.0);
 
     float3 paintColor = _BackgroundColor.rgb;
     if (cell.deposited > 0u)
@@ -119,8 +155,10 @@ void KBakeFilm(uint3 id : SV_DispatchThreadID)
     float3 color = lerp(_BackgroundColor.rgb, pigment, coverage);
     color *= lerp(1.0, 1.0 - saturate(_WetDarkening), wetness * coverage);
 
-    float gloss = wetness * coverage * saturate(_WetGlossBoost);
-    color = lerp(color, min(color + 0.18, float3(1.0, 1.0, 1.0)), gloss);
+    float edgeLift = saturate(length(heightGradient) * 0.16);
+    float gloss = wetness * coverage * saturate(_WetGlossBoost + _GlossResponse * 0.55);
+    color = lerp(color, min(color + 0.20 + edgeLift * 0.10, float3(1.0, 1.0, 1.0)), gloss);
+    color *= 1.0 + edgeLift * coverage * 0.10;
 
     _OutputTexture[id.xy] = float4(saturate(color), 1.0);
 }

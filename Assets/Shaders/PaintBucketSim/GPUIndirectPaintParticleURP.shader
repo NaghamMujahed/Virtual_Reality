@@ -4,6 +4,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
     {
         _FallbackColor ("Fallback Color", Color) = (0.1, 0.35, 1.0, 1.0)
         _VisualRadiusScale ("Visual Radius Scale", Float) = 1.0
+        _MinimumVisualRadius ("Minimum Visual Radius", Float) = 0.001
         _UsePerParticleColor ("Use Per Particle Color", Float) = 1.0
         _RenderMode ("Render Mode", Float) = 0.0
         _SplatNormalStrength ("Splat Normal Strength", Float) = 0.85
@@ -54,6 +55,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
 
             float4 _FallbackColor;
             float _VisualRadiusScale;
+            float _MinimumVisualRadius;
             float _UsePerParticleColor;
             float _Smoothness;
             float _RenderMode;
@@ -79,7 +81,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
                 float4 pr = _ParticlePositionRadius[particleIndex];
 
                 float3 centerWS = pr.xyz;
-                float radius = max(pr.w * _VisualRadiusScale, 0.0001);
+                float radius = max(pr.w * _VisualRadiusScale, max(_MinimumVisualRadius, 0.0001));
 
                 float3 local;
                 float3 normalWS;
@@ -147,8 +149,9 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
                 float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - input.positionWS);
                 float3 halfDir = normalize(lightDir + viewDir);
                 float specularPower = lerp(20.0, 96.0, saturate(_Smoothness));
+                float splatWetBoost = _RenderMode > 0.5 ? 1.45 : 1.0;
                 float specular = pow(saturate(dot(n, halfDir)), specularPower) *
-                    saturate(_PaintSpecularStrength);
+                    saturate(_PaintSpecularStrength * splatWetBoost);
 
                 float fresnel = pow(1.0 - saturate(dot(n, viewDir)), 3.0) *
                     saturate(_PaintFresnelStrength);

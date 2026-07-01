@@ -158,6 +158,7 @@ namespace PaintBucketSim.Systems.Fluid
                 renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
 
             _mpb.SetFloat("_VisualRadiusScale", renderConfig.visualRadiusScale);
+            _mpb.SetFloat("_MinimumVisualRadius", renderConfig.minimumVisualRadiusMeters);
             _mpb.SetFloat("_UsePerParticleColor", renderConfig.usePerParticleColor ? 1.0f : 0.0f);
             _mpb.SetColor("_FallbackColor", renderConfig.fallbackColor);
             _mpb.SetInt("_ParticleIndexStride", _effectiveRenderStride);

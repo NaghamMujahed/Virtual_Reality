@@ -31,6 +31,8 @@ namespace PaintBucketSim.Systems.Canvas
         [Range(0.0f, 1.0f)] [SerializeField] private float wetDarkening = 0.18f;
         [Range(0.0f, 1.0f)] [SerializeField] private float wetGlossBoost = 0.20f;
         [Range(0.0f, 1.0f)] [SerializeField] private float pigmentContrast = 0.22f;
+        [Range(0.0f, 8.0f)] [SerializeField] private float normalFromThicknessStrength = 2.4f;
+        [Range(0.0f, 0.08f)] [SerializeField] private float visualHeightScaleMeters = 0.018f;
 
         [Header("Evolution")]
         [SerializeField] private bool enableEvolution = true;
@@ -39,6 +41,10 @@ namespace PaintBucketSim.Systems.Canvas
         [Range(0.0f, 2.0f)] [SerializeField] private float evolutionRate = 1.0f;
         [Range(0.0f, 1.0f)] [SerializeField] private float viscosityDamping = 0.55f;
         [Range(0.0f, 4.0f)] [SerializeField] private float momentumFlowFactor = 1.25f;
+        [Range(0.0f, 4.0f)] [SerializeField] private float heightGradientFlowFactor = 1.15f;
+        [Range(0.0f, 4.0f)] [SerializeField] private float rivuletFactor = 1.2f;
+        [Range(0.0f, 4.0f)] [SerializeField] private float edgeDrainFactor = 0.65f;
+        [Range(0.0f, 0.01f)] [SerializeField] private float edgeDripThresholdMeters = 0.00065f;
         [SerializeField] private Vector3 gravityDirectionWorld = Vector3.down;
 
         private int _bakeKernel = -1;
@@ -48,6 +54,9 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_SourceFilmCells = Shader.PropertyToID("_SourceFilmCells");
         private static readonly int ID_TargetFilmCells = Shader.PropertyToID("_TargetFilmCells");
         private static readonly int ID_OutputTexture = Shader.PropertyToID("_OutputTexture");
+        private static readonly int ID_NormalTexture = Shader.PropertyToID("_NormalTexture");
+        private static readonly int ID_MaterialTexture = Shader.PropertyToID("_MaterialTexture");
+        private static readonly int ID_HeightTexture = Shader.PropertyToID("_HeightTexture");
         private static readonly int ID_GridWidth = Shader.PropertyToID("_GridWidth");
         private static readonly int ID_GridHeight = Shader.PropertyToID("_GridHeight");
         private static readonly int ID_ThicknessUnitsPerMeter = Shader.PropertyToID("_ThicknessUnitsPerMeter");
@@ -58,6 +67,10 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_WetDarkening = Shader.PropertyToID("_WetDarkening");
         private static readonly int ID_WetGlossBoost = Shader.PropertyToID("_WetGlossBoost");
         private static readonly int ID_PigmentContrast = Shader.PropertyToID("_PigmentContrast");
+        private static readonly int ID_NormalFromThicknessStrength = Shader.PropertyToID("_NormalFromThicknessStrength");
+        private static readonly int ID_VisualHeightScale = Shader.PropertyToID("_VisualHeightScale");
+        private static readonly int ID_SurfaceRoughness = Shader.PropertyToID("_SurfaceRoughness");
+        private static readonly int ID_GlossResponse = Shader.PropertyToID("_GlossResponse");
         private static readonly int ID_DebugView = Shader.PropertyToID("_DebugView");
         private static readonly int ID_DeltaTime = Shader.PropertyToID("_DeltaTime");
         private static readonly int ID_EnableDiffusion = Shader.PropertyToID("_EnableDiffusion");
@@ -72,6 +85,10 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_YieldStress = Shader.PropertyToID("_YieldStress");
         private static readonly int ID_ViscosityDamping = Shader.PropertyToID("_ViscosityDamping");
         private static readonly int ID_MomentumFlowFactor = Shader.PropertyToID("_MomentumFlowFactor");
+        private static readonly int ID_HeightGradientFlowFactor = Shader.PropertyToID("_HeightGradientFlowFactor");
+        private static readonly int ID_RivuletFactor = Shader.PropertyToID("_RivuletFactor");
+        private static readonly int ID_EdgeDrainFactor = Shader.PropertyToID("_EdgeDrainFactor");
+        private static readonly int ID_EdgeDripThreshold = Shader.PropertyToID("_EdgeDripThreshold");
         private static readonly int ID_CanvasTangent = Shader.PropertyToID("_CanvasTangent");
         private static readonly int ID_CanvasBitangent = Shader.PropertyToID("_CanvasBitangent");
         private static readonly int ID_CanvasNormal = Shader.PropertyToID("_CanvasNormal");
@@ -131,14 +148,21 @@ namespace PaintBucketSim.Systems.Canvas
                 _bakeKernel < 0 ||
                 surface == null ||
                 surface.PaintTexture == null ||
+                surface.NormalTexture == null ||
+                surface.MaterialTexture == null ||
+                surface.HeightTexture == null ||
                 !surface.FilmGrid.IsValid)
             {
                 return;
             }
 
             MpmPaintFilmGrid grid = surface.FilmGrid;
+            MpmCanvasSurfaceMaterialSettings settings = surface.MaterialSettings;
             paintFilmBakerCompute.SetBuffer(_bakeKernel, ID_FilmCells, grid.CellBuffer);
             paintFilmBakerCompute.SetTexture(_bakeKernel, ID_OutputTexture, surface.PaintTexture);
+            paintFilmBakerCompute.SetTexture(_bakeKernel, ID_NormalTexture, surface.NormalTexture);
+            paintFilmBakerCompute.SetTexture(_bakeKernel, ID_MaterialTexture, surface.MaterialTexture);
+            paintFilmBakerCompute.SetTexture(_bakeKernel, ID_HeightTexture, surface.HeightTexture);
             paintFilmBakerCompute.SetInt(ID_GridWidth, grid.Width);
             paintFilmBakerCompute.SetInt(ID_GridHeight, grid.Height);
             paintFilmBakerCompute.SetInt(ID_ThicknessUnitsPerMeter, MpmPaintFilmGrid.ThicknessUnitsPerMeter);
@@ -149,6 +173,10 @@ namespace PaintBucketSim.Systems.Canvas
             paintFilmBakerCompute.SetFloat(ID_WetDarkening, wetDarkening);
             paintFilmBakerCompute.SetFloat(ID_WetGlossBoost, wetGlossBoost);
             paintFilmBakerCompute.SetFloat(ID_PigmentContrast, pigmentContrast);
+            paintFilmBakerCompute.SetFloat(ID_NormalFromThicknessStrength, normalFromThicknessStrength);
+            paintFilmBakerCompute.SetFloat(ID_VisualHeightScale, visualHeightScaleMeters);
+            paintFilmBakerCompute.SetFloat(ID_SurfaceRoughness, settings.roughness);
+            paintFilmBakerCompute.SetFloat(ID_GlossResponse, settings.glossResponse);
             paintFilmBakerCompute.SetInt(ID_DebugView, (int)debugView);
 
             paintFilmBakerCompute.Dispatch(
@@ -198,6 +226,10 @@ namespace PaintBucketSim.Systems.Canvas
             paintFilmEvolverCompute.SetFloat(ID_YieldStress, yieldStress);
             paintFilmEvolverCompute.SetFloat(ID_ViscosityDamping, viscosityDamping);
             paintFilmEvolverCompute.SetFloat(ID_MomentumFlowFactor, momentumFlowFactor);
+            paintFilmEvolverCompute.SetFloat(ID_HeightGradientFlowFactor, heightGradientFlowFactor);
+            paintFilmEvolverCompute.SetFloat(ID_RivuletFactor, rivuletFactor);
+            paintFilmEvolverCompute.SetFloat(ID_EdgeDrainFactor, edgeDrainFactor);
+            paintFilmEvolverCompute.SetFloat(ID_EdgeDripThreshold, edgeDripThresholdMeters);
             paintFilmEvolverCompute.SetVector(ID_CanvasTangent, frame.tangent);
             paintFilmEvolverCompute.SetVector(ID_CanvasBitangent, frame.bitangent);
             paintFilmEvolverCompute.SetVector(ID_CanvasNormal, frame.normal);
@@ -282,9 +314,15 @@ namespace PaintBucketSim.Systems.Canvas
             wetDarkening = Mathf.Clamp01(wetDarkening);
             wetGlossBoost = Mathf.Clamp01(wetGlossBoost);
             pigmentContrast = Mathf.Clamp01(pigmentContrast);
+            normalFromThicknessStrength = Mathf.Clamp(normalFromThicknessStrength, 0.0f, 8.0f);
+            visualHeightScaleMeters = Mathf.Clamp(visualHeightScaleMeters, 0.0f, 0.08f);
             evolutionRate = Mathf.Clamp(evolutionRate, 0.0f, 2.0f);
             viscosityDamping = Mathf.Clamp01(viscosityDamping);
             momentumFlowFactor = Mathf.Clamp(momentumFlowFactor, 0.0f, 4.0f);
+            heightGradientFlowFactor = Mathf.Clamp(heightGradientFlowFactor, 0.0f, 4.0f);
+            rivuletFactor = Mathf.Clamp(rivuletFactor, 0.0f, 4.0f);
+            edgeDrainFactor = Mathf.Clamp(edgeDrainFactor, 0.0f, 4.0f);
+            edgeDripThresholdMeters = Mathf.Clamp(edgeDripThresholdMeters, 0.0f, 0.01f);
             ResolveKernels();
         }
     }

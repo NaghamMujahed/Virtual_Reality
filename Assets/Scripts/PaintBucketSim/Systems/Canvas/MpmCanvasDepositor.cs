@@ -84,6 +84,7 @@ namespace PaintBucketSim.Systems.Canvas
         [SerializeField] private Vector3 gravityDirectionWorld = Vector3.down;
 
         [Header("Visible MPM Droplets")]
+        [SerializeField] private bool autoAddHybridParticleRenderer = true;
         [SerializeField] private bool enableVisibleParticleReuse = true;
         [Range(0.0f, 1.0f)] [SerializeField] private float splashVisibleReuseProbability = 0.72f;
         [Range(0.0f, 1.0f)] [SerializeField] private float strongSpreadVisibleReuseProbability = 0.24f;
@@ -208,6 +209,15 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_VisibleDropletMinRadius = Shader.PropertyToID("_VisibleDropletMinRadius");
 
         public MpmCanvasDepositorStats Stats => _stats;
+        public GraphicsBuffer SurfaceParticleBuffer => _surfaceParticleBuffer;
+        public GraphicsBuffer DropletParticleBuffer => _dropletParticleBuffer;
+        public int SurfaceParticleCapacity => _surfaceCapacity;
+        public int DropletParticleCapacity => _dropletCapacity;
+        public bool HasHybridParticleBuffers =>
+            _surfaceParticleBuffer != null &&
+            _dropletParticleBuffer != null &&
+            _surfaceCapacity > 0 &&
+            _dropletCapacity > 0;
 
         private void Awake()
         {
@@ -220,6 +230,7 @@ namespace PaintBucketSim.Systems.Canvas
             ResolveReferences();
             ResolveKernels();
             SubscribeSurfaceReset();
+            EnsureHybridParticleRenderer();
             _needsInitialCapture = true;
         }
 
@@ -740,6 +751,15 @@ namespace PaintBucketSim.Systems.Canvas
 
             if (paintFluidSystem == null)
                 paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
+        }
+
+        private void EnsureHybridParticleRenderer()
+        {
+            if (!autoAddHybridParticleRenderer || !Application.isPlaying)
+                return;
+
+            if (GetComponent<MpmCanvasHybridParticleRenderer>() == null)
+                gameObject.AddComponent<MpmCanvasHybridParticleRenderer>();
         }
 
         private void SubscribeSurfaceReset()

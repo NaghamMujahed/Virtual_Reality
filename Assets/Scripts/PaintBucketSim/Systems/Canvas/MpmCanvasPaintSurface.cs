@@ -41,79 +41,79 @@ namespace PaintBucketSim.Systems.Canvas
                 case MpmCanvasSurfaceMaterialPreset.Paper:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.82f,
-                        spreadFactor = 0.72f,
-                        dripFactor = 0.10f,
-                        dryingRate = 0.45f,
-                        wetnessRetention = 0.45f,
-                        roughness = 0.75f,
-                        splatSharpness = 3.2f,
-                        glossResponse = 0.08f
+                        absorptionRate = 0.86f,
+                        spreadFactor = 0.62f,
+                        dripFactor = 0.06f,
+                        dryingRate = 0.58f,
+                        wetnessRetention = 0.34f,
+                        roughness = 0.84f,
+                        splatSharpness = 3.9f,
+                        glossResponse = 0.05f
                     };
 
                 case MpmCanvasSurfaceMaterialPreset.Fabric:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.8f,
-                        spreadFactor = 0.7f,
-                        dripFactor = 0.12f,
-                        dryingRate = 0.32f,
-                        wetnessRetention = 0.50f,
-                        roughness = 0.88f,
-                        splatSharpness = 4f,
-                        glossResponse = 0.05f
+                        absorptionRate = 0.82f,
+                        spreadFactor = 0.86f,
+                        dripFactor = 0.10f,
+                        dryingRate = 0.36f,
+                        wetnessRetention = 0.44f,
+                        roughness = 0.94f,
+                        splatSharpness = 4.8f,
+                        glossResponse = 0.04f
                     };
 
                 case MpmCanvasSurfaceMaterialPreset.Wood:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.38f,
-                        spreadFactor = 0.86f,
-                        dripFactor = 0.28f,
-                        dryingRate = 0.22f,
-                        wetnessRetention = 0.82f,
-                        roughness = 0.55f,
-                        splatSharpness = 3.8f,
-                        glossResponse = 0.18f
+                        absorptionRate = 0.32f,
+                        spreadFactor = 0.82f,
+                        dripFactor = 0.36f,
+                        dryingRate = 0.18f,
+                        wetnessRetention = 0.88f,
+                        roughness = 0.58f,
+                        splatSharpness = 3.5f,
+                        glossResponse = 0.20f
                     };
 
                 case MpmCanvasSurfaceMaterialPreset.Glass:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.03f,
-                        spreadFactor = 1.55f,
-                        dripFactor = 1.35f,
-                        dryingRate = 0.08f,
-                        wetnessRetention = 1.45f,
-                        roughness = 0.06f,
-                        splatSharpness = 5.8f,
-                        glossResponse = 0.82f
+                        absorptionRate = 0.01f,
+                        spreadFactor = 1.90f,
+                        dripFactor = 1.65f,
+                        dryingRate = 0.05f,
+                        wetnessRetention = 1.65f,
+                        roughness = 0.03f,
+                        splatSharpness = 6.4f,
+                        glossResponse = 0.95f
                     };
 
                 case MpmCanvasSurfaceMaterialPreset.Metal:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.04f,
-                        spreadFactor = 1.28f,
-                        dripFactor = 1.05f,
-                        dryingRate = 0.10f,
-                        wetnessRetention = 1.25f,
-                        roughness = 0.18f,
-                        splatSharpness = 5.0f,
-                        glossResponse = 0.70f
+                        absorptionRate = 0.02f,
+                        spreadFactor = 1.55f,
+                        dripFactor = 1.28f,
+                        dryingRate = 0.08f,
+                        wetnessRetention = 1.35f,
+                        roughness = 0.12f,
+                        splatSharpness = 5.5f,
+                        glossResponse = 0.82f
                     };
 
                 case MpmCanvasSurfaceMaterialPreset.Plastic:
                     return new MpmCanvasSurfaceMaterialSettings
                     {
-                        absorptionRate = 0.08f,
-                        spreadFactor = 1.18f,
-                        dripFactor = 0.80f,
-                        dryingRate = 0.12f,
-                        wetnessRetention = 1.05f,
-                        roughness = 0.24f,
-                        splatSharpness = 4.6f,
-                        glossResponse = 0.48f
+                        absorptionRate = 0.06f,
+                        spreadFactor = 1.35f,
+                        dripFactor = 0.95f,
+                        dryingRate = 0.10f,
+                        wetnessRetention = 1.18f,
+                        roughness = 0.18f,
+                        splatSharpness = 4.8f,
+                        glossResponse = 0.62f
                     };
 
                 default:
@@ -197,6 +197,10 @@ namespace PaintBucketSim.Systems.Canvas
         [SerializeField] private bool applyTextureToTargetRenderer = true;
         [SerializeField] private string baseMapProperty = "_BaseMap";
         [SerializeField] private string mainTextureProperty = "_MainTex";
+        [SerializeField] private string normalMapProperty = "_BumpMap";
+        [SerializeField] private string maskMapProperty = "_MetallicGlossMap";
+        [SerializeField] private string heightMapProperty = "_ParallaxMap";
+        [SerializeField] private string customMaterialMapProperty = "_MpmPaintMaterialMap";
 
         [Header("Debug")]
         [SerializeField] private bool drawBoundsGizmo = true;
@@ -205,6 +209,9 @@ namespace PaintBucketSim.Systems.Canvas
 
         private readonly MpmPaintFilmGrid _filmGrid = new MpmPaintFilmGrid();
         private RenderTexture _paintTexture;
+        private RenderTexture _normalTexture;
+        private RenderTexture _materialTexture;
+        private RenderTexture _heightTexture;
         private MaterialPropertyBlock _propertyBlock;
 
         private bool _hasCommittedTransform;
@@ -217,6 +224,9 @@ namespace PaintBucketSim.Systems.Canvas
 
         public MpmPaintFilmGrid FilmGrid => _filmGrid;
         public RenderTexture PaintTexture => _paintTexture;
+        public RenderTexture NormalTexture => _normalTexture;
+        public RenderTexture MaterialTexture => _materialTexture;
+        public RenderTexture HeightTexture => _heightTexture;
         public Color BackgroundColor => backgroundColor;
         public Vector2Int Resolution => resolution;
         public float WidthMeters => widthMeters;
@@ -268,7 +278,7 @@ namespace PaintBucketSim.Systems.Canvas
         {
             EnsureResources();
             _filmGrid.Clear();
-            ClearRenderTexture();
+            ClearRenderTextures();
             SurfaceReset?.Invoke();
         }
 
@@ -355,7 +365,22 @@ namespace PaintBucketSim.Systems.Canvas
             if (!string.IsNullOrEmpty(mainTextureProperty))
                 _propertyBlock.SetTexture(mainTextureProperty, _paintTexture);
 
+            if (_normalTexture != null && !string.IsNullOrEmpty(normalMapProperty))
+                _propertyBlock.SetTexture(normalMapProperty, _normalTexture);
+
+            if (_materialTexture != null && !string.IsNullOrEmpty(maskMapProperty))
+                _propertyBlock.SetTexture(maskMapProperty, _materialTexture);
+
+            if (_heightTexture != null && !string.IsNullOrEmpty(heightMapProperty))
+                _propertyBlock.SetTexture(heightMapProperty, _heightTexture);
+
+            if (_materialTexture != null && !string.IsNullOrEmpty(customMaterialMapProperty))
+                _propertyBlock.SetTexture(customMaterialMapProperty, _materialTexture);
+
             _propertyBlock.SetColor("_BaseColor", Color.white);
+            _propertyBlock.SetFloat("_Smoothness", Mathf.Lerp(0.18f, 0.92f, materialSettings.glossResponse));
+            _propertyBlock.SetFloat("_BumpScale", 1.0f);
+            _propertyBlock.SetFloat("_Parallax", 0.018f);
             targetRenderer.SetPropertyBlock(_propertyBlock);
         }
 
@@ -371,39 +396,89 @@ namespace PaintBucketSim.Systems.Canvas
         private void EnsureRenderTexture()
         {
             if (_paintTexture != null &&
+                _normalTexture != null &&
+                _materialTexture != null &&
+                _heightTexture != null &&
                 _paintTexture.width == resolution.x &&
-                _paintTexture.height == resolution.y)
+                _paintTexture.height == resolution.y &&
+                _normalTexture.width == resolution.x &&
+                _normalTexture.height == resolution.y &&
+                _materialTexture.width == resolution.x &&
+                _materialTexture.height == resolution.y &&
+                _heightTexture.width == resolution.x &&
+                _heightTexture.height == resolution.y)
             {
                 return;
             }
 
             ReleaseRenderTexture();
 
-            _paintTexture = new RenderTexture(
+            _paintTexture = CreateRenderTexture(
+                $"{name}_MpmCanvasPaintTexture",
+                RenderTextureFormat.ARGB32,
+                FilterMode.Bilinear
+            );
+
+            _normalTexture = CreateRenderTexture(
+                $"{name}_MpmCanvasNormalTexture",
+                RenderTextureFormat.ARGB32,
+                FilterMode.Bilinear
+            );
+
+            _materialTexture = CreateRenderTexture(
+                $"{name}_MpmCanvasMaterialTexture",
+                RenderTextureFormat.ARGB32,
+                FilterMode.Bilinear
+            );
+
+            _heightTexture = CreateRenderTexture(
+                $"{name}_MpmCanvasHeightTexture",
+                RenderTextureFormat.ARGB32,
+                FilterMode.Bilinear
+            );
+
+            ClearRenderTextures();
+        }
+
+        private RenderTexture CreateRenderTexture(
+            string textureName,
+            RenderTextureFormat format,
+            FilterMode filterMode)
+        {
+            RenderTexture texture = new RenderTexture(
                 resolution.x,
                 resolution.y,
                 0,
-                RenderTextureFormat.ARGB32
+                format
             )
             {
-                name = $"{name}_MpmCanvasPaintTexture",
+                name = textureName,
                 enableRandomWrite = true,
-                filterMode = FilterMode.Bilinear,
+                filterMode = filterMode,
                 wrapMode = TextureWrapMode.Clamp,
                 hideFlags = HideFlags.DontSave
             };
-            _paintTexture.Create();
-            ClearRenderTexture();
+
+            texture.Create();
+            return texture;
         }
 
-        private void ClearRenderTexture()
+        private void ClearRenderTextures()
         {
-            if (_paintTexture == null)
+            ClearRenderTexture(_paintTexture, backgroundColor);
+            ClearRenderTexture(_normalTexture, new Color(0.5f, 0.5f, 1.0f, 1.0f));
+            ClearRenderTexture(_materialTexture, new Color(0.0f, 0.0f, 1.0f, 0.0f));
+            ClearRenderTexture(_heightTexture, Color.black);
+        }
+
+        private static void ClearRenderTexture(RenderTexture texture, Color color)
+        {
+            if (texture == null)
                 return;
 
             RenderTexture previous = RenderTexture.active;
-            RenderTexture.active = _paintTexture;
-            GL.Clear(false, true, backgroundColor);
+            RenderTexture.active = texture;
+            GL.Clear(false, true, color);
             RenderTexture.active = previous;
         }
 
@@ -415,17 +490,25 @@ namespace PaintBucketSim.Systems.Canvas
 
         private void ReleaseRenderTexture()
         {
-            if (_paintTexture == null)
+            ReleaseRenderTexture(ref _paintTexture);
+            ReleaseRenderTexture(ref _normalTexture);
+            ReleaseRenderTexture(ref _materialTexture);
+            ReleaseRenderTexture(ref _heightTexture);
+        }
+
+        private static void ReleaseRenderTexture(ref RenderTexture texture)
+        {
+            if (texture == null)
                 return;
 
-            _paintTexture.Release();
+            texture.Release();
 
             if (Application.isPlaying)
-                Destroy(_paintTexture);
+                Destroy(texture);
             else
-                DestroyImmediate(_paintTexture);
+                DestroyImmediate(texture);
 
-            _paintTexture = null;
+            texture = null;
         }
 
         private void InitializeCommittedTransform()
