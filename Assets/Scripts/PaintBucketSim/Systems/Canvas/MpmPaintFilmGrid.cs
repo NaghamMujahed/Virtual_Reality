@@ -115,6 +115,7 @@ namespace PaintBucketSim.Systems.Canvas
         public int flowU;
         public int flowV;
         public uint flags;
+        // Stores pigment averaging weight, independent from physical thickness.
         public uint reserved;
     }
 

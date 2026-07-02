@@ -15,12 +15,12 @@ namespace PaintBucketSim.Systems.Canvas
         [Header("Rendering")]
         [SerializeField] private bool renderSurfaceParticles = true;
         [SerializeField] private bool renderDroplets = true;
-        [Range(0.1f, 12.0f)] [SerializeField] private float surfaceVisualScale = 0.78f;
-        [Range(0.1f, 16.0f)] [SerializeField] private float dropletVisualScale = 1.45f;
+        [Range(0.1f, 12.0f)] [SerializeField] private float surfaceVisualScale = 0.8f;
+        [Range(0.1f, 16.0f)] [SerializeField] private float dropletVisualScale = 1.8f;
         [Min(0.00001f)] [SerializeField] private float minimumWorldRadiusMeters = 0.0012f;
-        [Range(0.0f, 1.0f)] [SerializeField] private float surfaceAlpha = 0.42f;
-        [Range(0.0f, 1.0f)] [SerializeField] private float dropletAlpha = 0.82f;
-        [Range(0.0f, 1.0f)] [SerializeField] private float specularStrength = 0.42f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float surfaceAlpha = 0.35f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float dropletAlpha = 0.65f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float specularStrength = 0.45f;
         [Range(0.0f, 1.0f)] [SerializeField] private float fresnelStrength = 0.18f;
         [SerializeField] private ShadowCastingMode shadowCastingMode = ShadowCastingMode.Off;
         [SerializeField] private bool receiveShadows;

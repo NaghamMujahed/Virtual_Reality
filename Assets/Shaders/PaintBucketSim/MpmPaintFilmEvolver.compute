@@ -42,6 +42,9 @@ float _HeightGradientFlowFactor;
 float _RivuletFactor;
 float _EdgeDrainFactor;
 float _EdgeDripThreshold;
+float _FilmFlowStartThicknessMeters;
+float _PoolHoldFactor;
+float _ThinFilmMobilityBelowThreshold;
 
 float3 _CanvasTangent;
 float3 _CanvasBitangent;
@@ -69,10 +72,18 @@ float Wetness01(MpmPaintFilmCell cell)
 
 float3 CellColor(MpmPaintFilmCell cell)
 {
-    if (cell.deposited == 0u)
-        return float3(0.0, 0.0, 0.0);
+    if (cell.reserved == 0u)
+    {
+        if (cell.deposited == 0u || (cell.colorR | cell.colorG | cell.colorB) == 0u)
+            return float3(0.0, 0.0, 0.0);
 
-    float denom = max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
+        float oldDenom =
+            max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
+        return saturate(float3(cell.colorR, cell.colorG, cell.colorB) / oldDenom);
+    }
+
+    float denom =
+        max((float)cell.reserved * max((float)_ColorWeightScale, 1.0), 1.0);
     return saturate(float3(cell.colorR, cell.colorG, cell.colorB) / denom);
 }
 
@@ -93,6 +104,20 @@ float Hash21(float2 p)
     return frac(p.x * p.y);
 }
 
+uint SafePackColorWeight(float units, MpmPaintFilmCell source)
+{
+    if (source.reserved > 0u)
+        return min(source.reserved, 65535u);
+
+    if (source.deposited > 0u)
+        return min(source.deposited, 4096u);
+
+    if (source.thickness > 0u)
+        return min(source.thickness, 4096u);
+
+    return (uint)round(clamp(units, 1.0, 4096.0));
+}
+
 MpmPaintFilmCell PackCell(
     float thickness,
     float wetness,
@@ -107,22 +132,23 @@ MpmPaintFilmCell PackCell(
     color = saturate(color);
 
     uint thicknessU = (uint)round(min(thickness, 4290000000.0));
-    uint depositedU = thicknessU;
     uint colorScale = (uint)max(_ColorWeightScale, 1);
+    uint colorWeightU = thicknessU > 0u ? SafePackColorWeight(thickness, source) : 0u;
 
     cell.thickness = thicknessU;
     cell.wetness = (uint)round(wetness * (float)_WetnessUnits);
-    cell.colorR = (uint)round((float)depositedU * color.r * (float)colorScale);
-    cell.colorG = (uint)round((float)depositedU * color.g * (float)colorScale);
-    cell.colorB = (uint)round((float)depositedU * color.b * (float)colorScale);
-    cell.deposited = depositedU;
+    cell.colorR = (uint)round((float)colorWeightU * color.r * (float)colorScale);
+    cell.colorG = (uint)round((float)colorWeightU * color.g * (float)colorScale);
+    cell.colorB = (uint)round((float)colorWeightU * color.b * (float)colorScale);
+    cell.deposited = thicknessU;
     cell.absorbed = source.absorbed + (uint)round(max(absorbedAdd, 0.0));
     cell.impactCount = source.impactCount;
     float2 flow = float2((float)source.flowU, (float)source.flowV) * 0.96 + flowAdd;
     cell.flowU = (int)round(clamp(flow.x, -8000.0, 8000.0));
     cell.flowV = (int)round(clamp(flow.y, -8000.0, 8000.0));
     cell.flags = thicknessU > 0u ? 1u : 0u;
-    cell.reserved = 0u;
+    // reserved = colorWeight for stable pigment averaging.
+    cell.reserved = colorWeightU;
     return cell;
 }
 
@@ -150,6 +176,15 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
     float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
     float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
     float mobility = saturate(1.0 - viscosity01 * _ViscosityDamping - yield01 * 0.35);
+    float flowStartUnits =
+        max(_FilmFlowStartThicknessMeters, 0.0) *
+        max((float)_ThicknessUnitsPerMeter, 1.0) *
+        (1.0 + viscosity01 * 0.85 + yield01 * 0.55);
+    flowStartUnits = max(flowStartUnits, 1.0);
+    float accumulation01 = saturate((thickness - flowStartUnits) / flowStartUnits);
+    float thinMobility = saturate(_ThinFilmMobilityBelowThreshold);
+    float gatedMobility = lerp(thinMobility, 1.0, accumulation01);
+    float heldThickness = flowStartUnits * saturate(_PoolHoldFactor);
 
     float retention = max(_WetnessRetention, 0.05);
     float dryFactor = exp(-max(_DryingRate, 0.0) * _DeltaTime / retention);
@@ -176,6 +211,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
         float diffusion =
             saturate(_SpreadFactor) *
             mobility *
+            gatedMobility *
             max(wetness, neighborMass > 0.0 ? 0.35 : 0.0) *
             (1.0 - saturate(_Roughness) * 0.45) *
             _DeltaTime *
@@ -216,6 +252,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
         float pressureStep =
             max(_HeightGradientFlowFactor, 0.0) *
             mobility *
+            gatedMobility *
             max(wetness, 0.18) *
             saturate(_SpreadFactor) *
             (1.0 - saturate(_Roughness) * 0.52) *
@@ -228,6 +265,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
             max(thickness - downThickness, 0.0) +
             max(thickness - upThickness, 0.0);
         selfOut *= pressureStep * 0.25;
+        selfOut = min(selfOut, max(thickness - heldThickness, 0.0));
 
         float inLeft = max(leftThickness - thickness, 0.0) * pressureStep * 0.25;
         float inRight = max(rightThickness - thickness, 0.0) * pressureStep * 0.25;
@@ -270,6 +308,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
         float flowStep =
             max(_MomentumFlowFactor, 0.0) *
             mobility *
+            gatedMobility *
             _DeltaTime *
             1.05;
 
@@ -278,6 +317,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
             wetness *
             selfFlowSpeed *
             flowStep;
+        outflow = min(outflow, max(thickness - heldThickness, 0.0));
 
         float incoming = 0.0;
         float3 incomingColorSum = float3(0.0, 0.0, 0.0);
@@ -356,9 +396,11 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
                 wetness *
                 max(_DripFactor, 0.0) *
                 mobility *
+                gatedMobility *
                 slope *
                 _DeltaTime *
                 0.28;
+            selfOut = min(selfOut, max(thickness - heldThickness, 0.0));
 
             float upstreamThickness = ThicknessUnits(upstream);
             float upstreamWetness = Wetness01(upstream);
@@ -374,6 +416,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
                 upstreamWetness *
                 max(_DripFactor, 0.0) *
                 mobility *
+                gatedMobility *
                 slope *
                 _DeltaTime *
                 0.28 *
@@ -409,6 +452,7 @@ void KEvolveFilm(uint3 id : SV_DispatchThreadID)
                     max(_EdgeDrainFactor, 0.0) *
                     slope *
                     mobility *
+                    gatedMobility *
                     _DeltaTime *
                     0.85;
                 thickness = max(0.0, thickness - drain);

@@ -36,6 +36,7 @@ float _NormalFromThicknessStrength;
 float _VisualHeightScale;
 float _SurfaceRoughness;
 float _GlossResponse;
+float _FilmFlowStartThicknessMeters;
 int _DebugView;
 
 float3 Heatmap(float t)
@@ -99,11 +100,17 @@ void KBakeFilm(uint3 id : SV_DispatchThreadID)
     _HeightTexture[id.xy] = float4(height01, height01, height01, 1.0);
 
     float3 paintColor = _BackgroundColor.rgb;
-    if (cell.deposited > 0u)
+    if (cell.reserved > 0u)
+    {
+        float colorWeight = max((float)cell.reserved, 1.0);
+        float denom = colorWeight * max((float)_ColorWeightScale, 1.0);
+        paintColor = float3(cell.colorR, cell.colorG, cell.colorB) / max(denom, 1.0);
+        paintColor = saturate(paintColor);
+    }
+    else if (cell.deposited > 0u && (cell.colorR | cell.colorG | cell.colorB) != 0u)
     {
         float denom = max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
-        paintColor = float3(cell.colorR, cell.colorG, cell.colorB) / denom;
-        paintColor = saturate(paintColor);
+        paintColor = saturate(float3(cell.colorR, cell.colorG, cell.colorB) / denom);
     }
 
     if (_DebugView == 1)
@@ -146,6 +153,28 @@ void KBakeFilm(uint3 id : SV_DispatchThreadID)
         float mag = saturate(length(flow));
         float3 dirColor = float3(flow.x * 0.5 + 0.5, flow.y * 0.5 + 0.5, 0.18 + 0.82 * mag);
         _OutputTexture[id.xy] = float4(lerp(float3(0.02, 0.02, 0.025), saturate(dirColor), mag), 1.0);
+        return;
+    }
+
+    if (_DebugView == 6)
+    {
+        float startThickness = max(_FilmFlowStartThicknessMeters, 1e-7);
+        float activation = saturate((thicknessMeters - startThickness) / startThickness);
+        _OutputTexture[id.xy] = float4(Heatmap(activation), 1.0);
+        return;
+    }
+
+    if (_DebugView == 7)
+    {
+        bool missingWeight = cell.reserved == 0u && (cell.deposited > 0u || cell.thickness > 0u);
+        float denom =
+            max((float)cell.reserved * max((float)_ColorWeightScale, 1.0), 1.0);
+        float maxChannel = max((float)cell.colorR, max((float)cell.colorG, (float)cell.colorB));
+        bool overweight = cell.reserved > 0u && maxChannel > denom * 1.15;
+
+        float3 ok = lerp(float3(0.02, 0.02, 0.025), float3(0.0, 0.85, 0.35), coverage);
+        float3 warning = overweight ? float3(1.0, 0.65, 0.05) : ok;
+        _OutputTexture[id.xy] = float4(missingWeight ? float3(1.0, 0.05, 0.05) : warning, 1.0);
         return;
     }
 

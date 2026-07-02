@@ -15912,12 +15912,21 @@ MonoBehaviour:
   wetDarkening: 0.18
   wetGlossBoost: 0.2
   pigmentContrast: 0.22
+  normalFromThicknessStrength: 2.4
+  visualHeightScaleMeters: 0.015
   enableEvolution: 1
   enableDiffusion: 1
   enableDrips: 1
   evolutionRate: 1
   viscosityDamping: 0.55
   momentumFlowFactor: 0.75
+  heightGradientFlowFactor: 1.15
+  rivuletFactor: 1.2
+  edgeDrainFactor: 0.65
+  edgeDripThresholdMeters: 0.00065
+  filmFlowStartThicknessMeters: 0.002
+  poolHoldFactor: 0.65
+  thinFilmMobilityBelowThreshold: 0.15
   gravityDirectionWorld: {x: 0, y: -1, z: 0}
 --- !u!114 &2030639911
 MonoBehaviour:
@@ -15939,21 +15948,27 @@ MonoBehaviour:
   widthMeters: 10
   heightMeters: 10
   resolution: {x: 512, y: 512}
+  flipU: 0
+  flipV: 0
   materialPreset: 4
   autoApplyPreset: 1
   materialSettings:
-    absorptionRate: 0.03
-    spreadFactor: 1.55
-    dripFactor: 1.35
-    dryingRate: 0.08
-    wetnessRetention: 1.45
-    roughness: 0.06
-    splatSharpness: 5.8
-    glossResponse: 0.82
+    absorptionRate: 0.01
+    spreadFactor: 1.9
+    dripFactor: 1.65
+    dryingRate: 0.05
+    wetnessRetention: 1.65
+    roughness: 0.03
+    splatSharpness: 6.4
+    glossResponse: 0.95
   backgroundColor: {r: 0.92, g: 0.9, b: 0.84, a: 1}
   applyTextureToTargetRenderer: 1
   baseMapProperty: _BaseMap
   mainTextureProperty: _MainTex
+  normalMapProperty: _BumpMap
+  maskMapProperty: _MetallicGlossMap
+  heightMapProperty: _ParallaxMap
+  customMaterialMapProperty: _MpmPaintMaterialMap
   drawBoundsGizmo: 1
   drawAxesGizmo: 1
   boundsGizmoColor: {r: 0.1, g: 0.85, b: 1, a: 1}
@@ -15980,10 +15995,10 @@ MonoBehaviour:
   collisionSkinMeters: 0.0015
   minimumImpactSpeed: 0.03
   depositionEfficiency: 0.92
-  baseSplatRadiusCells: 1.2
-  impactSpreadMultiplier: 2.2
-  tangentialStretchMultiplier: 3.4
-  maxSplatRadiusCells: 8
+  baseSplatRadiusCells: 0.55
+  impactSpreadMultiplier: 0.45
+  tangentialStretchMultiplier: 0.8
+  maxSplatRadiusCells: 3
   maxDepositUnitsPerParticle: 600000
   shrinkDepositedParticles: 1
   depositedParticleRadiusMeters: 0.00005
@@ -15995,14 +16010,29 @@ MonoBehaviour:
   surfaceParticleDepositRate: 0.9
   surfaceParticleFrictionPerSecond: 4
   dropletDragPerSecond: 2.2
-  splashNormalSpeedThreshold: 2
-  bounceNormalSpeedThreshold: 1.2
-  secondaryDropletMassFraction: 0.18
-  secondaryDropletVelocityBoost: 1.4
-  maxSecondaryDropletsPerImpact: 4
+  splashNormalSpeedThreshold: 0.7
+  bounceNormalSpeedThreshold: 0.8
+  secondaryDropletMassFraction: 0.22
+  secondaryDropletVelocityBoost: 1.9
+  maxSecondaryDropletsPerImpact: 5
   bounceRestitution: 0.18
   gravityAcceleration: 9.81
   gravityDirectionWorld: {x: 0, y: -1, z: 0}
+  enableEdgeDropletEmission: 1
+  edgeDropletDrainFactor: 0.7
+  edgeDropletThresholdMeters: 0.00085
+  autoAddHybridParticleRenderer: 1
+  enableVisibleParticleReuse: 1
+  splashVisibleReuseProbability: 0.72
+  strongSpreadVisibleReuseProbability: 0.24
+  bounceVisibleReuseProbability: 0.88
+  visibleDropletMassFraction: 0.18
+  visibleDropletRadiusScale: 0.42
+  visibleDropletVelocityDamping: 0.68
+  visibleDropletNormalBoost: 0.55
+  visibleDropletSurfaceOffsetRadii: 1.8
+  strongSpreadVisibleSpeed: 1.15
+  visibleDropletMinRadiusMeters: 0.00045
   enableDebugReadback: 0
   debugReadbackInterval: 15
   showDebugOverlay: 0

@@ -33,6 +33,10 @@ namespace PaintBucketSim.Systems.Canvas
         public int spreadReusedParticles;
         public int surfaceParticlesActive;
         public int internalDropletsActive;
+        public int colorWeightClampedAdds;
+        public int edgeDrainMassUnits;
+        public int edgeDropletsSpawned;
+        public int edgeMassLostUnits;
     }
 
     [DefaultExecutionOrder(150)]
@@ -55,10 +59,10 @@ namespace PaintBucketSim.Systems.Canvas
         [Range(0.0f, 1.5f)] [SerializeField] private float depositionEfficiency = 0.92f;
 
         [Header("Splat Shape")]
-        [Range(0.25f, 8.0f)] [SerializeField] private float baseSplatRadiusCells = 1.2f;
-        [Range(0.0f, 8.0f)] [SerializeField] private float impactSpreadMultiplier = 2.2f;
-        [Range(0.0f, 10.0f)] [SerializeField] private float tangentialStretchMultiplier = 3.4f;
-        [Range(1, 12)] [SerializeField] private int maxSplatRadiusCells = 8;
+        [Range(0.25f, 8.0f)] [SerializeField] private float baseSplatRadiusCells = 0.55f;
+        [Range(0.0f, 8.0f)] [SerializeField] private float impactSpreadMultiplier = 0.45f;
+        [Range(0.0f, 10.0f)] [SerializeField] private float tangentialStretchMultiplier = 0.8f;
+        [Range(1, 12)] [SerializeField] private int maxSplatRadiusCells = 3;
         [Min(1)] [SerializeField] private int maxDepositUnitsPerParticle = 600000;
 
         [Header("Particle After Hit")]
@@ -74,14 +78,19 @@ namespace PaintBucketSim.Systems.Canvas
         [Range(0.05f, 4.0f)] [SerializeField] private float surfaceParticleDepositRate = 0.9f;
         [Range(0.0f, 12.0f)] [SerializeField] private float surfaceParticleFrictionPerSecond = 4.0f;
         [Range(0.0f, 12.0f)] [SerializeField] private float dropletDragPerSecond = 2.2f;
-        [Min(0.0f)] [SerializeField] private float splashNormalSpeedThreshold = 2.0f;
-        [Min(0.0f)] [SerializeField] private float bounceNormalSpeedThreshold = 1.2f;
-        [Range(0.0f, 0.8f)] [SerializeField] private float secondaryDropletMassFraction = 0.18f;
-        [Range(0.0f, 8.0f)] [SerializeField] private float secondaryDropletVelocityBoost = 1.4f;
-        [Range(0, 8)] [SerializeField] private int maxSecondaryDropletsPerImpact = 4;
+        [Min(0.0f)] [SerializeField] private float splashNormalSpeedThreshold = 0.7f;
+        [Min(0.0f)] [SerializeField] private float bounceNormalSpeedThreshold = 0.8f;
+        [Range(0.0f, 0.8f)] [SerializeField] private float secondaryDropletMassFraction = 0.22f;
+        [Range(0.0f, 8.0f)] [SerializeField] private float secondaryDropletVelocityBoost = 1.9f;
+        [Range(0, 8)] [SerializeField] private int maxSecondaryDropletsPerImpact = 5;
         [Range(0.0f, 0.8f)] [SerializeField] private float bounceRestitution = 0.18f;
         [Min(0.0f)] [SerializeField] private float gravityAcceleration = 9.81f;
         [SerializeField] private Vector3 gravityDirectionWorld = Vector3.down;
+
+        [Header("Edge Behavior")]
+        [SerializeField] private bool enableEdgeDropletEmission = true;
+        [Range(0.0f, 4.0f)] [SerializeField] private float edgeDropletDrainFactor = 0.7f;
+        [Range(0.0f, 0.01f)] [SerializeField] private float edgeDropletThresholdMeters = 0.00085f;
 
         [Header("Visible MPM Droplets")]
         [SerializeField] private bool autoAddHybridParticleRenderer = true;
@@ -121,6 +130,7 @@ namespace PaintBucketSim.Systems.Canvas
 
         private int _kernelDeposit = -1;
         private int _kernelEvolveHybridParticles = -1;
+        private int _kernelEmitEdgeDroplets = -1;
         private int _kernelCapturePrevious = -1;
         private int _kernelClearCounters = -1;
         private MpmCanvasPaintSurface _subscribedSurface;
@@ -174,6 +184,8 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_AbsorptionRate = Shader.PropertyToID("_AbsorptionRate");
         private static readonly int ID_SpreadFactor = Shader.PropertyToID("_SpreadFactor");
         private static readonly int ID_DripFactor = Shader.PropertyToID("_DripFactor");
+        private static readonly int ID_EdgeDrainFactor = Shader.PropertyToID("_EdgeDrainFactor");
+        private static readonly int ID_EdgeDripThreshold = Shader.PropertyToID("_EdgeDripThreshold");
         private static readonly int ID_Roughness = Shader.PropertyToID("_Roughness");
         private static readonly int ID_SplatSharpness = Shader.PropertyToID("_SplatSharpness");
         private static readonly int ID_PaintDensity = Shader.PropertyToID("_PaintDensity");
@@ -296,6 +308,10 @@ namespace PaintBucketSim.Systems.Canvas
             _stats.spreadReusedParticles = 0;
             _stats.surfaceParticlesActive = 0;
             _stats.internalDropletsActive = 0;
+            _stats.colorWeightClampedAdds = 0;
+            _stats.edgeDrainMassUnits = 0;
+            _stats.edgeDropletsSpawned = 0;
+            _stats.edgeMassLostUnits = 0;
             _needsInitialCapture = true;
         }
 
@@ -352,6 +368,7 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.Dispatch(_kernelDeposit, Groups(particleCount, 256), 1, 1);
 
             DispatchHybridEvolution();
+            DispatchEdgeDroplets();
             DispatchCapturePrevious(particleCount);
             RequestDebugReadbackIfDue();
 
@@ -424,6 +441,8 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_AbsorptionRate, surfaceMaterial.absorptionRate);
             canvasImpactCompute.SetFloat(ID_SpreadFactor, surfaceMaterial.spreadFactor);
             canvasImpactCompute.SetFloat(ID_DripFactor, surfaceMaterial.dripFactor);
+            canvasImpactCompute.SetFloat(ID_EdgeDrainFactor, edgeDropletDrainFactor);
+            canvasImpactCompute.SetFloat(ID_EdgeDripThreshold, edgeDropletThresholdMeters);
             canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
             canvasImpactCompute.SetFloat(ID_SplatSharpness, surfaceMaterial.splatSharpness);
 
@@ -534,6 +553,71 @@ namespace PaintBucketSim.Systems.Canvas
             );
         }
 
+        private void DispatchEdgeDroplets()
+        {
+            if (!enableEdgeDropletEmission ||
+                !enableHybridParticles ||
+                canvasImpactCompute == null ||
+                _kernelEmitEdgeDroplets < 0 ||
+                surface == null ||
+                !surface.FilmGrid.IsValid ||
+                _dropletParticleBuffer == null ||
+                _hybridCountersBuffer == null ||
+                _debugCountersBuffer == null)
+            {
+                return;
+            }
+
+            MpmPaintFilmGrid grid = surface.FilmGrid;
+            MpmCanvasSurfaceFrame frame = surface.Frame;
+            MpmCanvasSurfaceMaterialSettings surfaceMaterial = surface.MaterialSettings;
+            ResolvePaintMaterial(
+                out float density,
+                out float viscosity,
+                out float surfaceTension,
+                out float yieldStress
+            );
+
+            float stepDt = Mathf.Max(Mathf.Max(Time.deltaTime, Time.fixedDeltaTime), 1e-5f);
+            canvasImpactCompute.SetBuffer(_kernelEmitEdgeDroplets, ID_FilmCells, grid.CellBuffer);
+            canvasImpactCompute.SetBuffer(_kernelEmitEdgeDroplets, ID_DropletParticles, _dropletParticleBuffer);
+            canvasImpactCompute.SetBuffer(_kernelEmitEdgeDroplets, ID_HybridCounters, _hybridCountersBuffer);
+            canvasImpactCompute.SetBuffer(_kernelEmitEdgeDroplets, ID_DebugCounters, _debugCountersBuffer);
+            canvasImpactCompute.SetInt(ID_DropletParticleCapacity, _dropletCapacity);
+            canvasImpactCompute.SetInt(ID_GridWidth, grid.Width);
+            canvasImpactCompute.SetInt(ID_GridHeight, grid.Height);
+            canvasImpactCompute.SetInt(ID_ThicknessUnitsPerMeter, MpmPaintFilmGrid.ThicknessUnitsPerMeter);
+            canvasImpactCompute.SetInt(ID_WetnessUnits, MpmPaintFilmGrid.WetnessUnits);
+            canvasImpactCompute.SetInt(ID_ColorWeightScale, MpmPaintFilmGrid.ColorWeightScale);
+            canvasImpactCompute.SetVector(ID_CanvasCurrentNormal, frame.normal);
+            canvasImpactCompute.SetVector(ID_CanvasCurrentTangent, frame.tangent);
+            canvasImpactCompute.SetVector(ID_CanvasCurrentBitangent, frame.bitangent);
+            canvasImpactCompute.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
+            canvasImpactCompute.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
+            canvasImpactCompute.SetFloat(ID_CellSizeU, frame.widthMeters / Mathf.Max(grid.Width, 1));
+            canvasImpactCompute.SetFloat(ID_CellSizeV, frame.heightMeters / Mathf.Max(grid.Height, 1));
+            canvasImpactCompute.SetFloat(ID_DeltaTime, stepDt);
+            canvasImpactCompute.SetFloat(ID_AbsorptionRate, surfaceMaterial.absorptionRate);
+            canvasImpactCompute.SetFloat(ID_DripFactor, surfaceMaterial.dripFactor);
+            canvasImpactCompute.SetFloat(ID_EdgeDrainFactor, edgeDropletDrainFactor);
+            canvasImpactCompute.SetFloat(ID_EdgeDripThreshold, edgeDropletThresholdMeters);
+            canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
+            canvasImpactCompute.SetFloat(ID_PaintViscosity, viscosity);
+            canvasImpactCompute.SetFloat(ID_YieldStress, yieldStress);
+            canvasImpactCompute.SetFloat(ID_CollisionSkin, collisionSkinMeters);
+            canvasImpactCompute.SetInt(ID_EnableHybridParticles, enableHybridParticles ? 1 : 0);
+            canvasImpactCompute.SetFloat(ID_DropletLifetime, dropletLifetimeSeconds);
+            canvasImpactCompute.SetFloat(ID_SecondaryDropletVelocityBoost, secondaryDropletVelocityBoost);
+            canvasImpactCompute.SetVector(ID_GravityDirection, gravityDirectionWorld.normalized);
+
+            canvasImpactCompute.Dispatch(
+                _kernelEmitEdgeDroplets,
+                Groups(grid.CellCount, 256),
+                1,
+                1
+            );
+        }
+
         private void DispatchCapturePrevious(int particleCount)
         {
             if (canvasImpactCompute == null ||
@@ -607,6 +691,10 @@ namespace PaintBucketSim.Systems.Canvas
                 _stats.spreadReusedParticles = count > 17 ? (int)_debugCounters[17] : 0;
                 _stats.surfaceParticlesActive = count > 18 ? (int)_debugCounters[18] : 0;
                 _stats.internalDropletsActive = count > 19 ? (int)_debugCounters[19] : 0;
+                _stats.colorWeightClampedAdds = count > 20 ? (int)_debugCounters[20] : 0;
+                _stats.edgeDrainMassUnits = count > 21 ? (int)_debugCounters[21] : 0;
+                _stats.edgeDropletsSpawned = count > 22 ? (int)_debugCounters[22] : 0;
+                _stats.edgeMassLostUnits = count > 23 ? (int)_debugCounters[23] : 0;
             });
         }
 
@@ -794,6 +882,7 @@ namespace PaintBucketSim.Systems.Canvas
         {
             _kernelDeposit = FindKernelSafe(canvasImpactCompute, "KDepositImpacts");
             _kernelEvolveHybridParticles = FindKernelSafe(canvasImpactCompute, "KEvolveHybridParticles");
+            _kernelEmitEdgeDroplets = FindKernelSafe(canvasImpactCompute, "KEmitEdgeDroplets");
             _kernelCapturePrevious = FindKernelSafe(canvasImpactCompute, "KCapturePreviousPositions");
             _kernelClearCounters = FindKernelSafe(canvasImpactCompute, "KClearDebugCounters");
         }
@@ -854,7 +943,7 @@ namespace PaintBucketSim.Systems.Canvas
             if (!showDebugOverlay)
                 return;
 
-            GUILayout.BeginArea(new Rect(debugOverlayPosition.x, debugOverlayPosition.y, 360.0f, 300.0f), GUI.skin.box);
+            GUILayout.BeginArea(new Rect(debugOverlayPosition.x, debugOverlayPosition.y, 360.0f, 345.0f), GUI.skin.box);
             GUILayout.Label("MPM Canvas Deposition");
             GUILayout.Label($"Initialized: {_stats.initialized} | Enabled: {_stats.enabled}");
             GUILayout.Label($"Particles: {_stats.particleCount} | Frame: {_stats.dispatchFrame}");
@@ -868,6 +957,8 @@ namespace PaintBucketSim.Systems.Canvas
             GUILayout.Label($"Surface spawned/deposited: {_stats.surfaceParticlesSpawned}/{_stats.surfaceParticlesDeposited}");
             GUILayout.Label($"Droplets spawned/deposited: {_stats.dropletsSpawned}/{_stats.dropletsDeposited}");
             GUILayout.Label($"Active surface/internal: {_stats.surfaceParticlesActive}/{_stats.internalDropletsActive}");
+            GUILayout.Label($"Color clamp adds: {_stats.colorWeightClampedAdds}");
+            GUILayout.Label($"Edge drain/droplets/lost: {_stats.edgeDrainMassUnits}/{_stats.edgeDropletsSpawned}/{_stats.edgeMassLostUnits}");
             GUILayout.EndArea();
         }
 
@@ -897,6 +988,8 @@ namespace PaintBucketSim.Systems.Canvas
             maxSecondaryDropletsPerImpact = Mathf.Clamp(maxSecondaryDropletsPerImpact, 0, 8);
             bounceRestitution = Mathf.Clamp(bounceRestitution, 0.0f, 0.8f);
             gravityAcceleration = Mathf.Max(0.0f, gravityAcceleration);
+            edgeDropletDrainFactor = Mathf.Clamp(edgeDropletDrainFactor, 0.0f, 4.0f);
+            edgeDropletThresholdMeters = Mathf.Clamp(edgeDropletThresholdMeters, 0.0f, 0.01f);
             splashVisibleReuseProbability = Mathf.Clamp01(splashVisibleReuseProbability);
             strongSpreadVisibleReuseProbability = Mathf.Clamp01(strongSpreadVisibleReuseProbability);
             bounceVisibleReuseProbability = Mathf.Clamp01(bounceVisibleReuseProbability);

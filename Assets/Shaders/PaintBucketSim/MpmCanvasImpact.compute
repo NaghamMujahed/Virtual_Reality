@@ -1,6 +1,7 @@
 #pragma kernel KClearDebugCounters
 #pragma kernel KCapturePreviousPositions
 #pragma kernel KDepositImpacts
+#pragma kernel KEmitEdgeDroplets
 #pragma kernel KEvolveHybridParticles
 
 struct MpmPaintFilmCell
@@ -79,6 +80,8 @@ int _MaxSplatRadiusCells;
 float _AbsorptionRate;
 float _SpreadFactor;
 float _DripFactor;
+float _EdgeDrainFactor;
+float _EdgeDripThreshold;
 float _Roughness;
 float _SplatSharpness;
 
@@ -117,6 +120,7 @@ float _StrongSpreadVisibleSpeed;
 float _VisibleDropletMinRadius;
 
 static const int MAX_SPLAT_RADIUS = 12;
+static const uint MAX_COLOR_WEIGHT_PER_ADD = 4096u;
 static const int IMPACT_STICK = 0;
 static const int IMPACT_SPREAD = 1;
 static const int IMPACT_SPLASH = 2;
@@ -151,6 +155,33 @@ float2 SafeNormalize2(float2 v, float2 fallback)
 float Random01(float seed)
 {
     return frac(sin(seed * 12.9898 + 78.233) * 43758.5453);
+}
+
+uint SafeColorWeight(uint units)
+{
+    return min(units, MAX_COLOR_WEIGHT_PER_ADD);
+}
+
+float3 FilmCellColor(MpmPaintFilmCell cell)
+{
+    if (cell.reserved == 0u)
+    {
+        if (cell.deposited == 0u || (cell.colorR | cell.colorG | cell.colorB) == 0u)
+            return float3(0.0, 0.0, 0.0);
+
+        float oldDenom =
+            max((float)cell.deposited * max((float)_ColorWeightScale, 1.0), 1.0);
+        return saturate(float3(cell.colorR, cell.colorG, cell.colorB) / oldDenom);
+    }
+
+    float denom =
+        max((float)cell.reserved * max((float)_ColorWeightScale, 1.0), 1.0);
+    return saturate(float3(cell.colorR, cell.colorG, cell.colorB) / denom);
+}
+
+float FilmCellWetness(MpmPaintFilmCell cell)
+{
+    return saturate((float)cell.wetness / max((float)_WetnessUnits, 1.0));
 }
 
 float2 UvFlipSign()
@@ -207,10 +238,11 @@ void AddFilmCell(
 
     int idx = FilmIndex(x, y);
     uint colorScale = (uint)max(_ColorWeightScale, 1);
+    uint colorWeight = SafeColorWeight(units);
 
-    uint r = units * (uint)round(saturate(color.r) * (float)colorScale);
-    uint g = units * (uint)round(saturate(color.g) * (float)colorScale);
-    uint b = units * (uint)round(saturate(color.b) * (float)colorScale);
+    uint r = colorWeight * (uint)round(saturate(color.r) * (float)colorScale);
+    uint g = colorWeight * (uint)round(saturate(color.g) * (float)colorScale);
+    uint b = colorWeight * (uint)round(saturate(color.b) * (float)colorScale);
 
     InterlockedAdd(_FilmCells[idx].thickness, units);
     InterlockedMax(_FilmCells[idx].wetness, wetness);
@@ -218,8 +250,12 @@ void AddFilmCell(
     InterlockedAdd(_FilmCells[idx].colorG, g);
     InterlockedAdd(_FilmCells[idx].colorB, b);
     InterlockedAdd(_FilmCells[idx].deposited, units);
+    // reserved = colorWeight for stable pigment averaging.
+    InterlockedAdd(_FilmCells[idx].reserved, colorWeight);
     InterlockedAdd(_FilmCells[idx].impactCount, 1u);
     InterlockedMax(_FilmCells[idx].flags, 1u);
+    if (colorWeight < units)
+        InterlockedAdd(_DebugCounters[20], 1u);
 
     int flowU = (int)round(clamp(flowUv.x, -6000.0, 6000.0));
     int flowV = (int)round(clamp(flowUv.y, -6000.0, 6000.0));
@@ -372,6 +408,127 @@ void SpawnDropletParticle(
     _DropletParticles[slot] = particle;
 
     InterlockedAdd(_DebugCounters[11], 1u);
+}
+
+[numthreads(256, 1, 1)]
+void KEmitEdgeDroplets(uint3 id : SV_DispatchThreadID)
+{
+    uint cellIndex = id.x;
+    uint cellCount = (uint)max(_GridWidth * _GridHeight, 0);
+    if (cellIndex >= cellCount || _GridWidth <= 0 || _GridHeight <= 0)
+        return;
+
+    int x = (int)(cellIndex % (uint)_GridWidth);
+    int y = (int)(cellIndex / (uint)_GridWidth);
+    bool onAnyEdge = x == 0 || y == 0 || x == _GridWidth - 1 || y == _GridHeight - 1;
+    if (!onAnyEdge)
+        return;
+
+    MpmPaintFilmCell cell = _FilmCells[cellIndex];
+    uint thresholdUnits = (uint)round(
+        max(_EdgeDripThreshold, 0.0) *
+        max((float)_ThicknessUnitsPerMeter, 1.0)
+    );
+    if (cell.thickness <= thresholdUnits || cell.wetness == 0u)
+        return;
+
+    float3 gravity = normalize(_GravityDirection);
+    float3 tangent = normalize(_CanvasCurrentTangent);
+    float3 bitangent = normalize(_CanvasCurrentBitangent);
+    float3 normal = normalize(_CanvasCurrentNormal);
+    float2 gravityOnSurface = ApplyUvFlowFlip(float2(
+        dot(gravity, tangent),
+        dot(gravity, bitangent)
+    ));
+
+    float slope = saturate(length(gravityOnSurface));
+    if (slope < 0.03)
+        return;
+
+    bool onDrainEdge =
+        (gravityOnSurface.x < -0.15 && x == 0) ||
+        (gravityOnSurface.x > 0.15 && x == _GridWidth - 1) ||
+        (gravityOnSurface.y < -0.15 && y == 0) ||
+        (gravityOnSurface.y > 0.15 && y == _GridHeight - 1);
+    if (!onDrainEdge)
+        return;
+
+    float wetness = FilmCellWetness(cell);
+    float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
+    float yield01 = saturate(max(_YieldStress, 0.0) / 0.75);
+    float mobility = saturate(1.0 - viscosity01 * 0.55 - yield01 * 0.40);
+    float excessUnits = max((float)cell.thickness - (float)thresholdUnits, 0.0);
+    float drainUnitsF =
+        excessUnits *
+        wetness *
+        max(_EdgeDrainFactor, 0.0) *
+        slope *
+        mobility *
+        max(_DeltaTime, 1e-5) *
+        0.65;
+    drainUnitsF = min(drainUnitsF, min(excessUnits, (float)cell.thickness * 0.28));
+    uint drainUnits = (uint)round(drainUnitsF);
+    if (drainUnits == 0u)
+        return;
+
+    float2 uv = float2(
+        ((float)x + 0.5) / max((float)_GridWidth, 1.0),
+        ((float)y + 0.5) / max((float)_GridHeight, 1.0)
+    );
+    float seed = (float)cellIndex * 13.17 + (float)cell.impactCount * 2.31;
+    float2 side = SafeNormalize2(float2(-gravityOnSurface.y, gravityOnSurface.x), float2(1.0, 0.0));
+    float jitter = Random01(seed) * 2.0 - 1.0;
+    float2 gravityCells = ApplyUvFlowFlip(float2(
+        dot(gravity, tangent) / max(_CellSizeU, 1e-6),
+        dot(gravity, bitangent) / max(_CellSizeV, 1e-6)
+    ));
+    float2 velocityCells =
+        gravityCells * max(_SecondaryDropletVelocityBoost, 0.0) * (0.04 + 0.08 * slope) +
+        side * jitter * max(_SecondaryDropletVelocityBoost, 0.0) * (1.0 + 3.0 * slope);
+    float radiusCells = clamp(
+        sqrt((float)drainUnits / max((float)thresholdUnits, 1.0)) * 0.42,
+        0.35,
+        1.35
+    );
+    float normalVelocity = max(0.0, dot(gravity, normal)) * 0.02 + 0.025 * slope;
+    float4 color = float4(FilmCellColor(cell), 1.0);
+
+    bool canSpawn =
+        _EnableHybridParticles != 0 &&
+        _DropletParticleCapacity > 0;
+    if (canSpawn)
+    {
+        SpawnDropletParticle(
+            uv,
+            radiusCells,
+            velocityCells,
+            normalVelocity,
+            drainUnits,
+            color,
+            wetness,
+            max(_CollisionSkin, 0.001)
+        );
+        InterlockedAdd(_DebugCounters[22], 1u);
+    }
+    else
+    {
+        InterlockedAdd(_DebugCounters[23], drainUnits);
+    }
+
+    cell.thickness = cell.thickness > drainUnits ? cell.thickness - drainUnits : 0u;
+    cell.deposited = min(cell.deposited, cell.thickness);
+    if (cell.thickness == 0u)
+    {
+        cell.wetness = 0u;
+        cell.colorR = 0u;
+        cell.colorG = 0u;
+        cell.colorB = 0u;
+        cell.flags = 0u;
+        cell.reserved = 0u;
+    }
+
+    _FilmCells[cellIndex] = cell;
+    InterlockedAdd(_DebugCounters[21], drainUnits);
 }
 
 int ClassifyImpact(
@@ -750,13 +907,13 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
     }
     else if (regime == IMPACT_SPREAD)
     {
-        depositFraction = lerp(0.44, 0.30, mobility);
-        surfaceFraction = 0.24 + 0.28 * mobility;
+        depositFraction = lerp(0.38, 0.24, mobility);
+        surfaceFraction = 0.28 + 0.34 * mobility;
     }
     else if (regime == IMPACT_SPLASH)
     {
-        depositFraction = lerp(0.30, 0.16, splash01);
-        surfaceFraction = 0.16 + 0.18 * mobility;
+        depositFraction = lerp(0.24, 0.12, splash01);
+        surfaceFraction = 0.18 + 0.22 * mobility;
         dropletFraction = saturate(_SecondaryDropletMassFraction * (0.55 + splash01));
     }
     else
@@ -812,7 +969,7 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
         depositUnits,
         wetness,
         color,
-        tangentialUvVelocity * 0.28,
+        tangentialUvVelocity * 0.42,
         majorAxis,
         radiusLong,
         radiusShort,
@@ -852,9 +1009,27 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
             float r = 0.35 + Random01(seed + 3.1) * 0.65;
             float2 jitter = float2(cos(a), sin(a));
             float2 dropletUv = uv01 + jitter * r * radiusShort / float2(max(_GridWidth, 1), max(_GridHeight, 1));
+            float2 tangentDir = SafeNormalize2(tangentialUvVelocity, jitter);
+            float coneNoise =
+                (Random01(seed + 4.6) * 2.0 - 1.0) *
+                lerp(0.22, 0.95, saturate(_Roughness));
+            float2 coneDir = SafeNormalize2(
+                tangentDir * (0.70 + angleGrazing * 0.65) +
+                jitter * coneNoise +
+                jitter * (0.10 + 0.22 * splash01),
+                jitter
+            );
+            float splashMobility =
+                mobility *
+                (1.0 - viscosity01 * 0.28) *
+                (1.0 - yield01 * 0.35);
+            float coneSpeed =
+                _SecondaryDropletVelocityBoost *
+                (4.0 + 7.0 * splash01) *
+                saturate(0.35 + splashMobility);
             float2 dropletVelocity =
-                tangentialUvVelocity * (0.18 + Random01(seed + 1.7) * 0.22) +
-                jitter * _SecondaryDropletVelocityBoost * (3.0 + 8.0 * splash01);
+                tangentialUvVelocity * (0.14 + Random01(seed + 1.7) * 0.20) +
+                coneDir * coneSpeed;
             float normalVelocity =
                 max(0.10, normalSpeed * (0.10 + 0.22 * Random01(seed + 2.9)) +
                 _SecondaryDropletVelocityBoost * splash01 * 0.18);
@@ -952,7 +1127,7 @@ void DepositHybridParticleAt(
         units,
         (uint)round(saturate(wetness) * (float)_WetnessUnits),
         color,
-        flowCells * 0.09,
+        flowCells * 0.14,
         SafeNormalize2(flowCells, float2(1.0, 0.0)),
         max(radiusCells * 1.25, 0.75),
         max(radiusCells * 0.75, 0.50),
