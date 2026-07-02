@@ -183,6 +183,9 @@ namespace PaintBucketSim.Systems.Canvas
         [Header("Texture UV Mapping")]
         [SerializeField] private bool flipU;
         [SerializeField] private bool flipV;
+        [SerializeField] private bool swapUV;
+        [SerializeField] private bool rotate90;
+        [SerializeField] private bool invertTextureY;
 
         [Header("Surface Material")]
         [SerializeField] private MpmCanvasSurfaceMaterialPreset materialPreset =
@@ -233,6 +236,9 @@ namespace PaintBucketSim.Systems.Canvas
         public float HeightMeters => heightMeters;
         public bool FlipU => flipU;
         public bool FlipV => flipV;
+        public bool SwapUV => swapUV;
+        public bool Rotate90 => rotate90;
+        public bool InvertTextureY => invertTextureY;
         public MpmCanvasSurfaceMaterialSettings MaterialSettings => materialSettings;
         public MpmCanvasSurfaceFrame Frame => _frame;
         public event Action SurfaceReset;

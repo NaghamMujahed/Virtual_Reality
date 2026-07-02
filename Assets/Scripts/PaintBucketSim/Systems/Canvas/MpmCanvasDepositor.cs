@@ -63,6 +63,16 @@ namespace PaintBucketSim.Systems.Canvas
         [Range(0.0f, 8.0f)] [SerializeField] private float impactSpreadMultiplier = 0.45f;
         [Range(0.0f, 10.0f)] [SerializeField] private float tangentialStretchMultiplier = 0.8f;
         [Range(1, 12)] [SerializeField] private int maxSplatRadiusCells = 3;
+        [Range(0.0f, 1.0f)] [SerializeField] private float organicSplatNoiseStrength = 0.25f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float edgeBreakupStrength = 0.35f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float microLobeStrength = 0.18f;
+        [Range(0.1f, 32.0f)] [SerializeField] private float irregularityScale = 7.0f;
+        [Range(0.0f, 2.0f)] [SerializeField] private float directionalStreakStrength = 0.75f;
+        [Range(0.0f, 6.0f)] [SerializeField] private float maxStreakStretch = 3.0f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float streakNoiseStrength = 0.22f;
+        [Range(0.0f, 1.5f)] [SerializeField] private float streakViscosityDamping = 0.65f;
+        [Range(0.0f, 2.0f)] [SerializeField] private float tiltStretchStrength = 0.45f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float gravityBiasInSplat = 0.25f;
         [Min(1)] [SerializeField] private int maxDepositUnitsPerParticle = 600000;
 
         [Header("Particle After Hit")]
@@ -168,6 +178,9 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_CanvasAngularVelocity = Shader.PropertyToID("_CanvasAngularVelocity");
         private static readonly int ID_FlipU = Shader.PropertyToID("_FlipU");
         private static readonly int ID_FlipV = Shader.PropertyToID("_FlipV");
+        private static readonly int ID_SwapUV = Shader.PropertyToID("_SwapUV");
+        private static readonly int ID_Rotate90 = Shader.PropertyToID("_Rotate90");
+        private static readonly int ID_InvertTextureY = Shader.PropertyToID("_InvertTextureY");
         private static readonly int ID_CanvasWidth = Shader.PropertyToID("_CanvasWidth");
         private static readonly int ID_CanvasHeight = Shader.PropertyToID("_CanvasHeight");
         private static readonly int ID_CellSizeU = Shader.PropertyToID("_CellSizeU");
@@ -181,6 +194,16 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_ImpactSpreadMultiplier = Shader.PropertyToID("_ImpactSpreadMultiplier");
         private static readonly int ID_TangentialStretchMultiplier = Shader.PropertyToID("_TangentialStretchMultiplier");
         private static readonly int ID_MaxSplatRadiusCells = Shader.PropertyToID("_MaxSplatRadiusCells");
+        private static readonly int ID_OrganicSplatNoiseStrength = Shader.PropertyToID("_OrganicSplatNoiseStrength");
+        private static readonly int ID_EdgeBreakupStrength = Shader.PropertyToID("_EdgeBreakupStrength");
+        private static readonly int ID_MicroLobeStrength = Shader.PropertyToID("_MicroLobeStrength");
+        private static readonly int ID_IrregularityScale = Shader.PropertyToID("_IrregularityScale");
+        private static readonly int ID_DirectionalStreakStrength = Shader.PropertyToID("_DirectionalStreakStrength");
+        private static readonly int ID_MaxStreakStretch = Shader.PropertyToID("_MaxStreakStretch");
+        private static readonly int ID_StreakNoiseStrength = Shader.PropertyToID("_StreakNoiseStrength");
+        private static readonly int ID_StreakViscosityDamping = Shader.PropertyToID("_StreakViscosityDamping");
+        private static readonly int ID_TiltStretchStrength = Shader.PropertyToID("_TiltStretchStrength");
+        private static readonly int ID_GravityBiasInSplat = Shader.PropertyToID("_GravityBiasInSplat");
         private static readonly int ID_AbsorptionRate = Shader.PropertyToID("_AbsorptionRate");
         private static readonly int ID_SpreadFactor = Shader.PropertyToID("_SpreadFactor");
         private static readonly int ID_DripFactor = Shader.PropertyToID("_DripFactor");
@@ -420,8 +443,7 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetVector(ID_CanvasPreviousNormal, frame.previousNormal);
             canvasImpactCompute.SetVector(ID_CanvasLinearVelocity, frame.linearVelocity);
             canvasImpactCompute.SetVector(ID_CanvasAngularVelocity, frame.angularVelocity);
-            canvasImpactCompute.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
-            canvasImpactCompute.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
+            SetUvRemapParameters(canvasImpactCompute);
             canvasImpactCompute.SetFloat(ID_CanvasWidth, frame.widthMeters);
             canvasImpactCompute.SetFloat(ID_CanvasHeight, frame.heightMeters);
             canvasImpactCompute.SetFloat(ID_CellSizeU, frame.widthMeters / Mathf.Max(grid.Width, 1));
@@ -437,6 +459,7 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_ImpactSpreadMultiplier, impactSpreadMultiplier);
             canvasImpactCompute.SetFloat(ID_TangentialStretchMultiplier, tangentialStretchMultiplier);
             canvasImpactCompute.SetInt(ID_MaxSplatRadiusCells, maxSplatRadiusCells);
+            SetSplatStyleParameters(canvasImpactCompute);
 
             canvasImpactCompute.SetFloat(ID_AbsorptionRate, surfaceMaterial.absorptionRate);
             canvasImpactCompute.SetFloat(ID_SpreadFactor, surfaceMaterial.spreadFactor);
@@ -523,8 +546,7 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetVector(ID_CanvasCurrentNormal, frame.normal);
             canvasImpactCompute.SetVector(ID_CanvasCurrentTangent, frame.tangent);
             canvasImpactCompute.SetVector(ID_CanvasCurrentBitangent, frame.bitangent);
-            canvasImpactCompute.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
-            canvasImpactCompute.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
+            SetUvRemapParameters(canvasImpactCompute);
             canvasImpactCompute.SetFloat(ID_CanvasWidth, frame.widthMeters);
             canvasImpactCompute.SetFloat(ID_CanvasHeight, frame.heightMeters);
             canvasImpactCompute.SetFloat(ID_CellSizeU, frame.widthMeters / Mathf.Max(grid.Width, 1));
@@ -535,6 +557,7 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_DripFactor, surfaceMaterial.dripFactor);
             canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
             canvasImpactCompute.SetFloat(ID_SplatSharpness, surfaceMaterial.splatSharpness);
+            SetSplatStyleParameters(canvasImpactCompute);
             canvasImpactCompute.SetFloat(ID_PaintDensity, density);
             canvasImpactCompute.SetFloat(ID_PaintViscosity, viscosity);
             canvasImpactCompute.SetFloat(ID_SurfaceTension, surfaceTension);
@@ -592,8 +615,9 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetVector(ID_CanvasCurrentNormal, frame.normal);
             canvasImpactCompute.SetVector(ID_CanvasCurrentTangent, frame.tangent);
             canvasImpactCompute.SetVector(ID_CanvasCurrentBitangent, frame.bitangent);
-            canvasImpactCompute.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
-            canvasImpactCompute.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
+            SetUvRemapParameters(canvasImpactCompute);
+            canvasImpactCompute.SetFloat(ID_CanvasWidth, frame.widthMeters);
+            canvasImpactCompute.SetFloat(ID_CanvasHeight, frame.heightMeters);
             canvasImpactCompute.SetFloat(ID_CellSizeU, frame.widthMeters / Mathf.Max(grid.Width, 1));
             canvasImpactCompute.SetFloat(ID_CellSizeV, frame.heightMeters / Mathf.Max(grid.Height, 1));
             canvasImpactCompute.SetFloat(ID_DeltaTime, stepDt);
@@ -616,6 +640,29 @@ namespace PaintBucketSim.Systems.Canvas
                 1,
                 1
             );
+        }
+
+        private void SetSplatStyleParameters(ComputeShader shader)
+        {
+            shader.SetFloat(ID_OrganicSplatNoiseStrength, organicSplatNoiseStrength);
+            shader.SetFloat(ID_EdgeBreakupStrength, edgeBreakupStrength);
+            shader.SetFloat(ID_MicroLobeStrength, microLobeStrength);
+            shader.SetFloat(ID_IrregularityScale, irregularityScale);
+            shader.SetFloat(ID_DirectionalStreakStrength, directionalStreakStrength);
+            shader.SetFloat(ID_MaxStreakStretch, maxStreakStretch);
+            shader.SetFloat(ID_StreakNoiseStrength, streakNoiseStrength);
+            shader.SetFloat(ID_StreakViscosityDamping, streakViscosityDamping);
+            shader.SetFloat(ID_TiltStretchStrength, tiltStretchStrength);
+            shader.SetFloat(ID_GravityBiasInSplat, gravityBiasInSplat);
+        }
+
+        private void SetUvRemapParameters(ComputeShader shader)
+        {
+            shader.SetInt(ID_FlipU, surface != null && surface.FlipU ? 1 : 0);
+            shader.SetInt(ID_FlipV, surface != null && surface.FlipV ? 1 : 0);
+            shader.SetInt(ID_SwapUV, surface != null && surface.SwapUV ? 1 : 0);
+            shader.SetInt(ID_Rotate90, surface != null && surface.Rotate90 ? 1 : 0);
+            shader.SetInt(ID_InvertTextureY, surface != null && surface.InvertTextureY ? 1 : 0);
         }
 
         private void DispatchCapturePrevious(int particleCount)
@@ -972,6 +1019,16 @@ namespace PaintBucketSim.Systems.Canvas
             impactSpreadMultiplier = Mathf.Clamp(impactSpreadMultiplier, 0.0f, 8.0f);
             tangentialStretchMultiplier = Mathf.Clamp(tangentialStretchMultiplier, 0.0f, 10.0f);
             maxSplatRadiusCells = Mathf.Clamp(maxSplatRadiusCells, 1, 12);
+            organicSplatNoiseStrength = Mathf.Clamp01(organicSplatNoiseStrength);
+            edgeBreakupStrength = Mathf.Clamp01(edgeBreakupStrength);
+            microLobeStrength = Mathf.Clamp01(microLobeStrength);
+            irregularityScale = Mathf.Clamp(irregularityScale, 0.1f, 32.0f);
+            directionalStreakStrength = Mathf.Clamp(directionalStreakStrength, 0.0f, 2.0f);
+            maxStreakStretch = Mathf.Clamp(maxStreakStretch, 0.0f, 6.0f);
+            streakNoiseStrength = Mathf.Clamp01(streakNoiseStrength);
+            streakViscosityDamping = Mathf.Clamp(streakViscosityDamping, 0.0f, 1.5f);
+            tiltStretchStrength = Mathf.Clamp(tiltStretchStrength, 0.0f, 2.0f);
+            gravityBiasInSplat = Mathf.Clamp01(gravityBiasInSplat);
             maxDepositUnitsPerParticle = Mathf.Max(1, maxDepositUnitsPerParticle);
             depositedParticleRadiusMeters = Mathf.Max(depositedParticleRadiusMeters, 0.000001f);
             surfaceParticleCapacity = Mathf.Max(1, surfaceParticleCapacity);

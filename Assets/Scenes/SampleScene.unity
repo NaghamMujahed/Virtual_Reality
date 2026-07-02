@@ -15908,25 +15908,27 @@ MonoBehaviour:
   paintFilmEvolverCompute: {fileID: 7200000, guid: 397ab284f3fe6974c862d3a953cada84, type: 3}
   bakeEveryFrame: 1
   debugView: 0
-  maxVisibleThicknessMeters: 0.0015
+  maxVisibleThicknessMeters: 0.003
   wetDarkening: 0.18
-  wetGlossBoost: 0.2
+  wetGlossBoost: 0.05
   pigmentContrast: 0.22
-  normalFromThicknessStrength: 2.4
-  visualHeightScaleMeters: 0.015
+  normalFromThicknessStrength: 1.4
+  visualHeightScaleMeters: 0.03
   enableEvolution: 1
   enableDiffusion: 1
   enableDrips: 1
   evolutionRate: 1
   viscosityDamping: 0.55
   momentumFlowFactor: 0.75
-  heightGradientFlowFactor: 1.15
-  rivuletFactor: 1.2
-  edgeDrainFactor: 0.65
+  heightGradientFlowFactor: 0.6
+  rivuletFactor: 0.8
+  edgeDrainFactor: 0.45
   edgeDripThresholdMeters: 0.00065
-  filmFlowStartThicknessMeters: 0.002
-  poolHoldFactor: 0.65
-  thinFilmMobilityBelowThreshold: 0.15
+  filmFlowStartThicknessMeters: 0.001
+  poolHoldFactor: 0.75
+  thinFilmMobilityBelowThreshold: 0.04
+  gravityBiasInFilmFlow: 1.2
+  flowStopThicknessFactor: 0.8
   gravityDirectionWorld: {x: 0, y: -1, z: 0}
 --- !u!114 &2030639911
 MonoBehaviour:
@@ -15942,14 +15944,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Canvas.MpmCanvasPaintSurface
   surfaceTransform: {fileID: 2030639909}
   targetRenderer: {fileID: 2030639914}
-  axisPreset: 2
-  customLocalTangent: {x: -1, y: 0, z: 0}
-  customLocalBitangent: {x: 0, y: 0, z: -1}
+  axisPreset: 1
+  customLocalTangent: {x: 1, y: 0, z: 0}
+  customLocalBitangent: {x: 0, y: 1, z: 0}
   widthMeters: 10
   heightMeters: 10
   resolution: {x: 512, y: 512}
-  flipU: 0
+  flipU: 1
   flipV: 0
+  swapUV: 0
+  rotate90: 0
+  invertTextureY: 0
   materialPreset: 4
   autoApplyPreset: 1
   materialSettings:
@@ -15999,6 +16004,16 @@ MonoBehaviour:
   impactSpreadMultiplier: 0.45
   tangentialStretchMultiplier: 0.8
   maxSplatRadiusCells: 3
+  organicSplatNoiseStrength: 0.25
+  edgeBreakupStrength: 0.35
+  microLobeStrength: 0.18
+  irregularityScale: 7
+  directionalStreakStrength: 0.75
+  maxStreakStretch: 3
+  streakNoiseStrength: 0.22
+  streakViscosityDamping: 0.65
+  tiltStretchStrength: 0.45
+  gravityBiasInSplat: 0.25
   maxDepositUnitsPerParticle: 600000
   shrinkDepositedParticles: 1
   depositedParticleRadiusMeters: 0.00005

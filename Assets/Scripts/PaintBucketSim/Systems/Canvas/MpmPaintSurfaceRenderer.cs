@@ -50,6 +50,8 @@ namespace PaintBucketSim.Systems.Canvas
         [Min(0.000001f)] [SerializeField] private float filmFlowStartThicknessMeters = 0.002f;
         [Range(0.0f, 1.0f)] [SerializeField] private float poolHoldFactor = 0.65f;
         [Range(0.0f, 1.0f)] [SerializeField] private float thinFilmMobilityBelowThreshold = 0.12f;
+        [Range(0.0f, 2.0f)] [SerializeField] private float gravityBiasInFilmFlow = 0.65f;
+        [Range(0.0f, 1.0f)] [SerializeField] private float flowStopThicknessFactor = 0.55f;
         [SerializeField] private Vector3 gravityDirectionWorld = Vector3.down;
 
         private int _bakeKernel = -1;
@@ -79,6 +81,8 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_FilmFlowStartThicknessMeters = Shader.PropertyToID("_FilmFlowStartThicknessMeters");
         private static readonly int ID_PoolHoldFactor = Shader.PropertyToID("_PoolHoldFactor");
         private static readonly int ID_ThinFilmMobilityBelowThreshold = Shader.PropertyToID("_ThinFilmMobilityBelowThreshold");
+        private static readonly int ID_GravityBiasInFilmFlow = Shader.PropertyToID("_GravityBiasInFilmFlow");
+        private static readonly int ID_FlowStopThicknessFactor = Shader.PropertyToID("_FlowStopThicknessFactor");
         private static readonly int ID_DebugView = Shader.PropertyToID("_DebugView");
         private static readonly int ID_DeltaTime = Shader.PropertyToID("_DeltaTime");
         private static readonly int ID_EnableDiffusion = Shader.PropertyToID("_EnableDiffusion");
@@ -103,6 +107,9 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_GravityDirection = Shader.PropertyToID("_GravityDirection");
         private static readonly int ID_FlipU = Shader.PropertyToID("_FlipU");
         private static readonly int ID_FlipV = Shader.PropertyToID("_FlipV");
+        private static readonly int ID_SwapUV = Shader.PropertyToID("_SwapUV");
+        private static readonly int ID_Rotate90 = Shader.PropertyToID("_Rotate90");
+        private static readonly int ID_InvertTextureY = Shader.PropertyToID("_InvertTextureY");
 
         private void Awake()
         {
@@ -186,6 +193,7 @@ namespace PaintBucketSim.Systems.Canvas
             paintFilmBakerCompute.SetFloat(ID_SurfaceRoughness, settings.roughness);
             paintFilmBakerCompute.SetFloat(ID_GlossResponse, settings.glossResponse);
             paintFilmBakerCompute.SetFloat(ID_FilmFlowStartThicknessMeters, filmFlowStartThicknessMeters);
+            SetUvRemapParameters(paintFilmBakerCompute);
             paintFilmBakerCompute.SetInt(ID_DebugView, (int)debugView);
 
             paintFilmBakerCompute.Dispatch(
@@ -242,12 +250,13 @@ namespace PaintBucketSim.Systems.Canvas
             paintFilmEvolverCompute.SetFloat(ID_FilmFlowStartThicknessMeters, filmFlowStartThicknessMeters);
             paintFilmEvolverCompute.SetFloat(ID_PoolHoldFactor, poolHoldFactor);
             paintFilmEvolverCompute.SetFloat(ID_ThinFilmMobilityBelowThreshold, thinFilmMobilityBelowThreshold);
+            paintFilmEvolverCompute.SetFloat(ID_GravityBiasInFilmFlow, gravityBiasInFilmFlow);
+            paintFilmEvolverCompute.SetFloat(ID_FlowStopThicknessFactor, flowStopThicknessFactor);
             paintFilmEvolverCompute.SetVector(ID_CanvasTangent, frame.tangent);
             paintFilmEvolverCompute.SetVector(ID_CanvasBitangent, frame.bitangent);
             paintFilmEvolverCompute.SetVector(ID_CanvasNormal, frame.normal);
             paintFilmEvolverCompute.SetVector(ID_GravityDirection, gravityDirectionWorld.normalized);
-            paintFilmEvolverCompute.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
-            paintFilmEvolverCompute.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
+            SetUvRemapParameters(paintFilmEvolverCompute);
 
             paintFilmEvolverCompute.Dispatch(
                 _evolveKernel,
@@ -269,6 +278,15 @@ namespace PaintBucketSim.Systems.Canvas
 
             if (paintFluidSystem == null)
                 paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
+        }
+
+        private void SetUvRemapParameters(ComputeShader shader)
+        {
+            shader.SetInt(ID_FlipU, surface != null && surface.FlipU ? 1 : 0);
+            shader.SetInt(ID_FlipV, surface != null && surface.FlipV ? 1 : 0);
+            shader.SetInt(ID_SwapUV, surface != null && surface.SwapUV ? 1 : 0);
+            shader.SetInt(ID_Rotate90, surface != null && surface.Rotate90 ? 1 : 0);
+            shader.SetInt(ID_InvertTextureY, surface != null && surface.InvertTextureY ? 1 : 0);
         }
 
         private void ResolveKernels()
@@ -338,6 +356,8 @@ namespace PaintBucketSim.Systems.Canvas
             filmFlowStartThicknessMeters = Mathf.Max(filmFlowStartThicknessMeters, 0.000001f);
             poolHoldFactor = Mathf.Clamp01(poolHoldFactor);
             thinFilmMobilityBelowThreshold = Mathf.Clamp01(thinFilmMobilityBelowThreshold);
+            gravityBiasInFilmFlow = Mathf.Clamp(gravityBiasInFilmFlow, 0.0f, 2.0f);
+            flowStopThicknessFactor = Mathf.Clamp01(flowStopThicknessFactor);
             ResolveKernels();
         }
     }

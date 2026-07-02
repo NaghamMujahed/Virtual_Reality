@@ -51,6 +51,11 @@ Shader "PaintBucketSim/MPM Canvas Hybrid Particles URP"
             float _CanvasHeight;
             int _GridWidth;
             int _GridHeight;
+            int _FlipU;
+            int _FlipV;
+            int _SwapUV;
+            int _Rotate90;
+            int _InvertTextureY;
 
             float3 _CameraRightWS;
             float3 _CameraUpWS;
@@ -75,6 +80,26 @@ Shader "PaintBucketSim/MPM Canvas Hybrid Particles URP"
                 float active : TEXCOORD3;
             };
 
+            float2 InverseRemapUv(float2 uv01)
+            {
+                if (_InvertTextureY != 0)
+                    uv01.y = 1.0 - uv01.y;
+
+                if (_FlipV != 0)
+                    uv01.y = 1.0 - uv01.y;
+
+                if (_FlipU != 0)
+                    uv01.x = 1.0 - uv01.x;
+
+                if (_Rotate90 != 0)
+                    uv01 = float2(1.0 - uv01.y, uv01.x);
+
+                if (_SwapUV != 0)
+                    uv01 = uv01.yx;
+
+                return uv01;
+            }
+
             Varyings Vert(Attributes input, uint instanceID : SV_InstanceID)
             {
                 Varyings output;
@@ -82,7 +107,7 @@ Shader "PaintBucketSim/MPM Canvas Hybrid Particles URP"
                 MpmCanvasHybridParticle particle = _HybridParticles[instanceID];
                 float active = step(0.5, particle.data3.w);
 
-                float2 uv01 = saturate(particle.data0.xy);
+                float2 uv01 = saturate(InverseRemapUv(saturate(particle.data0.xy)));
                 float normalOffset = particle.data0.z;
                 float radiusCells = max(particle.data0.w, 0.0);
                 float cellSize = min(

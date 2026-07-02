@@ -37,6 +37,11 @@ float _VisualHeightScale;
 float _SurfaceRoughness;
 float _GlossResponse;
 float _FilmFlowStartThicknessMeters;
+int _FlipU;
+int _FlipV;
+int _SwapUV;
+int _Rotate90;
+int _InvertTextureY;
 int _DebugView;
 
 float3 Heatmap(float t)
@@ -52,6 +57,26 @@ float3 Heatmap(float t)
     float3 c = lerp(yellow, red, saturate((t - 0.66) * 3.0));
 
     return t < 0.33 ? a : (t < 0.66 ? b : c);
+}
+
+float2 InverseRemapUv(float2 uv01)
+{
+    if (_InvertTextureY != 0)
+        uv01.y = 1.0 - uv01.y;
+
+    if (_FlipV != 0)
+        uv01.y = 1.0 - uv01.y;
+
+    if (_FlipU != 0)
+        uv01.x = 1.0 - uv01.x;
+
+    if (_Rotate90 != 0)
+        uv01 = float2(1.0 - uv01.y, uv01.x);
+
+    if (_SwapUV != 0)
+        uv01 = uv01.yx;
+
+    return uv01;
 }
 
 int IndexOf(int x, int y)
@@ -134,10 +159,10 @@ void KBakeFilm(uint3 id : SV_DispatchThreadID)
 
     if (_DebugView == 4)
     {
-        float2 uv = float2(
+        float2 uv = InverseRemapUv(float2(
             (float)id.x / max((float)(_GridWidth - 1), 1.0),
             (float)id.y / max((float)(_GridHeight - 1), 1.0)
-        );
+        ));
         float gridLine =
             step(frac(uv.x * 16.0), 0.025) +
             step(frac(uv.y * 16.0), 0.025);

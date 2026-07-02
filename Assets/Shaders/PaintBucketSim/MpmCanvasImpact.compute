@@ -61,6 +61,9 @@ float3 _CanvasLinearVelocity;
 float3 _CanvasAngularVelocity;
 int _FlipU;
 int _FlipV;
+int _SwapUV;
+int _Rotate90;
+int _InvertTextureY;
 float _CanvasWidth;
 float _CanvasHeight;
 float _CellSizeU;
@@ -76,6 +79,16 @@ float _BaseSplatRadiusCells;
 float _ImpactSpreadMultiplier;
 float _TangentialStretchMultiplier;
 int _MaxSplatRadiusCells;
+float _OrganicSplatNoiseStrength;
+float _EdgeBreakupStrength;
+float _MicroLobeStrength;
+float _IrregularityScale;
+float _DirectionalStreakStrength;
+float _MaxStreakStretch;
+float _StreakNoiseStrength;
+float _StreakViscosityDamping;
+float _TiltStretchStrength;
+float _GravityBiasInSplat;
 
 float _AbsorptionRate;
 float _SpreadFactor;
@@ -157,6 +170,27 @@ float Random01(float seed)
     return frac(sin(seed * 12.9898 + 78.233) * 43758.5453);
 }
 
+float Hash21(float2 p)
+{
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+
+float ValueNoise2(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float a = Hash21(i);
+    float b = Hash21(i + float2(1.0, 0.0));
+    float c = Hash21(i + float2(0.0, 1.0));
+    float d = Hash21(i + float2(1.0, 1.0));
+
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
 uint SafeColorWeight(uint units)
 {
     return min(units, MAX_COLOR_WEIGHT_PER_ADD);
@@ -184,17 +218,21 @@ float FilmCellWetness(MpmPaintFilmCell cell)
     return saturate((float)cell.wetness / max((float)_WetnessUnits, 1.0));
 }
 
-float2 UvFlipSign()
-{
-    return float2(_FlipU != 0 ? -1.0 : 1.0, _FlipV != 0 ? -1.0 : 1.0);
-}
-
 float2 ApplyUvFlip(float2 uv01)
 {
+    if (_SwapUV != 0)
+        uv01 = uv01.yx;
+
+    if (_Rotate90 != 0)
+        uv01 = float2(uv01.y, 1.0 - uv01.x);
+
     if (_FlipU != 0)
         uv01.x = 1.0 - uv01.x;
 
     if (_FlipV != 0)
+        uv01.y = 1.0 - uv01.y;
+
+    if (_InvertTextureY != 0)
         uv01.y = 1.0 - uv01.y;
 
     return uv01;
@@ -202,7 +240,22 @@ float2 ApplyUvFlip(float2 uv01)
 
 float2 ApplyUvFlowFlip(float2 flow)
 {
-    return flow * UvFlipSign();
+    if (_SwapUV != 0)
+        flow = flow.yx;
+
+    if (_Rotate90 != 0)
+        flow = float2(flow.y, -flow.x);
+
+    if (_FlipU != 0)
+        flow.x = -flow.x;
+
+    if (_FlipV != 0)
+        flow.y = -flow.y;
+
+    if (_InvertTextureY != 0)
+        flow.y = -flow.y;
+
+    return flow;
 }
 
 float ComputeSplatWeight(
@@ -211,18 +264,74 @@ float ComputeSplatWeight(
     float2 majorAxis,
     float radiusLong,
     float radiusShort,
-    float sharpness)
+    float sharpness,
+    float splatSeed,
+    float directionality,
+    float organicStrength,
+    float edgeBreakup,
+    float microLobe,
+    float irregularityScale,
+    float streakNoiseStrength)
 {
     float2 o = float2((float)ox, (float)oy);
     float2 minorAxis = float2(-majorAxis.y, majorAxis.x);
+    float localScale = max(max(radiusLong, radiusShort), 1.0);
+    float2 noiseP = o / localScale * max(irregularityScale, 0.1) + splatSeed;
+    float roughN1 = ValueNoise2(noiseP + float2(11.7, 3.1)) * 2.0 - 1.0;
+    float roughN2 = ValueNoise2(noiseP + float2(5.3, 19.4)) * 2.0 - 1.0;
+
+    float preMajor = dot(o, majorAxis) / max(radiusLong, 1e-4);
+    float preMinor = dot(o, minorAxis) / max(radiusShort, 1e-4);
+    float preR = saturate(sqrt(preMajor * preMajor + preMinor * preMinor));
+    float edge01 = smoothstep(0.42, 1.02, preR);
+    float2 irregularOffset =
+        (majorAxis * roughN1 + minorAxis * roughN2) *
+        organicStrength *
+        edge01 *
+        0.32 *
+        min(radiusLong, radiusShort);
+    o += irregularOffset;
+
     float major = dot(o, majorAxis) / max(radiusLong, 1e-4);
     float minor = dot(o, minorAxis) / max(radiusShort, 1e-4);
     float r2 = major * major + minor * minor;
+    float r = sqrt(max(r2, 0.0));
+    float angle = atan2(minor, major);
+    float2 radialP =
+        float2(cos(angle), sin(angle)) *
+        max(irregularityScale, 0.1) +
+        splatSeed * 1.37;
+    float radialNoise = ValueNoise2(radialP) * 2.0 - 1.0;
+    float lobeNoise = ValueNoise2(radialP * 1.91 + float2(17.3, 29.1));
+    float lobe = smoothstep(0.63, 0.96, lobeNoise) * microLobe;
+    float boundaryScale =
+        1.0 +
+        radialNoise * organicStrength * 0.18 +
+        lobe * (0.25 + 0.35 * directionality);
+    float adjustedR = r / max(boundaryScale, 0.58);
 
-    if (r2 > 1.0)
+    if (adjustedR > 1.0 + microLobe * 0.22)
         return 0.0;
 
-    return exp(-r2 * max(sharpness, 0.25));
+    float baseWeight = exp(-adjustedR * adjustedR * max(sharpness, 0.25));
+    float organicEdge = smoothstep(0.45, 1.10, adjustedR);
+    float breakupNoise = ValueNoise2(noiseP * 1.63 + float2(41.2, 7.8));
+    float breakupCut =
+        smoothstep(0.08, 0.78, breakupNoise + lobe * 0.45) *
+        (1.0 - edgeBreakup * organicEdge * 0.58);
+    breakupCut = max(breakupCut, 0.32 + 0.22 * (1.0 - organicEdge));
+
+    float streakNoise =
+        1.0 +
+        (ValueNoise2(noiseP * 2.11 + float2(3.8, 53.4)) * 2.0 - 1.0) *
+        streakNoiseStrength *
+        directionality *
+        organicEdge;
+    float outsideFade = adjustedR > 1.0
+        ? saturate(1.0 - (adjustedR - 1.0) / max(microLobe * 0.22, 1e-4))
+        : 1.0;
+
+    return max(0.0, baseWeight * breakupCut * streakNoise * outsideFade);
 }
 
 void AddFilmCell(
@@ -273,7 +382,14 @@ void DepositSplat(
     float radiusLong,
     float radiusShort,
     float sharpness,
-    int radiusLoop)
+    int radiusLoop,
+    float splatSeed,
+    float directionality,
+    float organicStrength,
+    float edgeBreakup,
+    float microLobe,
+    float irregularityScale,
+    float streakNoiseStrength)
 {
     if (totalUnits == 0)
         return;
@@ -305,7 +421,14 @@ void DepositSplat(
                 majorAxis,
                 radiusLong,
                 radiusShort,
-                sharpness
+                sharpness,
+                splatSeed,
+                directionality,
+                organicStrength,
+                edgeBreakup,
+                microLobe,
+                irregularityScale,
+                streakNoiseStrength
             );
         }
     }
@@ -331,7 +454,14 @@ void DepositSplat(
                 majorAxis,
                 radiusLong,
                 radiusShort,
-                sharpness
+                sharpness,
+                splatSeed,
+                directionality,
+                organicStrength,
+                edgeBreakup,
+                microLobe,
+                irregularityScale,
+                streakNoiseStrength
             );
 
             if (w <= 0.0)
@@ -479,9 +609,9 @@ void KEmitEdgeDroplets(uint3 id : SV_DispatchThreadID)
     float2 side = SafeNormalize2(float2(-gravityOnSurface.y, gravityOnSurface.x), float2(1.0, 0.0));
     float jitter = Random01(seed) * 2.0 - 1.0;
     float2 gravityCells = ApplyUvFlowFlip(float2(
-        dot(gravity, tangent) / max(_CellSizeU, 1e-6),
-        dot(gravity, bitangent) / max(_CellSizeV, 1e-6)
-    ));
+        dot(gravity, tangent) / max(_CanvasWidth, 1e-6),
+        dot(gravity, bitangent) / max(_CanvasHeight, 1e-6)
+    )) * float2(max((float)_GridWidth, 1.0), max((float)_GridHeight, 1.0));
     float2 velocityCells =
         gravityCells * max(_SecondaryDropletVelocityBoost, 0.0) * (0.04 + 0.08 * slope) +
         side * jitter * max(_SecondaryDropletVelocityBoost, 0.0) * (1.0 + 3.0 * slope);
@@ -799,6 +929,7 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
     if (_DoubleSidedCollision != 0 && signedNormalVelocity > 0.0)
         normal = -normal;
 
+    float3 paintSideNormal = normalize(_CanvasCurrentNormal);
     float normalSpeed = abs(dot(relativeVelocity, normal));
     float speed = SafeLength(relativeVelocity);
 
@@ -856,11 +987,19 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
     float tangentialSpeed = SafeLength(tangentialVelocity);
     float speedSafe = max(speed, 1e-5);
 
-    float2 tangentialUvVelocity = float2(
-        dot(tangentialVelocity, tangent) / max(_CellSizeU, 1e-6),
-        dot(tangentialVelocity, bitangent) / max(_CellSizeV, 1e-6)
+    float2 tangentialUvVelocity01 = float2(
+        dot(tangentialVelocity, tangent) / max(_CanvasWidth, 1e-6),
+        dot(tangentialVelocity, bitangent) / max(_CanvasHeight, 1e-6)
     );
-    tangentialUvVelocity = ApplyUvFlowFlip(tangentialUvVelocity);
+    float2 tangentialUvVelocity = ApplyUvFlowFlip(tangentialUvVelocity01) *
+        float2(max((float)_GridWidth, 1.0), max((float)_GridHeight, 1.0));
+    float3 gravityDir = normalize(_GravityDirection);
+    float2 gravityOnSurface = ApplyUvFlowFlip(float2(
+        dot(gravityDir, tangent),
+        dot(gravityDir, bitangent)
+    ));
+    float surfaceSlope = saturate(length(gravityOnSurface));
+    float2 downhillAxis = SafeNormalize2(gravityOnSurface, float2(0.0, -1.0));
 
     float splash01;
     float bounce01;
@@ -940,6 +1079,12 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
     float impactEnergy = saturate(normalSpeed * 0.28);
     float particleRadiusCells = radius / max(min(_CellSizeU, _CellSizeV), 1e-6);
     float roughnessClamp = lerp(1.10, 0.78, saturate(_Roughness));
+    float streakViscosityMobility =
+        saturate(1.0 - viscosity01 * max(_StreakViscosityDamping, 0.0) - yield01 * 0.36);
+    float streak01 =
+        saturate(angleGrazing * max(_DirectionalStreakStrength, 0.0) * mobility * streakViscosityMobility);
+    float tilt01 =
+        saturate(surfaceSlope * max(_TiltStretchStrength, 0.0) * max(_GravityBiasInSplat, 0.0) * mobility);
     float radiusShort =
         max(_BaseSplatRadiusCells, particleRadiusCells * 0.65) +
         impactEnergy *
@@ -952,10 +1097,18 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
 
     float radiusLong =
         radiusShort *
-        (1.0 + angleGrazing * _TangentialStretchMultiplier * mobility);
+        (1.0 +
+        angleGrazing * _TangentialStretchMultiplier * mobility * streakViscosityMobility +
+        streak01 * max(_MaxStreakStretch, 0.0) +
+        tilt01 * 0.65);
     radiusLong = clamp(radiusLong, radiusShort, (float)MAX_SPLAT_RADIUS);
 
-    float2 majorAxis = SafeNormalize2(tangentialUvVelocity, float2(1.0, 0.0));
+    float2 motionAxis = SafeNormalize2(tangentialUvVelocity, float2(1.0, 0.0));
+    float2 majorAxis = SafeNormalize2(
+        motionAxis * (0.22 + streak01 * 1.35) +
+        downhillAxis * tilt01,
+        motionAxis
+    );
     int radiusLoop = min(MAX_SPLAT_RADIUS, max(_MaxSplatRadiusCells, 1));
     float sharpness = max(_SplatSharpness, 0.25);
     float wetnessF =
@@ -963,18 +1116,41 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
         lerp(1.0, 0.62, saturate(_AbsorptionRate));
     uint wetness = (uint)round(wetnessF * (float)_WetnessUnits);
     float4 color = saturate(_ParticleColor[particleIndex]);
+    float organicByMaterial =
+        (0.72 + saturate(_Roughness) * 0.72 + saturate(_AbsorptionRate) * 0.28) *
+        (1.0 - viscosity01 * 0.18);
+    float splatOrganicStrength = saturate(_OrganicSplatNoiseStrength * organicByMaterial);
+    float splatEdgeBreakup =
+        saturate(_EdgeBreakupStrength * (0.45 + saturate(_Roughness) * 0.90 + saturate(_AbsorptionRate) * 0.35));
+    float splatMicroLobe =
+        saturate(_MicroLobeStrength * (0.55 + saturate(_SpreadFactor) * 0.35 + streak01 * 0.35));
+    float splatSeed =
+        (float)particleIndex * 37.17 +
+        dot(uv01, float2(113.7, 271.9)) +
+        stateAgeId.y * 19.13;
+    float directionality = saturate(max(streak01, tilt01));
+    float2 initialFlow =
+        tangentialUvVelocity * 0.42 +
+        downhillAxis * surfaceSlope * max(_GravityBiasInSplat, 0.0) * mobility * wetnessF * 160.0;
 
     DepositSplat(
         uv01,
         depositUnits,
         wetness,
         color,
-        tangentialUvVelocity * 0.42,
+        initialFlow,
         majorAxis,
         radiusLong,
         radiusShort,
         sharpness,
-        radiusLoop
+        radiusLoop,
+        splatSeed,
+        directionality,
+        splatOrganicStrength,
+        splatEdgeBreakup,
+        splatMicroLobe,
+        _IrregularityScale,
+        _StreakNoiseStrength
     );
 
     uint absorbedUnits = (uint)round((float)depositUnits * saturate(_AbsorptionRate) * 0.35);
@@ -986,7 +1162,8 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
         SpawnSurfaceParticle(
             uv01,
             radiusShort,
-            tangentialUvVelocity * (0.30 + 0.38 * mobility),
+            tangentialUvVelocity * (0.30 + 0.42 * mobility * streakViscosityMobility) +
+            downhillAxis * surfaceSlope * max(_GravityBiasInSplat, 0.0) * 95.0,
             surfaceUnits,
             color,
             wetnessF
@@ -1056,7 +1233,7 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
             regime,
             visibleReuseFraction,
             impactPoint,
-            normal,
+            paintSideNormal,
             tangent,
             bitangent,
             canvasVelocity,
@@ -1084,7 +1261,7 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
         _ParticleVelocityMass[particleIndex] =
             float4(canvasVelocity + reflectedRelative, velocityMass.w);
         _ParticlePositionRadius[particleIndex] =
-            float4(impactPoint + normal * (radius + max(_CollisionSkin, 1e-4)), radius);
+            float4(impactPoint + paintSideNormal * (radius + max(_CollisionSkin, 1e-4)), radius);
         stateAgeId.x = 6.0;
         stateAgeId.y = 0.0;
         stateAgeId.z = 0.0;
@@ -1098,9 +1275,9 @@ void KDepositImpacts(uint3 id : SV_DispatchThreadID)
     _ParticleVelocityMass[particleIndex] = float4(0.0, 0.0, 0.0, velocityMass.w);
 
     if (_ShrinkDepositedParticles != 0)
-        currentPr = float4(impactPoint + normal * max(_CollisionSkin, 1e-4), max(_DepositedParticleRadius, 1e-6));
+        currentPr = float4(impactPoint + paintSideNormal * max(_CollisionSkin, 1e-4), max(_DepositedParticleRadius, 1e-6));
     else
-        currentPr = float4(impactPoint + normal * max(radius, _CollisionSkin), radius);
+        currentPr = float4(impactPoint + paintSideNormal * max(radius, _CollisionSkin), radius);
 
     _ParticlePositionRadius[particleIndex] = currentPr;
 
@@ -1122,6 +1299,12 @@ void DepositHybridParticleAt(
     if (units == 0)
         return;
 
+    float seed =
+        dot(uv01, float2(197.3, 83.1)) +
+        radiusCells * 31.7 +
+        (droplet ? 17.0 : 3.0);
+    float flowDirectionality = saturate(length(flowCells) / 120.0);
+
     DepositSplat(
         uv01,
         units,
@@ -1132,7 +1315,14 @@ void DepositHybridParticleAt(
         max(radiusCells * 1.25, 0.75),
         max(radiusCells * 0.75, 0.50),
         max(_SplatSharpness, 0.25),
-        min(MAX_SPLAT_RADIUS, max(1, (int)ceil(radiusCells * 1.5)))
+        min(MAX_SPLAT_RADIUS, max(1, (int)ceil(radiusCells * 1.5))),
+        seed,
+        flowDirectionality,
+        saturate(_OrganicSplatNoiseStrength * (0.55 + _Roughness * 0.65)),
+        saturate(_EdgeBreakupStrength * (0.45 + _Roughness * 0.70)),
+        saturate(_MicroLobeStrength * (droplet ? 0.85 : 0.45)),
+        _IrregularityScale,
+        _StreakNoiseStrength * (droplet ? 0.75 : 0.45)
     );
 
     if (droplet)
@@ -1157,11 +1347,10 @@ void KEvolveHybridParticles(uint3 id : SV_DispatchThreadID)
     uint index = id.x;
     float dt = max(_DeltaTime, 1e-5);
     float3 gravity = normalize(_GravityDirection) * max(_GravityAcceleration, 0.0);
-    float2 gravityUv = float2(
-        dot(gravity, normalize(_CanvasCurrentTangent)) / max(_CellSizeU, 1e-6),
-        dot(gravity, normalize(_CanvasCurrentBitangent)) / max(_CellSizeV, 1e-6)
-    );
-    gravityUv = ApplyUvFlowFlip(gravityUv);
+    float2 gravityUv = ApplyUvFlowFlip(float2(
+        dot(gravity, normalize(_CanvasCurrentTangent)) / max(_CanvasWidth, 1e-6),
+        dot(gravity, normalize(_CanvasCurrentBitangent)) / max(_CanvasHeight, 1e-6)
+    )) * float2(max((float)_GridWidth, 1.0), max((float)_GridHeight, 1.0));
     float gravityNormal = dot(gravity, normalize(_CanvasCurrentNormal));
 
     float viscosity01 = saturate(log2(1.0 + max(_PaintViscosity, 0.0)) / 4.0);
