@@ -12,10 +12,21 @@ namespace PaintSim.Scripts.Stages.Surface
         private readonly PaintFilmGrid _paintFilmGrid;
         private readonly PaintProperties _paintProperties;
         private readonly int _kernelIndex = -1;
+        private readonly int _diagnosticsKernelIndex = -1;
+        private readonly int _buildResolveArgsKernelIndex = -1;
+        private readonly int _resolveKernelIndex = -1;
+        private readonly int _resetDepositTrackingKernelIndex = -1;
         private readonly uint[] _zeroDiagnostics = new uint[DiagnosticCounterCount];
         private readonly uint[] _diagnostics = new uint[DiagnosticCounterCount];
 
         private ComputeBuffer _diagnosticBuffer;
+        private bool _useCarreauYasuda;
+        private float _zeroShearViscosity = 1.0f;
+        private float _infiniteShearViscosity = 0.1f;
+        private float _relaxationTime = 1.0f;
+        private float _yasudaExponent = 2.0f;
+        private float _flowIndex = 0.7f;
+        private float _yieldStress;
 
         private static readonly int ID_ThicknessScale =
             Shader.PropertyToID("_ThicknessScale");
@@ -36,6 +47,10 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_MlsParticleColor");
         private static readonly int ID_MlsParticleStateAgeId =
             Shader.PropertyToID("_MlsParticleStateAgeId");
+        private static readonly int ID_MlsParticleVolumeJ =
+            Shader.PropertyToID("_MlsParticleVolumeJ");
+        private static readonly int ID_UseMlsParticleVolumeJ =
+            Shader.PropertyToID("_UseMlsParticleVolumeJ");
         private static readonly int ID_MlsParticleCount =
             Shader.PropertyToID("_MlsParticleCount");
         private static readonly int ID_DepositOnlyMlsAirDomainParticles =
@@ -48,6 +63,20 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_EnableSurfaceImpactDiagnostics");
         private static readonly int ID_SurfaceImpactDiagnostics =
             Shader.PropertyToID("_SurfaceImpactDiagnostics");
+        private static readonly int ID_UseCarreauYasuda =
+            Shader.PropertyToID("_UseCarreauYasuda");
+        private static readonly int ID_ZeroShearViscosity =
+            Shader.PropertyToID("_ZeroShearViscosity");
+        private static readonly int ID_InfiniteShearViscosity =
+            Shader.PropertyToID("_InfiniteShearViscosity");
+        private static readonly int ID_RelaxationTime =
+            Shader.PropertyToID("_RelaxationTime");
+        private static readonly int ID_YasudaExponent =
+            Shader.PropertyToID("_YasudaExponent");
+        private static readonly int ID_FlowIndex =
+            Shader.PropertyToID("_FlowIndex");
+        private static readonly int ID_YieldStress =
+            Shader.PropertyToID("_YieldStress");
 
         private static readonly int ID_DepositionFraction =
             Shader.PropertyToID("_DepositionFraction");
@@ -75,7 +104,32 @@ namespace PaintSim.Scripts.Stages.Surface
                 return;
 
             _kernelIndex = _shader.FindKernel("CSMainMlsMpm");
+            _diagnosticsKernelIndex =
+                _shader.FindKernel("CollectSurfaceImpactDiagnostics");
+            _buildResolveArgsKernelIndex =
+                _shader.FindKernel("BuildResolveDispatchArgs");
+            _resolveKernelIndex = _shader.FindKernel("ResolveDeposits");
+            _resetDepositTrackingKernelIndex =
+                _shader.FindKernel("ResetDepositTracking");
             EnsureDiagnosticBuffer();
+        }
+
+        public void ConfigureImpactRheology(
+            bool useCarreauYasuda,
+            float zeroShearViscosity,
+            float infiniteShearViscosity,
+            float relaxationTime,
+            float yasudaExponent,
+            float flowIndex,
+            float yieldStress)
+        {
+            _useCarreauYasuda = useCarreauYasuda;
+            _zeroShearViscosity = Mathf.Max(zeroShearViscosity, 0.0001f);
+            _infiniteShearViscosity = Mathf.Max(infiniteShearViscosity, 0.0001f);
+            _relaxationTime = Mathf.Max(relaxationTime, 0.0f);
+            _yasudaExponent = Mathf.Clamp(yasudaExponent, 0.25f, 8.0f);
+            _flowIndex = Mathf.Clamp(flowIndex, 0.05f, 2.0f);
+            _yieldStress = Mathf.Max(yieldStress, 0.0f);
         }
 
         public void DispatchFromMlsMpmBuffers(
@@ -83,6 +137,7 @@ namespace PaintSim.Scripts.Stages.Surface
             GraphicsBuffer velocityMassBuffer,
             GraphicsBuffer colorBuffer,
             GraphicsBuffer stateAgeIdBuffer,
+            GraphicsBuffer volumeJBuffer,
             int activeParticleCount,
             SurfaceProperties surface,
             bool markParticlesOnImpact = true,
@@ -97,7 +152,9 @@ namespace PaintSim.Scripts.Stages.Surface
                 positionRadiusBuffer == null ||
                 velocityMassBuffer == null ||
                 colorBuffer == null ||
-                stateAgeIdBuffer == null)
+                stateAgeIdBuffer == null ||
+                _paintFilmGrid.DepositColorAccumulatorBuffer == null ||
+                _paintFilmGrid.DepositFlowAccumulatorBuffer == null)
             {
                 return;
             }
@@ -133,17 +190,15 @@ namespace PaintSim.Scripts.Stages.Surface
                 ID_EnableSurfaceImpactDiagnostics,
                 enableDiagnostics ? 1 : 0
             );
+            _shader.SetInt(
+                ID_UseMlsParticleVolumeJ,
+                volumeJBuffer != null ? 1 : 0
+            );
 
             if (_diagnosticBuffer != null)
             {
                 if (enableDiagnostics)
                     _diagnosticBuffer.SetData(_zeroDiagnostics);
-
-                _shader.SetBuffer(
-                    _kernelIndex,
-                    ID_SurfaceImpactDiagnostics,
-                    _diagnosticBuffer
-                );
             }
 
             _shader.SetBuffer(
@@ -166,12 +221,30 @@ namespace PaintSim.Scripts.Stages.Surface
                 ID_MlsParticleStateAgeId,
                 stateAgeIdBuffer
             );
+            _shader.SetBuffer(
+                _kernelIndex,
+                ID_MlsParticleVolumeJ,
+                volumeJBuffer != null ? volumeJBuffer : positionRadiusBuffer
+            );
 
             _paintFilmGrid.BindToShader(_shader, _kernelIndex);
+            _paintFilmGrid.BindDepositWriteBuffers(_shader, _kernelIndex);
 
             int threadGroups = Mathf.CeilToInt((float)particleCount / ThreadGroupSize);
             if (threadGroups > 0)
                 _shader.Dispatch(_kernelIndex, threadGroups, 1, 1);
+
+            if (enableDiagnostics)
+            {
+                DispatchDiagnostics(
+                    positionRadiusBuffer,
+                    stateAgeIdBuffer,
+                    particleCount,
+                    threadGroups
+                );
+            }
+
+            ResolveAtomicDeposits();
         }
 
         public SurfaceImpactDiagnostics ReadDiagnostics()
@@ -219,6 +292,83 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_SpreadSpeed, surface.SpreadSpeed);
             _shader.SetInt(ID_SurfaceTypeID, (int)surface.SurfaceTypeID);
             _shader.SetInt(ID_MlsParticleCount, particleCount);
+            _shader.SetInt(ID_UseCarreauYasuda, _useCarreauYasuda ? 1 : 0);
+            _shader.SetFloat(ID_ZeroShearViscosity, _zeroShearViscosity);
+            _shader.SetFloat(ID_InfiniteShearViscosity, _infiniteShearViscosity);
+            _shader.SetFloat(ID_RelaxationTime, _relaxationTime);
+            _shader.SetFloat(ID_YasudaExponent, _yasudaExponent);
+            _shader.SetFloat(ID_FlowIndex, _flowIndex);
+            _shader.SetFloat(ID_YieldStress, _yieldStress);
+        }
+
+        private void ResolveAtomicDeposits()
+        {
+            if (_buildResolveArgsKernelIndex < 0 ||
+                _resolveKernelIndex < 0 ||
+                _resetDepositTrackingKernelIndex < 0 ||
+                _paintFilmGrid.DepositResolveDispatchArgsBuffer == null)
+            {
+                return;
+            }
+
+            _paintFilmGrid.ApplyGridParameters(_shader);
+            _paintFilmGrid.BindDepositDispatchControlBuffers(
+                _shader,
+                _buildResolveArgsKernelIndex
+            );
+            _paintFilmGrid.BindDepositResolveBuffers(
+                _shader,
+                _resolveKernelIndex
+            );
+            _paintFilmGrid.BindDepositDispatchControlBuffers(
+                _shader,
+                _resetDepositTrackingKernelIndex
+            );
+            _shader.SetFloat(ID_PaintDensity, _paintProperties.Density);
+
+            _shader.Dispatch(_buildResolveArgsKernelIndex, 1, 1, 1);
+            _shader.DispatchIndirect(
+                _resolveKernelIndex,
+                _paintFilmGrid.DepositResolveDispatchArgsBuffer
+            );
+            _shader.Dispatch(_resetDepositTrackingKernelIndex, 1, 1, 1);
+        }
+
+        private void DispatchDiagnostics(
+            GraphicsBuffer positionRadiusBuffer,
+            GraphicsBuffer stateAgeIdBuffer,
+            int particleCount,
+            int threadGroups)
+        {
+            if (_diagnosticsKernelIndex < 0 ||
+                _diagnosticBuffer == null ||
+                threadGroups <= 0)
+            {
+                return;
+            }
+
+            _paintFilmGrid.ApplyGridParameters(_shader);
+            _paintFilmGrid.BindDepositTouchedList(
+                _shader,
+                _diagnosticsKernelIndex
+            );
+            _shader.SetInt(ID_MlsParticleCount, particleCount);
+            _shader.SetBuffer(
+                _diagnosticsKernelIndex,
+                ID_MlsParticlePositionRadius,
+                positionRadiusBuffer
+            );
+            _shader.SetBuffer(
+                _diagnosticsKernelIndex,
+                ID_MlsParticleStateAgeId,
+                stateAgeIdBuffer
+            );
+            _shader.SetBuffer(
+                _diagnosticsKernelIndex,
+                ID_SurfaceImpactDiagnostics,
+                _diagnosticBuffer
+            );
+            _shader.Dispatch(_diagnosticsKernelIndex, threadGroups, 1, 1);
         }
     }
 

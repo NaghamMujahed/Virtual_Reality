@@ -29,8 +29,8 @@ namespace PaintSim.Scripts.Stages.Surface
             PaintSurfaceSizingMode.FitRendererBounds;
         [SerializeField] private PaintSurfacePlaneMode _planeMode =
             PaintSurfacePlaneMode.AutoFromMeshBounds;
-        [SerializeField] private int _gridWidth = 256;
-        [SerializeField] private int _gridHeight = 256;
+        [SerializeField] private int _gridWidth = 768;
+        [SerializeField] private int _gridHeight = 768;
         [SerializeField] private float _cellSize = 0.01f;
         [SerializeField] private bool _resizeTransformToExplicitGrid = false;
 
@@ -65,6 +65,10 @@ namespace PaintSim.Scripts.Stages.Surface
         private PaintEvolver _evolver;
         private MeshRenderer _meshRenderer;
         private MeshFilter _meshFilter;
+        private float _filmDensity = 1200.0f;
+        private float _filmViscosity = 0.5f;
+        private float _filmSurfaceTension = 0.04f;
+        private float _filmYieldStress;
 
         private void Awake()
         {
@@ -349,6 +353,7 @@ namespace PaintSim.Scripts.Stages.Surface
             _evolver.DiffusionRate = EffectiveDiffusionRate();
             _evolver.RunoffRate = _runoffRate;
             _evolver.MinimumWetThickness = _minimumWetThickness;
+            ApplyFilmMaterialToEvolver();
         }
 
         private void InitRenderer()
@@ -379,11 +384,29 @@ namespace PaintSim.Scripts.Stages.Surface
                 _evolver.DiffusionRate = EffectiveDiffusionRate();
                 _evolver.RunoffRate = _runoffRate;
                 _evolver.MinimumWetThickness = _minimumWetThickness;
+                _evolver.SurfaceGravity = new Vector2(
+                    Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisU),
+                    Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisV)
+                );
+                ApplyFilmMaterialToEvolver();
                 _evolver.Evolve(Time.deltaTime * Mathf.Max(1, _evolveEveryNFrames));
             }
 
             if (Time.frameCount % Mathf.Max(1, _renderEveryNFrames) == 0)
                 _renderer?.Render();
+        }
+
+        public void ConfigureFilmMaterial(
+            float density,
+            float dynamicViscosity,
+            float surfaceTension,
+            float yieldStress)
+        {
+            _filmDensity = Mathf.Max(density, 1.0f);
+            _filmViscosity = Mathf.Max(dynamicViscosity, 0.0001f);
+            _filmSurfaceTension = Mathf.Max(surfaceTension, 0.0001f);
+            _filmYieldStress = Mathf.Max(yieldStress, 0.0f);
+            ApplyFilmMaterialToEvolver();
         }
 
         [ContextMenu("PaintSim/Debug Stamp Center")]
@@ -481,10 +504,21 @@ namespace PaintSim.Scripts.Stages.Surface
 
         private float EffectiveDiffusionRate()
         {
-            // Existing scenes used values around 30 for the old non-conservative
-            // diffusion shader. The new ping-pong spread model expects a smaller
-            // normalized rate, so we preserve inspector compatibility here.
-            return Mathf.Clamp(_diffusionRate * 0.02f, 0.0f, 2.0f);
+            // Preserve the legacy inspector scale while mapping it to the
+            // conservative capillary flux model. A legacy value of 30 maps to
+            // 7.5 1/s and remains CFL-stable because the shader clamps transport.
+            return Mathf.Clamp(_diffusionRate * 0.25f, 0.0f, 12.0f);
+        }
+
+        private void ApplyFilmMaterialToEvolver()
+        {
+            if (_evolver == null)
+                return;
+
+            _evolver.PaintDensity = _filmDensity;
+            _evolver.DynamicViscosity = _filmViscosity;
+            _evolver.SurfaceTension = _filmSurfaceTension;
+            _evolver.YieldStress = _filmYieldStress;
         }
 
         private void OnDestroy()

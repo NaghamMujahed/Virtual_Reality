@@ -9569,8 +9569,7 @@ MeshRenderer:
   m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: 67ac656add6c9fb40af8ea3d86eeebe2, type: 2}
+  m_Materials: []
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -9644,9 +9643,11 @@ MonoBehaviour:
   _depositInLateUpdate: 1
   _depositEveryNFrames: 1
   _skipWhenNoAirDomainParticles: 1
-  _depositOnlyAirDomainParticles: 1
-  _acceptFluidDomainSurfaceHits: 1
   _markMlsMpmParticlesOnImpact: 1
+  _enableCanvasSlidingTrails: 1
+  _canvasTrailParticleStride: 4
+  _canvasTrailMaxSteps: 2
+  _canvasTrailSplatHalfWidth: 1
   _enableSurfaceImpactDiagnostics: 0
   _diagnosticLogEveryNFrames: 120
   _syncPaintPropertiesFromMlsMpmMaterial: 1
@@ -9670,22 +9671,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintSim.Scripts.Stages.Surface.PaintSurface
   _surfaceType: 0
   _sizingMode: 0
-  _planeMode: 0
-  _gridWidth: 768
-  _gridHeight: 768
+  _planeMode: 2
+  _gridWidth: 256
+  _gridHeight: 256
   _cellSize: 0.01
   _resizeTransformToExplicitGrid: 0
   _impactCaptureDistance: 0.03
   _doubleSidedImpact: 1
   _paintFilmBakerShader: {fileID: 7200000, guid: 66a63eb08b67aba499aad6f41f2ab2f1, type: 3}
-  _maxThickness: 0.00008
+  _maxThickness: 0.0001
   _wetnessShine: 0.8
   _renderEveryNFrames: 1
   _enableEvolution: 1
   _evaporationShader: {fileID: 7200000, guid: d732c12b1f53b16458bbd821f0f08ad3, type: 3}
-  _evaporationRate: 0.02
+  _evaporationRate: 0.05
   _diffusionRate: 30
-  _runoffRate: 0.18
+  _runoffRate: 0.32
+  _colorMixRate: 1.15
   _minimumWetThickness: 0.000015
   _evolveEveryNFrames: 2
   _debugStampColor: {r: 1, g: 0.05, b: 0.02, a: 1}

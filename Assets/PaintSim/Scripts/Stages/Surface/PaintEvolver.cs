@@ -1,4 +1,5 @@
 using UnityEngine;
+using PaintSim.Scripts.Core.Data;
 
 namespace PaintSim.Scripts.Stages.Surface
 {
@@ -29,11 +30,32 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_RunoffRate");
         private static readonly int ID_MinimumWetThickness =
             Shader.PropertyToID("_MinimumWetThickness");
+        private static readonly int ID_ThicknessScale =
+            Shader.PropertyToID("_ThicknessScale");
+        private static readonly int ID_CellSizeU =
+            Shader.PropertyToID("_CellSizeU");
+        private static readonly int ID_CellSizeV =
+            Shader.PropertyToID("_CellSizeV");
+        private static readonly int ID_SurfaceGravity =
+            Shader.PropertyToID("_SurfaceGravity");
+        private static readonly int ID_PaintDensity =
+            Shader.PropertyToID("_PaintDensity");
+        private static readonly int ID_DynamicViscosity =
+            Shader.PropertyToID("_DynamicViscosity");
+        private static readonly int ID_SurfaceTension =
+            Shader.PropertyToID("_SurfaceTension");
+        private static readonly int ID_YieldStress =
+            Shader.PropertyToID("_YieldStress");
 
         public float EvaporationRate { get; set; } = 0.05f;
         public float DiffusionRate { get; set; } = 0.35f;
         public float RunoffRate { get; set; } = 0.18f;
         public float MinimumWetThickness { get; set; } = 0.000015f;
+        public Vector2 SurfaceGravity { get; set; }
+        public float PaintDensity { get; set; } = 1200.0f;
+        public float DynamicViscosity { get; set; } = 0.5f;
+        public float SurfaceTension { get; set; } = 0.04f;
+        public float YieldStress { get; set; }
 
         public PaintEvolver(ComputeShader shader, PaintFilmGrid grid)
         {
@@ -79,6 +101,14 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_DiffusionRate, Mathf.Max(DiffusionRate, 0.0f));
             _shader.SetFloat(ID_RunoffRate, Mathf.Max(RunoffRate, 0.0f));
             _shader.SetFloat(ID_MinimumWetThickness, Mathf.Max(MinimumWetThickness, 1e-7f));
+            _shader.SetInt(ID_ThicknessScale, PaintCellData.ThicknessScale);
+            _shader.SetFloat(ID_CellSizeU, _grid.CellSizeU);
+            _shader.SetFloat(ID_CellSizeV, _grid.CellSizeV);
+            _shader.SetVector(ID_SurfaceGravity, SurfaceGravity);
+            _shader.SetFloat(ID_PaintDensity, Mathf.Max(PaintDensity, 1.0f));
+            _shader.SetFloat(ID_DynamicViscosity, Mathf.Max(DynamicViscosity, 0.0001f));
+            _shader.SetFloat(ID_SurfaceTension, Mathf.Max(SurfaceTension, 0.0001f));
+            _shader.SetFloat(ID_YieldStress, Mathf.Max(YieldStress, 0.0f));
         }
     }
 }

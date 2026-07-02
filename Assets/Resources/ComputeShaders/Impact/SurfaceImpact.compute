@@ -1,4 +1,8 @@
 #pragma kernel CSMainMlsMpm
+#pragma kernel CollectSurfaceImpactDiagnostics
+#pragma kernel BuildResolveDispatchArgs
+#pragma kernel ResolveDeposits
+#pragma kernel ResetDepositTracking
 
 struct PaintCellData
 {
@@ -18,7 +22,13 @@ RWStructuredBuffer<float4> _MlsParticlePositionRadius;
 RWStructuredBuffer<float4> _MlsParticleVelocityMass;
 StructuredBuffer<float4>   _MlsParticleColor;
 RWStructuredBuffer<float4> _MlsParticleStateAgeId;
+StructuredBuffer<float4>   _MlsParticleVolumeJ;
 RWStructuredBuffer<uint>   _SurfaceImpactDiagnostics;
+RWStructuredBuffer<int4>   _DepositColorAccumulator;
+RWStructuredBuffer<int2>   _DepositFlowAccumulator;
+RWStructuredBuffer<uint>   _DepositTouchedFlags;
+RWStructuredBuffer<uint>   _DepositTouchedList;
+RWStructuredBuffer<uint>   _DepositResolveDispatchArgs;
 
 int _GridWidth;
 int _GridHeight;
@@ -53,6 +63,15 @@ int _DepositOnlyMlsAirDomainParticles;
 int _MarkMlsParticlesDeposited;
 int _AcceptFluidDomainSurfaceHits;
 int _EnableSurfaceImpactDiagnostics;
+int _UseMlsParticleVolumeJ;
+int _UseCarreauYasuda;
+
+float _ZeroShearViscosity;
+float _InfiniteShearViscosity;
+float _RelaxationTime;
+float _YasudaExponent;
+float _FlowIndex;
+float _YieldStress;
 
 #define PI 3.14159265f
 #define WE_DEPOSITION 5.0f
@@ -67,11 +86,12 @@ int _EnableSurfaceImpactDiagnostics;
 #define DIAG_SETTLED          5
 #define DIAG_STATE_SKIPPED    6
 #define DIAG_CELL_WRITES      7
+#define FLOW_ACCUMULATION_SCALE 128.0f
 
 void DiagAdd(uint index, uint value)
 {
-    if (_EnableSurfaceImpactDiagnostics != 0)
-        InterlockedAdd(_SurfaceImpactDiagnostics[index], value);
+    // Diagnostics run in a separate kernel so the hot impact kernel remains
+    // within D3D11's eight-UAV limit.
 }
 
 float3 SafeNormalize3(float3 value, float3 fallback)
@@ -95,6 +115,30 @@ float4 SafePaintColor(float4 color)
 
     color.a = max(color.a, _FallbackPaintColor.a);
     return saturate(color);
+}
+
+float EvaluateImpactViscosity(float shearRate)
+{
+    shearRate = max(shearRate, 0.01f);
+    float viscosity = max(_PaintViscosity, 1e-5f);
+
+    if (_UseCarreauYasuda != 0)
+    {
+        float a = max(_YasudaExponent, 0.25f);
+        float lambdaGamma = max(_RelaxationTime, 0.0f) * shearRate;
+        float exponent = (_FlowIndex - 1.0f) / a;
+        float factor = pow(1.0f + pow(lambdaGamma, a), exponent);
+
+        viscosity =
+            max(_InfiniteShearViscosity, 1e-5f) +
+            (
+                max(_ZeroShearViscosity, _InfiniteShearViscosity) -
+                max(_InfiniteShearViscosity, 1e-5f)
+            ) * factor;
+    }
+
+    viscosity += max(_YieldStress, 0.0f) / shearRate;
+    return max(viscosity, 1e-5f);
 }
 
 bool IsMlsAirDomainState(int state)
@@ -144,26 +188,68 @@ void WriteCell(
     if (w <= 0)
         return;
 
-    float addedMass = thickness * weight;
-
     InterlockedAdd(_PaintCellBuffer[idx].ThicknessInt, w);
     InterlockedMax(_PaintCellBuffer[idx].IsActive, 1u);
     DiagAdd(DIAG_CELL_WRITES, 1u);
 
     _PaintCellBuffer[idx].Wetness = 1.0f;
+    _PaintCellBuffer[idx].Age = 0.0f;
 
-    float4 oldColor = _PaintCellBuffer[idx].Color;
-    float oldDensity = _PaintCellBuffer[idx].PaintDensity;
-    float total = oldDensity + addedMass;
+    float3 safeColor = saturate(SafePaintColor(col).rgb);
+    int3 colorContribution = (int3)round(safeColor * (float)w);
 
-    float4 blendedColor =
-        (oldColor * oldDensity + col * addedMass) / max(total, 1e-5f);
+    InterlockedAdd(_DepositColorAccumulator[idx].x, colorContribution.x);
+    InterlockedAdd(_DepositColorAccumulator[idx].y, colorContribution.y);
+    InterlockedAdd(_DepositColorAccumulator[idx].z, colorContribution.z);
+    InterlockedAdd(_DepositColorAccumulator[idx].w, w);
 
-    _PaintCellBuffer[idx].Color = SafePaintColor(blendedColor);
-    _PaintCellBuffer[idx].PaintDensity = total;
+    float2 safeFlow = clamp(
+        flow,
+        float2(-16.0f, -16.0f),
+        float2(16.0f, 16.0f)
+    );
+    int2 flowContribution =
+        (int2)round(safeFlow * (float)w * FLOW_ACCUMULATION_SCALE);
 
-    _PaintCellBuffer[idx].FlowVelocity =
-        _PaintCellBuffer[idx].FlowVelocity * 0.9f + flow * weight * 0.1f;
+    InterlockedAdd(_DepositFlowAccumulator[idx].x, flowContribution.x);
+    InterlockedAdd(_DepositFlowAccumulator[idx].y, flowContribution.y);
+
+    uint wasTouched;
+    InterlockedExchange(_DepositTouchedFlags[idx], 1u, wasTouched);
+
+    if (wasTouched == 0u)
+    {
+        uint touchedSlot;
+        InterlockedAdd(_DepositTouchedList[0], 1u, touchedSlot);
+
+        uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+        if (touchedSlot < maxTouched)
+            _DepositTouchedList[touchedSlot + 1u] = (uint)idx;
+    }
+}
+
+float FootprintWeight(
+    int cellU,
+    int cellV,
+    float localU,
+    float localV,
+    float2 tangentDirection,
+    float alongRadius,
+    float acrossRadius)
+{
+    float2 delta =
+        float2((float)cellU + 0.5f - localU, (float)cellV + 0.5f - localV);
+    float2 tangent = SafeNormalize3(
+        float3(tangentDirection, 0.0f),
+        float3(1.0f, 0.0f, 0.0f)
+    ).xy;
+    float2 perpendicular = float2(-tangent.y, tangent.x);
+
+    float along = dot(delta, tangent) / max(alongRadius, 1e-4f);
+    float across = dot(delta, perpendicular) / max(acrossRadius, 1e-4f);
+    float r2 = along * along + across * across;
+
+    return r2 <= 1.0f ? exp(-r2 * 4.0f) : 0.0f;
 }
 
 bool DepositSurfaceImpact(
@@ -172,6 +258,7 @@ bool DepositSurfaceImpact(
     float3 velocity,
     float mass,
     float radius,
+    float particleVolume,
     float4 color,
     out float3 resolvedPosition,
     out float3 resolvedVelocity,
@@ -242,9 +329,11 @@ bool DepositSurfaceImpact(
     float weber =
         (_PaintDensity * speed * speed * diameter) /
         max(_SurfaceTension, 1e-5f);
+    float shearRate = speed / max(diameter, 1e-5f);
+    float impactViscosity = EvaluateImpactViscosity(shearRate);
     float reynolds =
         (_PaintDensity * speed * diameter) /
-        max(_PaintViscosity, 1e-5f);
+        impactViscosity;
     float splashK = weber * sqrt(max(reynolds, 0.0f));
 
     uint regime = 0u;
@@ -267,70 +356,150 @@ bool DepositSurfaceImpact(
     else if (regime == 3u)
         depositionFraction *= 0.50f;
 
-    float absorbed = saturate(1.0f - depositionFraction);
-
     float spreadSpeed = saturate(_SpreadSpeed);
     float baseRadiusCells =
         1.0f +
         sqrt(max(weber, 0.0f)) *
         lerp(0.12f, 0.32f, spreadSpeed);
-    float radiusU = clamp(
-        baseRadiusCells * (1.0f + abs(tangentU) * 2.0f),
+    baseRadiusCells *= lerp(1.12f, 0.82f, saturate(_Roughness));
+    float alongRadius = clamp(
+        baseRadiusCells * (1.0f + tangentLen * 2.0f),
         1.0f,
         6.0f
     );
-    float radiusV = clamp(
-        baseRadiusCells * (1.0f + abs(tangentV) * 2.0f),
-        1.0f,
-        6.0f
-    );
+    float acrossRadius = clamp(baseRadiusCells, 1.0f, 5.0f);
+    float2 tangentDirection = SafeNormalize3(
+        float3(tangentU, tangentV, 0.0f),
+        float3(1.0f, 0.0f, 0.0f)
+    ).xy;
 
     float volume =
-        (4.0f / 3.0f) * PI *
-        resolvedRadius * resolvedRadius * resolvedRadius;
+        particleVolume > 1e-12f
+            ? particleVolume
+            : resolvedMass / max(_PaintDensity, 1e-5f);
     float cellArea = max(_CellSizeU * _CellSizeV, 1e-8f);
     float thickness = volume / cellArea;
-    int thicknessInt = (int)(thickness * _ThicknessScale);
-
-    float roughnessMod = 1.0f + saturate(_Roughness) * 0.5f;
-    int depositInt = (int)(thicknessInt * depositionFraction / roughnessMod);
-
-    color = SafePaintColor(color);
-
-    [loop]
-    for (int y = -6; y <= 6; y++)
-    {
-        [loop]
-        for (int x = -6; x <= 6; x++)
-        {
-            float du = (float)x / radiusU;
-            float dv = (float)y / radiusV;
-            float r2 = du * du + dv * dv;
-
-            if (r2 > 1.0f)
-                continue;
-
-            float w = exp(-r2 * 4.0f);
-            float2 flow = float2(tangentU, tangentV) * speed * 0.05f;
-
-            WriteCell(
-                baseU + x,
-                baseV + y,
-                w,
-                depositInt,
-                color,
-                _PaintDensity,
-                flow
-            );
-        }
-    }
 
     float splash01 =
         saturate((weber - WE_SPREAD) / 120.0f) *
         max(_SplashMultiplier, 0.0f);
 
-    if (splash01 > 0.01f && depositInt > 0)
+    float energy = saturate(weber / 150.0f);
+    float bounceFactor =
+        (weber < WE_DEPOSITION) ? 0.0f :
+        (weber < WE_SPREAD)     ? 0.05f :
+        (splashK < K_SPLASH)    ? 0.2f :
+                                  0.5f;
+
+    float3 tangentVelocity = velocity - normalWS * normalVelocity;
+    resolvedVelocity = tangentVelocity * (1.0f - saturate(depositionFraction));
+    resolvedVelocity += normalWS *
+        (abs(normalVelocity) * bounceFactor * energy * impactSide);
+
+    float predictedNormalSpeed = abs(dot(resolvedVelocity, normalWS));
+    bool predictedSettled =
+        weber < WE_DEPOSITION ||
+        bounceFactor < 0.05f ||
+        predictedNormalSpeed < 0.5f;
+
+    float effectiveDepositFraction =
+        predictedSettled ? 1.0f : saturate(depositionFraction);
+    int depositInt = (int)round(
+        thickness * effectiveDepositFraction * (float)_ThicknessScale
+    );
+
+    color = SafePaintColor(color);
+
+    float satelliteBudgetFraction =
+        saturate(splash01) * lerp(0.08f, 0.22f, saturate(_SplashMultiplier));
+    satelliteBudgetFraction = min(satelliteBudgetFraction, 0.25f);
+
+    int satelliteBudgetInt =
+        (int)round((float)depositInt * satelliteBudgetFraction);
+    int footprintDepositInt = max(depositInt - satelliteBudgetInt, 0);
+
+    float footprintWeightSum = 0.0f;
+
+    [loop]
+    for (int weightY = -6; weightY <= 6; weightY++)
     {
+        [loop]
+        for (int weightX = -6; weightX <= 6; weightX++)
+        {
+            int cellU = baseU + weightX;
+            int cellV = baseV + weightY;
+
+            if (!InBounds(cellU, cellV))
+                continue;
+
+            footprintWeightSum += FootprintWeight(
+                cellU,
+                cellV,
+                localU,
+                localV,
+                tangentDirection,
+                alongRadius,
+                acrossRadius
+            );
+        }
+    }
+
+    float2 impactFlow = tangentDirection * length(tangentVelocity);
+
+    if (footprintDepositInt > 0 && footprintWeightSum > 1e-6f)
+    {
+        [loop]
+        for (int depositY = -6; depositY <= 6; depositY++)
+        {
+            [loop]
+            for (int depositX = -6; depositX <= 6; depositX++)
+            {
+                int cellU = baseU + depositX;
+                int cellV = baseV + depositY;
+
+                float weight = FootprintWeight(
+                    cellU,
+                    cellV,
+                    localU,
+                    localV,
+                    tangentDirection,
+                    alongRadius,
+                    acrossRadius
+                );
+
+                if (weight <= 0.0f)
+                    continue;
+
+                WriteCell(
+                    cellU,
+                    cellV,
+                    weight / footprintWeightSum,
+                    footprintDepositInt,
+                    color,
+                    _PaintDensity,
+                    impactFlow
+                );
+            }
+        }
+    }
+
+    if (satelliteBudgetInt > 0 && splash01 > 0.01f)
+    {
+        float satelliteWeightSum = 0.0f;
+
+        [unroll]
+        for (int weightIndex = 0; weightIndex < 10; weightIndex++)
+        {
+            float weightSeed =
+                (float)particleIndex * 17.113f +
+                (float)weightIndex * 31.719f +
+                localU * 0.137f +
+                localV * 0.271f;
+            float randomWeight =
+                frac(sin(weightSeed + 71.71f) * 13412.9831f);
+            satelliteWeightSum += lerp(0.5f, 1.5f, randomWeight);
+        }
+
         [unroll]
         for (int k = 0; k < 10; k++)
         {
@@ -347,44 +516,34 @@ bool DepositSurfaceImpact(
             float angle = r0 * 6.2831853f;
             float dist =
                 lerp(1.4f, 4.8f, r1) *
-                lerp(radiusU, max(radiusU, radiusV), 0.5f) *
+                lerp(acrossRadius, alongRadius, 0.65f) *
                 lerp(0.7f, 1.35f, splash01);
 
             float2 dir = float2(cos(angle), sin(angle));
             float tangentAlignment =
-                saturate(abs(dot(normalize(float2(tangentU, tangentV) + 1e-5f), dir)));
+                saturate(abs(dot(tangentDirection, dir)));
 
             dist *= lerp(0.75f, 1.35f, tangentAlignment);
 
             int satelliteU = baseU + (int)round(dir.x * dist);
             int satelliteV = baseV + (int)round(dir.y * dist);
-
-            int satelliteThickness =
-                (int)max(1.0f, (float)depositInt * splash01 * lerp(0.015f, 0.08f, r2));
+            int satelliteThickness = (int)round(
+                (float)satelliteBudgetInt *
+                lerp(0.5f, 1.5f, r2) /
+                max(satelliteWeightSum, 1e-5f)
+            );
 
             WriteCell(
                 satelliteU,
                 satelliteV,
-                lerp(0.35f, 0.85f, r2),
+                1.0f,
                 satelliteThickness,
                 color,
                 _PaintDensity,
-                float2(tangentU, tangentV) * speed * 0.03f
+                impactFlow * 0.75f
             );
         }
     }
-
-    float energy = saturate(weber / 150.0f);
-    float bounceFactor =
-        (weber < WE_DEPOSITION) ? 0.0f :
-        (weber < WE_SPREAD)     ? 0.05f :
-        (splashK < K_SPLASH)    ? 0.2f :
-                                  0.5f;
-
-    float3 tangentVelocity = velocity - normalWS * normalVelocity;
-    resolvedVelocity = tangentVelocity * (1.0f - saturate(depositionFraction));
-    resolvedVelocity += normalWS *
-        (abs(normalVelocity) * bounceFactor * energy * impactSide);
 
     float2 jitter = float2(
         frac(sin(localU * 12.3f + particleIndex) * 43758.5f),
@@ -413,17 +572,13 @@ bool DepositSurfaceImpact(
 
     resolvedVelocity -= normalWS * dot(resolvedVelocity, normalWS) * 0.02f;
 
-    resolvedMass *= (1.0f - absorbed * saturate(_AbsorptionRate));
-    float newVolume = resolvedMass / max(_PaintDensity, 1e-5f);
-    resolvedRadius = pow(
-        max((3.0f * newVolume) / (4.0f * PI), 0.0f),
-        0.3333f
-    );
+    float remainingFraction = saturate(1.0f - effectiveDepositFraction);
+    resolvedMass *= remainingFraction;
+    resolvedRadius *= pow(max(remainingFraction, 0.0f), 0.3333333f);
 
     float resolvedNormalSpeed = abs(dot(resolvedVelocity, normalWS));
     settled =
-        weber < WE_DEPOSITION ||
-        bounceFactor < 0.05f ||
+        predictedSettled ||
         resolvedNormalSpeed < 0.5f ||
         resolvedRadius < 0.001f ||
         resolvedMass < 0.000001f;
@@ -457,6 +612,18 @@ void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
     float4 pr = _MlsParticlePositionRadius[i];
     float4 vm = _MlsParticleVelocityMass[i];
     float4 col = _MlsParticleColor[i];
+    float4 volumeJ = _MlsParticleVolumeJ[i];
+    float fallbackVolume = max(vm.w, 0.0f) / max(_PaintDensity, 1e-5f);
+    float restMass =
+        max(volumeJ.x, 0.0f) * max(volumeJ.z, _PaintDensity);
+    float remainingMassFraction =
+        restMass > 1e-10f ? saturate(vm.w / restMass) : 1.0f;
+    float particleVolume =
+        _UseMlsParticleVolumeJ != 0 && volumeJ.x > 0.0f
+            ? volumeJ.x *
+              clamp(volumeJ.y, 0.25f, 4.0f) *
+              remainingMassFraction
+            : fallbackVolume;
 
     float3 resolvedPosition;
     float3 resolvedVelocity;
@@ -470,6 +637,7 @@ void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
         vm.xyz,
         vm.w,
         pr.w,
+        particleVolume,
         col,
         resolvedPosition,
         resolvedVelocity,
@@ -499,4 +667,145 @@ void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
     }
 
     _MlsParticleStateAgeId[i] = stateAgeId;
+}
+
+[numthreads(64, 1, 1)]
+void CollectSurfaceImpactDiagnostics(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)max(_MlsParticleCount, 0))
+        return;
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_SCANNED], 1u);
+
+    int state = (int)round(_MlsParticleStateAgeId[i].x);
+    bool accepted =
+        IsMlsDepositableState(state) ||
+        state == 8 ||
+        state == 9;
+
+    if (!accepted)
+    {
+        InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_STATE_SKIPPED], 1u);
+        return;
+    }
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_STATE_ACCEPTED], 1u);
+
+    float3 axisU = SafeNormalize3(_SurfaceAxisU, float3(1.0f, 0.0f, 0.0f));
+    float3 axisV = SafeNormalize3(_SurfaceAxisV, float3(0.0f, 0.0f, 1.0f));
+    float3 normalWS = SafeNormalize3(
+        _SurfaceNormalWS,
+        normalize(cross(axisU, axisV))
+    );
+    float4 positionRadius = _MlsParticlePositionRadius[i];
+    float3 relative = positionRadius.xyz - _SurfaceOriginWS;
+    float distanceToSurface = abs(dot(relative, normalWS));
+    float captureDistance =
+        max(
+            _SurfaceImpactCaptureDistance,
+            max(positionRadius.w, _CellSize) * 1.5f
+        );
+
+    if (distanceToSurface > captureDistance + positionRadius.w)
+        return;
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_NEAR_SURFACE], 1u);
+
+    float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
+    float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
+
+    if (localU < -6.0f || localU >= (float)_GridWidth + 6.0f ||
+        localV < -6.0f || localV >= (float)_GridHeight + 6.0f)
+    {
+        return;
+    }
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_IN_GRID], 1u);
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_IMPACTED], 1u);
+
+    if (state == 8 || state == 9)
+    {
+        InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_SETTLED], 1u);
+    }
+
+    if (i == 0u)
+    {
+        uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+        uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+        _SurfaceImpactDiagnostics[DIAG_CELL_WRITES] = touchedCount;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void BuildResolveDispatchArgs(uint3 id : SV_DispatchThreadID)
+{
+    uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+    uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+
+    _DepositResolveDispatchArgs[0] = (touchedCount + 63u) / 64u;
+    _DepositResolveDispatchArgs[1] = 1u;
+    _DepositResolveDispatchArgs[2] = 1u;
+}
+
+[numthreads(64, 1, 1)]
+void ResolveDeposits(uint3 id : SV_DispatchThreadID)
+{
+    uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+    uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+
+    if (id.x >= touchedCount)
+        return;
+
+    int index = (int)_DepositTouchedList[id.x + 1u];
+    int4 colorAccum = _DepositColorAccumulator[index];
+    int2 flowAccum = _DepositFlowAccumulator[index];
+
+    if (colorAccum.w > 0)
+    {
+        PaintCellData cell = _PaintCellBuffer[index];
+        int totalThickness = max(cell.ThicknessInt, 0);
+        int depositedThickness = min(colorAccum.w, totalThickness);
+        int previousThickness = max(totalThickness - depositedThickness, 0);
+
+        float3 previousColor = SafePaintColor(cell.Color).rgb;
+        float3 depositedColor =
+            (float3)colorAccum.xyz / max((float)depositedThickness, 1.0f);
+        float3 mixedColor =
+            (
+                previousColor * (float)previousThickness +
+                depositedColor * (float)depositedThickness
+            ) / max((float)totalThickness, 1.0f);
+
+        float2 depositedFlow =
+            (float2)flowAccum /
+            max(
+                (float)depositedThickness * FLOW_ACCUMULATION_SCALE,
+                1.0f
+            );
+        float depositBlend =
+            saturate((float)depositedThickness / max((float)totalThickness, 1.0f));
+
+        cell.Color = float4(saturate(mixedColor), 1.0f);
+        cell.FlowVelocity = lerp(cell.FlowVelocity, depositedFlow, depositBlend);
+        cell.PaintDensity = max(_PaintDensity, 1.0f);
+        cell.Wetness = 1.0f;
+        cell.Age = 0.0f;
+        cell.IsActive = totalThickness > 0 ? 1u : 0u;
+
+        _PaintCellBuffer[index] = cell;
+    }
+
+    _DepositColorAccumulator[index] = int4(0, 0, 0, 0);
+    _DepositFlowAccumulator[index] = int2(0, 0);
+    _DepositTouchedFlags[index] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void ResetDepositTracking(uint3 id : SV_DispatchThreadID)
+{
+    _DepositTouchedList[0] = 0u;
+    _DepositResolveDispatchArgs[0] = 0u;
+    _DepositResolveDispatchArgs[1] = 1u;
+    _DepositResolveDispatchArgs[2] = 1u;
 }

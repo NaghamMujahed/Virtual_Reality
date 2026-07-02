@@ -16,7 +16,10 @@ namespace PaintSim.Scripts.Core.Data
         private float _pad0;
 
         public const int Stride = 48;
-        public const int ThicknessScale = 1000000;
+        // 10 nm fixed-point units. Micrometre precision was too coarse for
+        // physically calibrated MLS-MPM particles and caused visible mass loss
+        // when a thin film spread across multiple cells.
+        public const int ThicknessScale = 100000000;
 
         public float Thickness => ThicknessInt / (float)ThicknessScale;
 

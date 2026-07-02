@@ -5,6 +5,7 @@ using PaintBucketSim.Systems.Fluid.GPU;
 using PaintSim.Scripts.Core.Data;
 using PaintSim.Scripts.Stages.Surface;
 using PaintMaterialConfig = PaintBucketSim.Configs.PaintMaterialConfig;
+using PaintViscosityModel = PaintBucketSim.Configs.PaintViscosityModel;
 
 namespace PaintSim.Scripts.UnityBridge
 {
@@ -146,6 +147,28 @@ namespace PaintSim.Scripts.UnityBridge
                 _paintSurface.PaintFilmGrid,
                 _paintProperties
             );
+
+            if (_paintFluidSystem != null &&
+                _paintFluidSystem.MaterialConfig != null)
+            {
+                PaintMaterialConfig material = _paintFluidSystem.MaterialConfig;
+                _paintDepositor.ConfigureImpactRheology(
+                    material.viscosityModel == PaintViscosityModel.CarreauYasuda,
+                    material.zeroShearViscosityPaS,
+                    material.infiniteShearViscosityPaS,
+                    material.relaxationTimeSeconds,
+                    material.yasudaExponent,
+                    material.flowIndex,
+                    material.yieldStressPa
+                );
+
+                _paintSurface.ConfigureFilmMaterial(
+                    material.densityKgPerM3,
+                    material.EvaluateViscosity(1.0f, _materialViscositySampleTemperature),
+                    material.surfaceTensionNPerM,
+                    material.yieldStressPa
+                );
+            }
         }
 
         private void DispatchMlsMpmDepositor()
@@ -185,6 +208,7 @@ namespace PaintSim.Scripts.UnityBridge
                 _gpuFluidBufferSet.VelocityMassBuffer,
                 _gpuFluidBufferSet.ColorBuffer,
                 _gpuFluidBufferSet.StateAgeIdBuffer,
+                _gpuFluidBufferSet.VolumeJBuffer,
                 count,
                 _paintSurface.SurfaceProperties,
                 _markMlsMpmParticlesOnImpact,

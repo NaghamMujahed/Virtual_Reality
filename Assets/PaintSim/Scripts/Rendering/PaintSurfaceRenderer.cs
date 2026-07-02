@@ -11,6 +11,7 @@ namespace PaintSim.Scripts.Rendering
         private readonly MeshRenderer _surfaceRenderer;
 
         private RenderTexture _paintTexture;
+        private RenderTexture _surfaceDataTexture;
         private Color _canvasBaseColor = new Color(0.72f, 0.65f, 0.55f, 1.0f);
         private Material _runtimeFallbackMaterial;
 
@@ -20,6 +21,8 @@ namespace PaintSim.Scripts.Rendering
 
         private static readonly int ID_PaintCellBuffer = Shader.PropertyToID("_PaintCellBuffer");
         private static readonly int ID_OutputTexture   = Shader.PropertyToID("_OutputTexture");
+        private static readonly int ID_SurfaceDataTexture =
+            Shader.PropertyToID("_SurfaceDataTexture");
         private static readonly int ID_GridWidth       = Shader.PropertyToID("_GridWidth");
         private static readonly int ID_GridHeight      = Shader.PropertyToID("_GridHeight");
         private static readonly int ID_ThicknessScale  = Shader.PropertyToID("_ThicknessScale");
@@ -30,6 +33,8 @@ namespace PaintSim.Scripts.Rendering
         private static readonly int ID_Color           = Shader.PropertyToID("_Color");
         private static readonly int ID_BaseColor       = Shader.PropertyToID("_BaseColor");
         private static readonly int ID_CanvasBaseColor = Shader.PropertyToID("_CanvasBaseColor");
+        private static readonly int ID_PaintSurfaceData =
+            Shader.PropertyToID("_PaintSurfaceData");
 
         public float MaxThickness = 0.0001f;
         public float WetnessShine = 0.8f;
@@ -71,6 +76,21 @@ namespace PaintSim.Scripts.Rendering
 
             _paintTexture.Create();
 
+            _surfaceDataTexture = new RenderTexture(
+                _paintFilmGrid.GridWidth,
+                _paintFilmGrid.GridHeight,
+                0,
+                RenderTextureFormat.ARGBHalf
+            )
+            {
+                enableRandomWrite = true,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+
+            _surfaceDataTexture.Create();
+
             if (_surfaceRenderer == null)
             {
                 Debug.LogError("[PaintSurfaceRenderer] _surfaceRenderer is NULL");
@@ -95,6 +115,9 @@ namespace PaintSim.Scripts.Rendering
             if (mat.HasProperty(ID_BaseMap))
                 mat.SetTexture(ID_BaseMap, _paintTexture);
 
+            if (mat.HasProperty(ID_PaintSurfaceData))
+                mat.SetTexture(ID_PaintSurfaceData, _surfaceDataTexture);
+
             if (mat.HasProperty(ID_BaseColor))
                 mat.SetColor(ID_BaseColor, Color.white);
 
@@ -112,6 +135,7 @@ namespace PaintSim.Scripts.Rendering
                 _surfaceRenderer.sharedMaterials.Length == 0)
             {
                 Shader shader =
+                    Shader.Find("PaintSim/Wet Paint Surface URP") ??
                     Shader.Find("Universal Render Pipeline/Unlit") ??
                     Shader.Find("Universal Render Pipeline/Lit") ??
                     Shader.Find("Standard");
@@ -151,6 +175,11 @@ namespace PaintSim.Scripts.Rendering
                 ID_OutputTexture,
                 _paintTexture
             );
+            _bakerShader.SetTexture(
+                _kernelIndex,
+                ID_SurfaceDataTexture,
+                _surfaceDataTexture
+            );
 
             _bakerShader.SetInt(ID_GridWidth, _paintFilmGrid.GridWidth);
             _bakerShader.SetInt(ID_GridHeight, _paintFilmGrid.GridHeight);
@@ -174,6 +203,17 @@ namespace PaintSim.Scripts.Rendering
                     Object.Destroy(_paintTexture);
                 else
                     Object.DestroyImmediate(_paintTexture);
+            }
+
+            if (_surfaceDataTexture != null)
+            {
+                _surfaceDataTexture.Release();
+                if (Application.isPlaying)
+                    Object.Destroy(_surfaceDataTexture);
+                else
+                    Object.DestroyImmediate(_surfaceDataTexture);
+
+                _surfaceDataTexture = null;
             }
 
             if (_runtimeFallbackMaterial != null)

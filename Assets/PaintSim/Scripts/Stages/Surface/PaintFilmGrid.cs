@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using UnityEngine;
 using PaintSim.Scripts.Core.Data;
 
@@ -5,6 +6,22 @@ namespace PaintSim.Scripts.Stages.Surface
 {
     public sealed class PaintFilmGrid
     {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Int4
+        {
+            public int X;
+            public int Y;
+            public int Z;
+            public int W;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Int2
+        {
+            public int X;
+            public int Y;
+        }
+
         public int GridWidth { get; private set; }
         public int GridHeight { get; private set; }
         public float CellSize { get; private set; }
@@ -21,6 +38,11 @@ namespace PaintSim.Scripts.Stages.Surface
 
         public ComputeBuffer PaintCellBuffer { get; private set; }
         public ComputeBuffer ScratchCellBuffer { get; private set; }
+        public ComputeBuffer DepositColorAccumulatorBuffer { get; private set; }
+        public ComputeBuffer DepositFlowAccumulatorBuffer { get; private set; }
+        public ComputeBuffer DepositTouchedFlagsBuffer { get; private set; }
+        public ComputeBuffer DepositTouchedIndicesBuffer { get; private set; }
+        public ComputeBuffer DepositResolveDispatchArgsBuffer { get; private set; }
 
         private static readonly int ID_PaintCellBuffer = Shader.PropertyToID("_PaintCellBuffer");
         private static readonly int ID_GridWidth = Shader.PropertyToID("_GridWidth");
@@ -39,6 +61,16 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_SurfaceImpactCaptureDistance");
         private static readonly int ID_SurfaceDoubleSidedImpact =
             Shader.PropertyToID("_SurfaceDoubleSidedImpact");
+        private static readonly int ID_DepositColorAccumulator =
+            Shader.PropertyToID("_DepositColorAccumulator");
+        private static readonly int ID_DepositFlowAccumulator =
+            Shader.PropertyToID("_DepositFlowAccumulator");
+        private static readonly int ID_DepositTouchedFlags =
+            Shader.PropertyToID("_DepositTouchedFlags");
+        private static readonly int ID_DepositTouchedList =
+            Shader.PropertyToID("_DepositTouchedList");
+        private static readonly int ID_DepositResolveDispatchArgs =
+            Shader.PropertyToID("_DepositResolveDispatchArgs");
 
         public PaintFilmGrid(
             int gridWidth,
@@ -118,17 +150,61 @@ namespace PaintSim.Scripts.Stages.Surface
                 ComputeBufferType.Default
             );
 
+            DepositColorAccumulatorBuffer = new ComputeBuffer(
+                totalCells,
+                sizeof(int) * 4,
+                ComputeBufferType.Default
+            );
+
+            DepositFlowAccumulatorBuffer = new ComputeBuffer(
+                totalCells,
+                sizeof(int) * 2,
+                ComputeBufferType.Default
+            );
+
+            DepositTouchedFlagsBuffer = new ComputeBuffer(
+                totalCells,
+                sizeof(uint),
+                ComputeBufferType.Default
+            );
+
+            DepositTouchedIndicesBuffer = new ComputeBuffer(
+                totalCells + 1,
+                sizeof(uint),
+                ComputeBufferType.Default
+            );
+
+            DepositResolveDispatchArgsBuffer = new ComputeBuffer(
+                3,
+                sizeof(uint),
+                ComputeBufferType.IndirectArguments
+            );
+
             var emptyCells = new PaintCellData[totalCells];
+            var emptyColorAccumulator = new Int4[totalCells];
+            var emptyFlowAccumulator = new Int2[totalCells];
+            var emptyTouchedFlags = new uint[totalCells];
+            var emptyTouchedList = new uint[totalCells + 1];
             for (int i = 0; i < totalCells; i++)
                 emptyCells[i] = PaintCellData.Empty;
 
             PaintCellBuffer.SetData(emptyCells);
             ScratchCellBuffer.SetData(emptyCells);
+            DepositColorAccumulatorBuffer.SetData(emptyColorAccumulator);
+            DepositFlowAccumulatorBuffer.SetData(emptyFlowAccumulator);
+            DepositTouchedFlagsBuffer.SetData(emptyTouchedFlags);
+            DepositTouchedIndicesBuffer.SetData(emptyTouchedList);
+            DepositResolveDispatchArgsBuffer.SetData(new uint[] { 0u, 1u, 1u });
         }
 
         public void BindToShader(ComputeShader shader, int kernelIndex)
         {
             shader.SetBuffer(kernelIndex, ID_PaintCellBuffer, PaintCellBuffer);
+            ApplyGridParameters(shader);
+        }
+
+        public void ApplyGridParameters(ComputeShader shader)
+        {
             shader.SetInt(ID_GridWidth, GridWidth);
             shader.SetInt(ID_GridHeight, GridHeight);
             shader.SetFloat(ID_CellSize, CellSize);
@@ -143,6 +219,61 @@ namespace PaintSim.Scripts.Stages.Surface
             shader.SetVector(ID_SurfaceNormalWS, SurfaceNormalWS);
             shader.SetFloat(ID_SurfaceImpactCaptureDistance, ImpactCaptureDistance);
             shader.SetInt(ID_SurfaceDoubleSidedImpact, DoubleSidedImpact ? 1 : 0);
+        }
+
+        public void BindDepositWriteBuffers(ComputeShader shader, int kernelIndex)
+        {
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositColorAccumulator,
+                DepositColorAccumulatorBuffer
+            );
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositFlowAccumulator,
+                DepositFlowAccumulatorBuffer
+            );
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositTouchedFlags,
+                DepositTouchedFlagsBuffer
+            );
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositTouchedList,
+                DepositTouchedIndicesBuffer
+            );
+        }
+
+        public void BindDepositResolveBuffers(ComputeShader shader, int kernelIndex)
+        {
+            shader.SetBuffer(kernelIndex, ID_PaintCellBuffer, PaintCellBuffer);
+            BindDepositWriteBuffers(shader, kernelIndex);
+        }
+
+        public void BindDepositDispatchControlBuffers(
+            ComputeShader shader,
+            int kernelIndex)
+        {
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositTouchedList,
+                DepositTouchedIndicesBuffer
+            );
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositResolveDispatchArgs,
+                DepositResolveDispatchArgsBuffer
+            );
+        }
+
+        public void BindDepositTouchedList(ComputeShader shader, int kernelIndex)
+        {
+            shader.SetBuffer(
+                kernelIndex,
+                ID_DepositTouchedList,
+                DepositTouchedIndicesBuffer
+            );
         }
 
         public bool WorldToGrid(
@@ -182,19 +313,38 @@ namespace PaintSim.Scripts.Stages.Surface
         {
             int totalCells = GridWidth * GridHeight;
             var emptyCells = new PaintCellData[totalCells];
+            var emptyColorAccumulator = new Int4[totalCells];
+            var emptyFlowAccumulator = new Int2[totalCells];
+            var emptyTouchedFlags = new uint[totalCells];
+            var emptyTouchedList = new uint[totalCells + 1];
             for (int i = 0; i < totalCells; i++)
                 emptyCells[i] = PaintCellData.Empty;
 
             PaintCellBuffer.SetData(emptyCells);
             ScratchCellBuffer?.SetData(emptyCells);
+            DepositColorAccumulatorBuffer?.SetData(emptyColorAccumulator);
+            DepositFlowAccumulatorBuffer?.SetData(emptyFlowAccumulator);
+            DepositTouchedFlagsBuffer?.SetData(emptyTouchedFlags);
+            DepositTouchedIndicesBuffer?.SetData(emptyTouchedList);
+            DepositResolveDispatchArgsBuffer?.SetData(new uint[] { 0u, 1u, 1u });
         }
 
         public void Dispose()
         {
             PaintCellBuffer?.Release();
             ScratchCellBuffer?.Release();
+            DepositColorAccumulatorBuffer?.Release();
+            DepositFlowAccumulatorBuffer?.Release();
+            DepositTouchedFlagsBuffer?.Release();
+            DepositTouchedIndicesBuffer?.Release();
+            DepositResolveDispatchArgsBuffer?.Release();
             PaintCellBuffer = null;
             ScratchCellBuffer = null;
+            DepositColorAccumulatorBuffer = null;
+            DepositFlowAccumulatorBuffer = null;
+            DepositTouchedFlagsBuffer = null;
+            DepositTouchedIndicesBuffer = null;
+            DepositResolveDispatchArgsBuffer = null;
         }
     }
 }
