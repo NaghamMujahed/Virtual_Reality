@@ -46,6 +46,18 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_SurfaceTension");
         private static readonly int ID_YieldStress =
             Shader.PropertyToID("_YieldStress");
+        private static readonly int ID_ContactLineThickness =
+            Shader.PropertyToID("_ContactLineThickness");
+        private static readonly int ID_ContactAngleResistance =
+            Shader.PropertyToID("_ContactAngleResistance");
+        private static readonly int ID_SubstrateFlowVariation =
+            Shader.PropertyToID("_SubstrateFlowVariation");
+        private static readonly int ID_SurfaceRoughness =
+            Shader.PropertyToID("_SurfaceRoughness");
+        private static readonly int ID_DripFingerInstability =
+            Shader.PropertyToID("_DripFingerInstability");
+        private static readonly int ID_ThinFilmCohesion =
+            Shader.PropertyToID("_ThinFilmCohesion");
 
         public float EvaporationRate { get; set; } = 0.05f;
         public float DiffusionRate { get; set; } = 0.35f;
@@ -56,6 +68,12 @@ namespace PaintSim.Scripts.Stages.Surface
         public float DynamicViscosity { get; set; } = 0.5f;
         public float SurfaceTension { get; set; } = 0.04f;
         public float YieldStress { get; set; }
+        public float ContactLineThickness { get; set; } = 0.000025f;
+        public float ContactAngleResistance { get; set; } = 0.72f;
+        public float SubstrateFlowVariation { get; set; } = 0.28f;
+        public float SurfaceRoughness { get; set; } = 0.5f;
+        public float DripFingerInstability { get; set; } = 0.36f;
+        public float ThinFilmCohesion { get; set; } = 0.58f;
 
         public PaintEvolver(ComputeShader shader, PaintFilmGrid grid)
         {
@@ -109,6 +127,30 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_DynamicViscosity, Mathf.Max(DynamicViscosity, 0.0001f));
             _shader.SetFloat(ID_SurfaceTension, Mathf.Max(SurfaceTension, 0.0001f));
             _shader.SetFloat(ID_YieldStress, Mathf.Max(YieldStress, 0.0f));
+            _shader.SetFloat(
+                ID_ContactLineThickness,
+                Mathf.Max(ContactLineThickness, 1e-7f)
+            );
+            _shader.SetFloat(
+                ID_ContactAngleResistance,
+                Mathf.Clamp01(ContactAngleResistance)
+            );
+            _shader.SetFloat(
+                ID_SubstrateFlowVariation,
+                Mathf.Clamp01(SubstrateFlowVariation)
+            );
+            _shader.SetFloat(
+                ID_SurfaceRoughness,
+                Mathf.Clamp01(SurfaceRoughness)
+            );
+            _shader.SetFloat(
+                ID_DripFingerInstability,
+                Mathf.Clamp01(DripFingerInstability)
+            );
+            _shader.SetFloat(
+                ID_ThinFilmCohesion,
+                Mathf.Clamp01(ThinFilmCohesion)
+            );
         }
     }
 }

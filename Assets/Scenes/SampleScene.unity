@@ -9678,7 +9678,7 @@ MonoBehaviour:
   _impactCaptureDistance: 0.03
   _doubleSidedImpact: 1
   _paintFilmBakerShader: {fileID: 7200000, guid: 66a63eb08b67aba499aad6f41f2ab2f1, type: 3}
-  _maxThickness: 0.00008
+  _maxThickness: 0.00003
   _wetnessShine: 0.8
   _renderEveryNFrames: 1
   _enableEvolution: 1
@@ -9687,6 +9687,11 @@ MonoBehaviour:
   _diffusionRate: 30
   _runoffRate: 0.18
   _minimumWetThickness: 0.000015
+  _contactLineThickness: 0.000025
+  _contactAngleResistance: 0.72
+  _substrateFlowVariation: 0.28
+  _dripFingerInstability: 0.36
+  _thinFilmCohesion: 0.58
   _evolveEveryNFrames: 2
   _debugStampColor: {r: 1, g: 0.05, b: 0.02, a: 1}
   _debugStampThickness: 0.00008

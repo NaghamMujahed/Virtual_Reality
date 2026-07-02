@@ -157,7 +157,9 @@ namespace PaintSim.Scripts.Rendering
                 _surfaceRenderer.sharedMaterial = _runtimeFallbackMaterial;
             }
 
-            return _surfaceRenderer.material;
+            return Application.isPlaying
+                ? _surfaceRenderer.material
+                : _surfaceRenderer.sharedMaterial;
         }
 
         public void Render()
@@ -203,6 +205,8 @@ namespace PaintSim.Scripts.Rendering
                     Object.Destroy(_paintTexture);
                 else
                     Object.DestroyImmediate(_paintTexture);
+
+                _paintTexture = null;
             }
 
             if (_surfaceDataTexture != null)

@@ -86,7 +86,8 @@ float _YieldStress;
 #define DIAG_SETTLED          5
 #define DIAG_STATE_SKIPPED    6
 #define DIAG_CELL_WRITES      7
-#define FLOW_ACCUMULATION_SCALE 128.0f
+#define FLOW_ACCUMULATION_SCALE 32.0f
+#define MAX_FOOTPRINT_RADIUS 10
 
 void DiagAdd(uint index, uint value)
 {
@@ -208,8 +209,12 @@ void WriteCell(
         float2(-16.0f, -16.0f),
         float2(16.0f, 16.0f)
     );
-    int2 flowContribution =
-        (int2)round(safeFlow * (float)w * FLOW_ACCUMULATION_SCALE);
+    float2 flowContributionFloat = clamp(
+        safeFlow * (float)w * FLOW_ACCUMULATION_SCALE,
+        float2(-1000000000.0f, -1000000000.0f),
+        float2(1000000000.0f, 1000000000.0f)
+    );
+    int2 flowContribution = (int2)round(flowContributionFloat);
 
     InterlockedAdd(_DepositFlowAccumulator[idx].x, flowContribution.x);
     InterlockedAdd(_DepositFlowAccumulator[idx].y, flowContribution.y);
@@ -235,7 +240,9 @@ float FootprintWeight(
     float localV,
     float2 tangentDirection,
     float alongRadius,
-    float acrossRadius)
+    float acrossRadius,
+    float irregularity,
+    float irregularitySeed)
 {
     float2 delta =
         float2((float)cellU + 0.5f - localU, (float)cellV + 0.5f - localV);
@@ -247,9 +254,29 @@ float FootprintWeight(
 
     float along = dot(delta, tangent) / max(alongRadius, 1e-4f);
     float across = dot(delta, perpendicular) / max(acrossRadius, 1e-4f);
-    float r2 = along * along + across * across;
+    float angle = atan2(across, along);
+    float angularShape =
+        sin(angle * 5.0f + irregularitySeed) * 0.12f +
+        sin(angle * 9.0f - irregularitySeed * 1.73f) * 0.07f +
+        sin(angle * 13.0f + irregularitySeed * 0.47f) * 0.035f;
+    float radialScale = max(
+        1.0f + angularShape * saturate(irregularity),
+        0.7f
+    );
+    float radial =
+        sqrt(along * along + across * across) / radialScale;
 
-    return r2 <= 1.0f ? exp(-r2 * 4.0f) : 0.0f;
+    if (radial > 1.0f)
+        return 0.0f;
+
+    float core = exp(-radial * radial * 4.0f);
+    float rimDistance = (radial - 0.78f) / 0.14f;
+    float impactRim =
+        exp(-rimDistance * rimDistance) *
+        saturate(irregularity) *
+        0.42f;
+
+    return core + impactRim;
 }
 
 bool DepositSurfaceImpact(
@@ -300,7 +327,10 @@ bool DepositSurfaceImpact(
 
     DiagAdd(DIAG_NEAR_SURFACE, 1u);
 
-    if (baseU < -6 || baseU >= _GridWidth + 6 || baseV < -6 || baseV >= _GridHeight + 6)
+    if (baseU < -MAX_FOOTPRINT_RADIUS ||
+        baseU >= _GridWidth + MAX_FOOTPRINT_RADIUS ||
+        baseV < -MAX_FOOTPRINT_RADIUS ||
+        baseV >= _GridHeight + MAX_FOOTPRINT_RADIUS)
         return false;
 
     DiagAdd(DIAG_IN_GRID, 1u);
@@ -365,13 +395,24 @@ bool DepositSurfaceImpact(
     float alongRadius = clamp(
         baseRadiusCells * (1.0f + tangentLen * 2.0f),
         1.0f,
-        6.0f
+        (float)MAX_FOOTPRINT_RADIUS
     );
-    float acrossRadius = clamp(baseRadiusCells, 1.0f, 5.0f);
+    float acrossRadius = clamp(
+        baseRadiusCells,
+        1.0f,
+        (float)MAX_FOOTPRINT_RADIUS * 0.78f
+    );
     float2 tangentDirection = SafeNormalize3(
         float3(tangentU, tangentV, 0.0f),
         float3(1.0f, 0.0f, 0.0f)
     ).xy;
+    float footprintIrregularity =
+        saturate((weber - 8.0f) / 140.0f) *
+        lerp(0.72f, 1.15f, saturate(_Roughness));
+    float footprintSeed =
+        (float)particleIndex * 0.6180339f +
+        localU * 0.117f +
+        localV * 0.173f;
 
     float volume =
         particleVolume > 1e-12f
@@ -421,10 +462,18 @@ bool DepositSurfaceImpact(
     float footprintWeightSum = 0.0f;
 
     [loop]
-    for (int weightY = -6; weightY <= 6; weightY++)
+    for (
+        int weightY = -MAX_FOOTPRINT_RADIUS;
+        weightY <= MAX_FOOTPRINT_RADIUS;
+        weightY++
+    )
     {
         [loop]
-        for (int weightX = -6; weightX <= 6; weightX++)
+        for (
+            int weightX = -MAX_FOOTPRINT_RADIUS;
+            weightX <= MAX_FOOTPRINT_RADIUS;
+            weightX++
+        )
         {
             int cellU = baseU + weightX;
             int cellV = baseV + weightY;
@@ -439,7 +488,9 @@ bool DepositSurfaceImpact(
                 localV,
                 tangentDirection,
                 alongRadius,
-                acrossRadius
+                acrossRadius,
+                footprintIrregularity,
+                footprintSeed
             );
         }
     }
@@ -449,10 +500,18 @@ bool DepositSurfaceImpact(
     if (footprintDepositInt > 0 && footprintWeightSum > 1e-6f)
     {
         [loop]
-        for (int depositY = -6; depositY <= 6; depositY++)
+        for (
+            int depositY = -MAX_FOOTPRINT_RADIUS;
+            depositY <= MAX_FOOTPRINT_RADIUS;
+            depositY++
+        )
         {
             [loop]
-            for (int depositX = -6; depositX <= 6; depositX++)
+            for (
+                int depositX = -MAX_FOOTPRINT_RADIUS;
+                depositX <= MAX_FOOTPRINT_RADIUS;
+                depositX++
+            )
             {
                 int cellU = baseU + depositX;
                 int cellV = baseV + depositY;
@@ -464,7 +523,9 @@ bool DepositSurfaceImpact(
                     localV,
                     tangentDirection,
                     alongRadius,
-                    acrossRadius
+                    acrossRadius,
+                    footprintIrregularity,
+                    footprintSeed
                 );
 
                 if (weight <= 0.0f)
@@ -715,8 +776,10 @@ void CollectSurfaceImpactDiagnostics(uint3 id : SV_DispatchThreadID)
     float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
     float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
 
-    if (localU < -6.0f || localU >= (float)_GridWidth + 6.0f ||
-        localV < -6.0f || localV >= (float)_GridHeight + 6.0f)
+    if (localU < -(float)MAX_FOOTPRINT_RADIUS ||
+        localU >= (float)_GridWidth + (float)MAX_FOOTPRINT_RADIUS ||
+        localV < -(float)MAX_FOOTPRINT_RADIUS ||
+        localV >= (float)_GridHeight + (float)MAX_FOOTPRINT_RADIUS)
     {
         return;
     }

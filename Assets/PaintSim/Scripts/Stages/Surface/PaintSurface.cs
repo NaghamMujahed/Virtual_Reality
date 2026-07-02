@@ -40,7 +40,7 @@ namespace PaintSim.Scripts.Stages.Surface
 
         [Header("Rendering")]
         [SerializeField] private ComputeShader _paintFilmBakerShader;
-        [SerializeField] private float _maxThickness = 0.0001f;
+        [SerializeField] private float _maxThickness = 0.00003f;
         [SerializeField] private float _wetnessShine = 0.8f;
         [SerializeField, Min(1)] private int _renderEveryNFrames = 1;
 
@@ -51,6 +51,11 @@ namespace PaintSim.Scripts.Stages.Surface
         [SerializeField] private float _diffusionRate = 30.0f;
         [SerializeField, Min(0.0f)] private float _runoffRate = 0.18f;
         [SerializeField, Min(0.000001f)] private float _minimumWetThickness = 0.000015f;
+        [SerializeField, Min(0.000001f)] private float _contactLineThickness = 0.000025f;
+        [SerializeField, Range(0.0f, 1.0f)] private float _contactAngleResistance = 0.72f;
+        [SerializeField, Range(0.0f, 1.0f)] private float _substrateFlowVariation = 0.28f;
+        [SerializeField, Range(0.0f, 1.0f)] private float _dripFingerInstability = 0.36f;
+        [SerializeField, Range(0.0f, 1.0f)] private float _thinFilmCohesion = 0.58f;
         [SerializeField, Min(1)] private int _evolveEveryNFrames = 2;
 
         [Header("Debug / Validation")]
@@ -497,6 +502,11 @@ namespace PaintSim.Scripts.Stages.Surface
             _diffusionRate = Mathf.Max(_diffusionRate, 0.0f);
             _runoffRate = Mathf.Max(_runoffRate, 0.0f);
             _minimumWetThickness = Mathf.Max(_minimumWetThickness, 0.000001f);
+            _contactLineThickness = Mathf.Max(_contactLineThickness, 0.000001f);
+            _contactAngleResistance = Mathf.Clamp01(_contactAngleResistance);
+            _substrateFlowVariation = Mathf.Clamp01(_substrateFlowVariation);
+            _dripFingerInstability = Mathf.Clamp01(_dripFingerInstability);
+            _thinFilmCohesion = Mathf.Clamp01(_thinFilmCohesion);
             _renderEveryNFrames = Mathf.Max(1, _renderEveryNFrames);
             _evolveEveryNFrames = Mathf.Max(1, _evolveEveryNFrames);
             SurfaceProperties = SurfaceProperties.FromType(_surfaceType);
@@ -519,6 +529,12 @@ namespace PaintSim.Scripts.Stages.Surface
             _evolver.DynamicViscosity = _filmViscosity;
             _evolver.SurfaceTension = _filmSurfaceTension;
             _evolver.YieldStress = _filmYieldStress;
+            _evolver.ContactLineThickness = _contactLineThickness;
+            _evolver.ContactAngleResistance = _contactAngleResistance;
+            _evolver.SubstrateFlowVariation = _substrateFlowVariation;
+            _evolver.SurfaceRoughness = SurfaceProperties.Roughness;
+            _evolver.DripFingerInstability = _dripFingerInstability;
+            _evolver.ThinFilmCohesion = _thinFilmCohesion;
         }
 
         private void OnDestroy()
