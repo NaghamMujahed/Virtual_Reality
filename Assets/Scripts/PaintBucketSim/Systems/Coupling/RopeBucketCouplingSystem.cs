@@ -31,10 +31,10 @@ namespace PaintBucketSim.Systems.Coupling
         private void Awake()
         {
             if (ropeSystem == null)
-                ropeSystem = FindFirstObjectByType<RopeSystem>();
+                ropeSystem = FindAnyObjectByType<RopeSystem>();
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
         }
 
         public void Initialize(SimulationContext context)
@@ -45,10 +45,10 @@ namespace PaintBucketSim.Systems.Coupling
             }
 
             if (ropeSystem == null)
-                ropeSystem = FindFirstObjectByType<RopeSystem>();
+                ropeSystem = FindAnyObjectByType<RopeSystem>();
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             _diagnostics = default;
 

@@ -20,7 +20,7 @@ namespace PaintBucketSim.Systems.Fluid
         private void Awake()
         {
             if (paintFluidSystem == null)
-                paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
 
             if (paintFluidConfig == null && paintFluidSystem != null)
                 paintFluidConfig = paintFluidSystem.FluidConfig;

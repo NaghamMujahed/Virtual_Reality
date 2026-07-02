@@ -86,9 +86,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _kernelApplyProjectionFaceVelocitiesToGrid = -1;
         private int _kernelCollectProjectionDiagnostics = -1;
 
-        /// /// /// /// /// /// /// <G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelBucketCollision = -1;
-        /// /// /// /// /// /// /// <End G8.A Changes> /// /// /// /// /// /// /// /// ///
         private int _kernelStepAirborneParticles = -1;
 
         private FluidSolverStats _stats;
@@ -737,8 +735,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 particleCount
             );
 
-            /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// /// ///
-            ///
             if (!runBucketCollision)
             {
                 UnityEngine.Debug.LogWarning(
@@ -746,9 +742,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     "This should only happen during debugging."
                 );
             }
-            //BindBucketCollision(compute, solverContext);
-            //compute.Dispatch(_kernelBucketCollision, Groups(particleCount), 1, 1);
-            /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// ///
 
             int deformationDispatches = 0;
             if (!_useReferenceDensityEosThisStep)
@@ -1155,9 +1148,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _kernelG2PVelocityApicBucketCollision =
                 compute.FindKernel("KG2PVelocityApicBucketCollision");
 
-            /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// 
             _kernelBucketCollision = compute.FindKernel("KBucketCollision");
-            /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// 
             _kernelStepAirborneParticles = compute.FindKernel("KStepAirborneParticles");
             
             _kernelUpdateDeformation = compute.FindKernel("KUpdateDeformation");
@@ -1646,20 +1637,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_EnableGpuDiagnostics",
                 context.GpuMpmConfig.enableGpuDiagnostics ? 1 : 0
             );
-            //compute.SetFloat("_PicBlend", context.GpuMpmConfig.picBlend);
-
             compute.SetInt("_MassFixedScale", context.GpuMpmConfig.massFixedScale);
             compute.SetInt("_MomentumFixedScale", context.GpuMpmConfig.momentumFixedScale);
 
-            //compute.SetInt("_EnableBoxBoundary", context.GpuMpmConfig.enableBoxBoundary ? 1 : 0);
-            //compute.SetFloat("_BoundaryDamping", context.GpuMpmConfig.boundaryDamping);
-
-            ////////// G5 Changes ////////////
-            //bool enableApic = context.GpuMpmConfig.enableApicTransfer;
-
-            //compute.SetInt("_EnableApicTransfer", enableApic ? 1 : 0);
-            //compute.SetFloat("_ApicP2GStrength", context.GpuMpmConfig.apicP2GStrength);
-            //compute.SetFloat("_ApicG2PStrength", context.GpuMpmConfig.apicG2PStrength);
             compute.SetFloat("_AffineDamping", context.GpuMpmConfig.affineDamping);
             compute.SetFloat("_MaxAffineMagnitude", context.GpuMpmConfig.maxAffineMagnitude);
 
@@ -1671,9 +1651,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 : context.GpuMpmConfig.manualApicDInverse;
 
             compute.SetFloat("_ApicDInverse", dInverse);
-            ////////// End G5 Changes ////////////
-            
-            ////////// G6.A Changes ////////////
+
             compute.SetInt("_EnableMaterialStress", context.GpuMpmConfig.enableMaterialStress ? 1 : 0);
             compute.SetFloat("_BulkModulus", context.GpuMpmConfig.bulkModulus);
             compute.SetFloat("_MpmViscosity", context.GpuMpmConfig.mpmViscosity);
@@ -1682,9 +1660,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetFloat("_MinJ", context.GpuMpmConfig.minJ);
             compute.SetFloat("_MaxJ", context.GpuMpmConfig.maxJ);
             compute.SetFloat("_MaxDeformationGradientValue", context.GpuMpmConfig.maxDeformationGradientValue);
-            ////////// End G6.A Changes ////////////
 
-            ////////// G7 Paint Rheology //////////
             compute.SetInt("_EnablePaintRheology", context.GpuMpmConfig.enablePaintRheology ? 1 : 0);
 
             compute.SetFloat("_LowShearViscosity", context.GpuMpmConfig.lowShearViscosity);
@@ -1731,11 +1707,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_MaxJetCohesionVelocityCorrection",
                 context.GpuMpmConfig.maxJetCohesionVelocityCorrection
             );
-            ////////// End G7 Paint Rheology //////////
 
-            ////////// G8.A  bucket collision //////////
             SetBucketCollisionParameters(context);
-            ////////// End G8.A bucket collision //////////
 
             SetOutflowAirborneParameters(context);
             if (!_useReferenceDensityEosThisStep ||
@@ -3111,8 +3084,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _useActiveProjectionBoundsThisStep = false;
         }
 
-        /// /// /// /// /// /// /// G8.A Changes /// /// /// /// /// /// /// /// /// 
-
         private void SetBucketCollisionParameters(FluidSolverContext context)
         {
             ComputeShader compute = context.GpuMpmConfig.denseLocalMpmCompute;
@@ -3144,7 +3115,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetMatrix("_BucketLocalToWorld", localToWorld);
             compute.SetMatrix("_BucketWorldToLocal", worldToLocal);
 
-            /// /// /// /// /// /// ///  G8.B Changes /// /// /// /// /// /// /// /// /// 
             compute.SetInt(
                 "_EnableMovingBucketBoundaryVelocity",
                 context.GpuMpmConfig.enableMovingBucketBoundaryVelocity ? 1 : 0
@@ -3182,7 +3152,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     0.0f
                 )
             );
-            /// /// /// /// /// /// ///  End G8.B Changes /// /// /// /// /// /// /// /// /// 
 
             compute.SetInt("_BucketShapeType", (int)config.shapeType);
 
@@ -3405,7 +3374,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetBuffer(kernel, "_BucketHoleData3", _bucketHoleData3Buffer);
             compute.SetBuffer(kernel, "_BucketHoleData4", _bucketHoleData4Buffer);
         }
-        /// /// /// /// /// /// /// End G8.A Changes /// /// /// /// /// /// /// /// /// 
 
         private void SetProjectionParameters(FluidSolverContext context)
         {

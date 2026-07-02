@@ -79,13 +79,13 @@ namespace PaintBucketSim.Systems.Fluid
         private void Awake()
         {
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (gpuFluidBufferSet == null)
-                gpuFluidBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
+                gpuFluidBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
         }
 
         private void OnDestroy()
@@ -232,10 +232,10 @@ namespace PaintBucketSim.Systems.Fluid
             }
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (bucketSystem == null || !bucketSystem.IsInitialized)
             {
@@ -400,9 +400,6 @@ namespace PaintBucketSim.Systems.Fluid
                 estimatedSpacing *
                 Mathf.Clamp(paintFluidConfig.particleRadiusToSpacing, 0.25f, 0.65f);
 
-            //float spacing = ComputeParticleSpacing(bucketConfig);
-            //float radius = spacing * paintFluidConfig.particleRadiusToSpacing;
-
             float halfHeight = bucketConfig.heightMeters * 0.5f;
             float yMin = -halfHeight + paintFluidConfig.wallClearanceMeters + radius;
 
@@ -416,9 +413,6 @@ namespace PaintBucketSim.Systems.Fluid
 
             if (yMax <= yMin)
                 yMax = yMin + estimatedSpacing;
-
-            //float particleVolume = estimatedSpacing * estimatedSpacing * estimatedSpacing;
-            //float particleMass = paintMaterialConfig.densityKgPerM3 * particleVolume;
 
             Color color = paintMaterialConfig.baseColor;
             float4 color4 = new float4(color.r, color.g, color.b, color.a);
@@ -472,21 +466,6 @@ namespace PaintBucketSim.Systems.Fluid
                     break;
             }
 
-            //float estimatedFillVolume = EstimateFillVolume(bucketConfig);
-
-            //_data.Diagnostics[0] = new FluidDiagnostics
-            //{
-            //    particleCount = _data.Count,
-            //    capacity = _data.Capacity,
-            //    particleRadius = radius,
-            //    particleSpacing = spacing,
-            //    totalMass = particleMass * _data.Count,
-            //    insideMass = particleMass * _data.Count,
-            //    fillFraction = paintFluidConfig.fillFraction01,
-            //    estimatedFillVolume = estimatedFillVolume,
-            //    centerOfMassWorld = float3.zero
-            //};
-            
             targetPaintVolume = ComputeBucketFillVolumeM3(
                 Mathf.Clamp01(paintFluidConfig.fillFraction01)
             );
@@ -564,39 +543,6 @@ namespace PaintBucketSim.Systems.Fluid
             d.centerOfMassWorld = centerOfMass;
 
             _data.Diagnostics[0] = d;
-        }
-
-        private float ComputeParticleSpacing(BucketConfig bucketConfig)
-        {
-            if (paintFluidConfig.initializationMode == FluidInitializationMode.ManualSpacing)
-                return paintFluidConfig.manualParticleSpacingMeters;
-
-            float volume = Mathf.Max(EstimateFillVolume(bucketConfig), 1e-6f);
-            int target = Mathf.Max(1, paintFluidConfig.targetParticleCount);
-
-            float spacing = Mathf.Pow(volume / target, 1.0f / 3.0f);
-            spacing *= 0.92f;
-
-            return Mathf.Max(spacing, 0.005f);
-        }
-
-        private float EstimateFillVolume(BucketConfig bucketConfig)
-        {
-            float h = bucketConfig.heightMeters;
-            float fillH = Mathf.Clamp01(paintFluidConfig.fillFraction01) * h;
-
-            float tFill = paintFluidConfig.fillFraction01;
-
-            float r0 = GetInnerRadiusAtT(bucketConfig, 0.0f);
-            float r1 = GetInnerRadiusAtT(bucketConfig, tFill);
-
-            float volume =
-                Mathf.PI *
-                fillH *
-                (r0 * r0 + r0 * r1 + r1 * r1) /
-                3.0f;
-
-            return Mathf.Max(volume, 0.0f);
         }
 
         private float GetInnerRadiusAtT(BucketConfig bucketConfig, float t)
@@ -872,8 +818,6 @@ namespace PaintBucketSim.Systems.Fluid
             return written;
         }
 
-        ////////////////    G6.A Changes   //////////////////
-
         public int CopyParticleGpuData(
             Vector4[] positionRadiusOutput,
             Vector4[] velocityMassOutput,
@@ -936,8 +880,6 @@ namespace PaintBucketSim.Systems.Fluid
                 float4 c = _data.Colors[i];
 
                 float mass = _data.Masses[i];
-                //float restDensity = Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f);
-                //float restVolume = mass / restDensity;
 
                 positionRadiusOutput[written] = new Vector4(
                     p.x,
@@ -967,14 +909,6 @@ namespace PaintBucketSim.Systems.Fluid
                     _data.ParticleIds[i]
                 );
 
-                //// x = rest volume, y = current J, z = rest density, w = reserved
-                //volumeJOutput[written] = new Vector4(
-                //    restVolume,
-                //    1.0f,
-                //    restDensity,
-                //    0.0f
-                //);
-
                 float restVolume = _data.RestVolumes[i];
                 float restDensity = _data.RestDensities[i];
 
@@ -998,8 +932,9 @@ namespace PaintBucketSim.Systems.Fluid
                     restDensity,
                     referenceDensityScale
                 );
+
                 // Initial deformation gradient F = Identity.
-                                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
+                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
                 deformationF1Output[written] = new Vector4(0, 1, 0, 0);
                 deformationF2Output[written] = new Vector4(0, 0, 1, 0);
 
@@ -1008,8 +943,6 @@ namespace PaintBucketSim.Systems.Fluid
 
             return written;
         }
-
-        ////////////////    End G6.A Changes   //////////////////
 
         private float ComputeBucketInnerVolumeM3()
         {

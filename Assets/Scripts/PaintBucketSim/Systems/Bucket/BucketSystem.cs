@@ -122,6 +122,23 @@ namespace PaintBucketSim.Systems.Bucket
             return _data.State.position + math.rotate(_data.State.rotation, localPoint);
         }
 
+        public Vector3 LocalToWorldPoint(Vector3 localPoint)
+        {
+            float3 p = LocalToWorldPoint(new float3(localPoint.x, localPoint.y, localPoint.z));
+            return new Vector3(p.x, p.y, p.z);
+        }
+
+        public Vector3 WorldToLocalPoint(Vector3 worldPoint)
+        {
+            if (!IsInitialized)
+                return Vector3.zero;
+
+            BucketState state = _data.State;
+            float3 world = new float3(worldPoint.x, worldPoint.y, worldPoint.z);
+            float3 local = math.rotate(math.inverse(state.rotation), world - state.position);
+            return new Vector3(local.x, local.y, local.z);
+        }
+
         public float3 LocalToWorldVector(float3 localVector)
         {
             return math.rotate(_data.State.rotation, localVector);
@@ -131,6 +148,12 @@ namespace PaintBucketSim.Systems.Bucket
         {
             float3 r = worldPoint - _data.State.position;
             return _data.State.velocity + math.cross(_data.State.angularVelocity, r);
+        }
+
+        public Vector3 GetWorldPointVelocity(Vector3 worldPoint)
+        {
+            float3 velocity = GetWorldPointVelocity(new float3(worldPoint.x, worldPoint.y, worldPoint.z));
+            return new Vector3(velocity.x, velocity.y, velocity.z);
         }
 
         private void InitializeStateFromReference()
@@ -486,6 +509,47 @@ namespace PaintBucketSim.Systems.Bucket
 
             _data.State = state;
 
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void ApplyImpulseAtWorldPoint(Vector3 impulse, Vector3 worldPoint)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+
+            float3 j = new float3(impulse.x, impulse.y, impulse.z);
+            float3 p = new float3(worldPoint.x, worldPoint.y, worldPoint.z);
+
+            state.velocity += j * state.inverseMass;
+
+            float3 r = p - state.position;
+            float3 angularImpulse = math.cross(r, j);
+            float3 angularDelta = WorldAngularAccelerationFromTorque(state, angularImpulse);
+            state.angularVelocity += angularDelta;
+
+            _data.State = state;
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void ApplyAngularImpulse(Vector3 angularImpulseWorld)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+            float3 angularImpulse = new float3(
+                angularImpulseWorld.x,
+                angularImpulseWorld.y,
+                angularImpulseWorld.z
+            );
+
+            state.angularVelocity += WorldAngularAccelerationFromTorque(state, angularImpulse);
+
+            _data.State = state;
             UpdateAttachmentAndHoles();
             UpdateDiagnostics();
         }

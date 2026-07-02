@@ -1,4 +1,3 @@
-using PaintBucketSim.Configs;
 using PaintBucketSim.Systems.Fluid;
 using UnityEngine;
 
@@ -105,12 +104,6 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_CanvasBitangent = Shader.PropertyToID("_CanvasBitangent");
         private static readonly int ID_CanvasNormal = Shader.PropertyToID("_CanvasNormal");
         private static readonly int ID_GravityDirection = Shader.PropertyToID("_GravityDirection");
-        private static readonly int ID_FlipU = Shader.PropertyToID("_FlipU");
-        private static readonly int ID_FlipV = Shader.PropertyToID("_FlipV");
-        private static readonly int ID_SwapUV = Shader.PropertyToID("_SwapUV");
-        private static readonly int ID_Rotate90 = Shader.PropertyToID("_Rotate90");
-        private static readonly int ID_InvertTextureY = Shader.PropertyToID("_InvertTextureY");
-
         private void Awake()
         {
             ResolveReferences();
@@ -221,7 +214,8 @@ namespace PaintBucketSim.Systems.Canvas
             MpmPaintFilmGrid grid = surface.FilmGrid;
             MpmCanvasSurfaceMaterialSettings settings = surface.MaterialSettings;
             MpmCanvasSurfaceFrame frame = surface.Frame;
-            ResolvePaintMaterial(out float viscosity, out float yieldStress);
+            MpmCanvasPaintMaterialSample paintMaterial =
+                MpmCanvasPaintMaterial.Resolve(paintFluidSystem);
 
             paintFilmEvolverCompute.SetBuffer(_evolveKernel, ID_SourceFilmCells, grid.CellBuffer);
             paintFilmEvolverCompute.SetBuffer(_evolveKernel, ID_TargetFilmCells, grid.ScratchBuffer);
@@ -239,8 +233,8 @@ namespace PaintBucketSim.Systems.Canvas
             paintFilmEvolverCompute.SetFloat(ID_DryingRate, settings.dryingRate);
             paintFilmEvolverCompute.SetFloat(ID_WetnessRetention, settings.wetnessRetention);
             paintFilmEvolverCompute.SetFloat(ID_Roughness, settings.roughness);
-            paintFilmEvolverCompute.SetFloat(ID_PaintViscosity, viscosity);
-            paintFilmEvolverCompute.SetFloat(ID_YieldStress, yieldStress);
+            paintFilmEvolverCompute.SetFloat(ID_PaintViscosity, paintMaterial.Viscosity);
+            paintFilmEvolverCompute.SetFloat(ID_YieldStress, paintMaterial.YieldStress);
             paintFilmEvolverCompute.SetFloat(ID_ViscosityDamping, viscosityDamping);
             paintFilmEvolverCompute.SetFloat(ID_MomentumFlowFactor, momentumFlowFactor);
             paintFilmEvolverCompute.SetFloat(ID_HeightGradientFlowFactor, heightGradientFlowFactor);
@@ -282,40 +276,13 @@ namespace PaintBucketSim.Systems.Canvas
 
         private void SetUvRemapParameters(ComputeShader shader)
         {
-            shader.SetInt(ID_FlipU, surface != null && surface.FlipU ? 1 : 0);
-            shader.SetInt(ID_FlipV, surface != null && surface.FlipV ? 1 : 0);
-            shader.SetInt(ID_SwapUV, surface != null && surface.SwapUV ? 1 : 0);
-            shader.SetInt(ID_Rotate90, surface != null && surface.Rotate90 ? 1 : 0);
-            shader.SetInt(ID_InvertTextureY, surface != null && surface.InvertTextureY ? 1 : 0);
+            MpmCanvasUvRemap.Apply(shader, surface);
         }
 
         private void ResolveKernels()
         {
             _bakeKernel = FindKernelSafe(paintFilmBakerCompute, "KBakeFilm");
             _evolveKernel = FindKernelSafe(paintFilmEvolverCompute, "KEvolveFilm");
-        }
-
-        private void ResolvePaintMaterial(out float viscosity, out float yieldStress)
-        {
-            viscosity = 1.0f;
-            yieldStress = 0.0f;
-
-            if (paintFluidSystem == null)
-                return;
-
-            PaintMaterialConfig material = paintFluidSystem.MaterialConfig;
-            if (material != null)
-            {
-                viscosity = Mathf.Max(material.EvaluateViscosity(1.0f, 20.0f), 0.0001f);
-                yieldStress = Mathf.Max(material.yieldStressPa, 0.0f);
-            }
-
-            GpuMpmSolverConfig gpuConfig = paintFluidSystem.GpuMpmConfig;
-            if (gpuConfig != null && gpuConfig.enablePaintRheology)
-            {
-                viscosity = Mathf.Max(viscosity, gpuConfig.lowShearViscosity);
-                yieldStress = Mathf.Max(yieldStress, gpuConfig.yieldStress);
-            }
         }
 
         private static int FindKernelSafe(ComputeShader shader, string kernelName)

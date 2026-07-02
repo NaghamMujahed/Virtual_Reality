@@ -244,6 +244,23 @@ namespace PaintBucketSim.Systems.Rope
             return new Vector3(p.x, p.y, p.z);
         }
 
+        public Vector3 GetParticleVelocity(int index)
+        {
+            if (!IsInitialized || index < 0 || index >= _data.ParticleCount)
+                return Vector3.zero;
+
+            float3 v = _data.Velocities[index];
+            return new Vector3(v.x, v.y, v.z);
+        }
+
+        public float GetParticleInverseMass(int index)
+        {
+            if (!IsInitialized || index < 0 || index >= _data.ParticleCount)
+                return 0.0f;
+
+            return _data.InverseMasses[index];
+        }
+
         public Vector3 GetRopeEndPosition()
         {
             if (!IsInitialized)
@@ -423,7 +440,20 @@ namespace PaintBucketSim.Systems.Rope
             if (!IsInitialized || IsBroken)
                 return;
 
-            int index = _data.ParticleCount - 1;
+            ApplyParticlePositionCorrection(_data.ParticleCount - 1, correction, dt, updateVelocity);
+        }
+
+        public void ApplyParticlePositionCorrection(
+            int index,
+            Vector3 correction,
+            float dt,
+            bool updateVelocity)
+        {
+            if (!IsInitialized || IsBroken || index < 0 || index >= _data.ParticleCount)
+                return;
+
+            if (_data.InverseMasses[index] <= 0.0f)
+                return;
 
             float3 c = new float3(correction.x, correction.y, correction.z);
 
@@ -437,6 +467,19 @@ namespace PaintBucketSim.Systems.Rope
                 _data.PreviousPositions[index] =
                     _data.Positions[index] - _data.Velocities[index] * dt;
             }
+        }
+
+        public void ApplyParticleImpulse(int index, Vector3 impulse)
+        {
+            if (!IsInitialized || IsBroken || index < 0 || index >= _data.ParticleCount)
+                return;
+
+            float inverseMass = _data.InverseMasses[index];
+            if (inverseMass <= 0.0f)
+                return;
+
+            float3 j = new float3(impulse.x, impulse.y, impulse.z);
+            _data.Velocities[index] += j * inverseMass;
         }
     }
 }

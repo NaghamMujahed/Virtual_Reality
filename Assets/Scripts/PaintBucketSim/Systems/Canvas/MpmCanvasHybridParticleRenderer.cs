@@ -38,11 +38,6 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_CanvasHeight = Shader.PropertyToID("_CanvasHeight");
         private static readonly int ID_GridWidth = Shader.PropertyToID("_GridWidth");
         private static readonly int ID_GridHeight = Shader.PropertyToID("_GridHeight");
-        private static readonly int ID_FlipU = Shader.PropertyToID("_FlipU");
-        private static readonly int ID_FlipV = Shader.PropertyToID("_FlipV");
-        private static readonly int ID_SwapUV = Shader.PropertyToID("_SwapUV");
-        private static readonly int ID_Rotate90 = Shader.PropertyToID("_Rotate90");
-        private static readonly int ID_InvertTextureY = Shader.PropertyToID("_InvertTextureY");
         private static readonly int ID_CameraRight = Shader.PropertyToID("_CameraRightWS");
         private static readonly int ID_CameraUp = Shader.PropertyToID("_CameraUpWS");
         private static readonly int ID_CameraForward = Shader.PropertyToID("_CameraForwardWS");
@@ -113,11 +108,7 @@ namespace PaintBucketSim.Systems.Canvas
             _mpb.SetFloat(ID_CanvasHeight, frame.heightMeters);
             _mpb.SetInt(ID_GridWidth, grid.Width);
             _mpb.SetInt(ID_GridHeight, grid.Height);
-            _mpb.SetInt(ID_FlipU, surface.FlipU ? 1 : 0);
-            _mpb.SetInt(ID_FlipV, surface.FlipV ? 1 : 0);
-            _mpb.SetInt(ID_SwapUV, surface.SwapUV ? 1 : 0);
-            _mpb.SetInt(ID_Rotate90, surface.Rotate90 ? 1 : 0);
-            _mpb.SetInt(ID_InvertTextureY, surface.InvertTextureY ? 1 : 0);
+            MpmCanvasUvRemap.Apply(_mpb, surface);
             _mpb.SetFloat(ID_VisualScale, visualScale);
             _mpb.SetFloat(ID_MinWorldRadius, minimumWorldRadiusMeters);
             _mpb.SetFloat(ID_GlobalAlpha, alpha);

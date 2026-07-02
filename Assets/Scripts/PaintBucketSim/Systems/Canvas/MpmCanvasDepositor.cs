@@ -1,5 +1,4 @@
 using System;
-using PaintBucketSim.Configs;
 using PaintBucketSim.Systems.Fluid;
 using PaintBucketSim.Systems.Fluid.GPU;
 using UnityEngine;
@@ -176,11 +175,6 @@ namespace PaintBucketSim.Systems.Canvas
         private static readonly int ID_CanvasPreviousNormal = Shader.PropertyToID("_CanvasPreviousNormal");
         private static readonly int ID_CanvasLinearVelocity = Shader.PropertyToID("_CanvasLinearVelocity");
         private static readonly int ID_CanvasAngularVelocity = Shader.PropertyToID("_CanvasAngularVelocity");
-        private static readonly int ID_FlipU = Shader.PropertyToID("_FlipU");
-        private static readonly int ID_FlipV = Shader.PropertyToID("_FlipV");
-        private static readonly int ID_SwapUV = Shader.PropertyToID("_SwapUV");
-        private static readonly int ID_Rotate90 = Shader.PropertyToID("_Rotate90");
-        private static readonly int ID_InvertTextureY = Shader.PropertyToID("_InvertTextureY");
         private static readonly int ID_CanvasWidth = Shader.PropertyToID("_CanvasWidth");
         private static readonly int ID_CanvasHeight = Shader.PropertyToID("_CanvasHeight");
         private static readonly int ID_CellSizeU = Shader.PropertyToID("_CellSizeU");
@@ -407,12 +401,8 @@ namespace PaintBucketSim.Systems.Canvas
             MpmPaintFilmGrid grid = surface.FilmGrid;
             MpmCanvasSurfaceFrame frame = surface.Frame;
             MpmCanvasSurfaceMaterialSettings surfaceMaterial = surface.MaterialSettings;
-            ResolvePaintMaterial(
-                out float density,
-                out float viscosity,
-                out float surfaceTension,
-                out float yieldStress
-            );
+            MpmCanvasPaintMaterialSample paintMaterial =
+                MpmCanvasPaintMaterial.Resolve(paintFluidSystem);
 
             canvasImpactCompute.SetBuffer(_kernelDeposit, ID_ParticlePositionRadius, gpuBufferSet.PositionRadiusBuffer);
             canvasImpactCompute.SetBuffer(_kernelDeposit, ID_ParticleVelocityMass, gpuBufferSet.VelocityMassBuffer);
@@ -469,10 +459,10 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
             canvasImpactCompute.SetFloat(ID_SplatSharpness, surfaceMaterial.splatSharpness);
 
-            canvasImpactCompute.SetFloat(ID_PaintDensity, density);
-            canvasImpactCompute.SetFloat(ID_PaintViscosity, viscosity);
-            canvasImpactCompute.SetFloat(ID_SurfaceTension, surfaceTension);
-            canvasImpactCompute.SetFloat(ID_YieldStress, yieldStress);
+            canvasImpactCompute.SetFloat(ID_PaintDensity, paintMaterial.Density);
+            canvasImpactCompute.SetFloat(ID_PaintViscosity, paintMaterial.Viscosity);
+            canvasImpactCompute.SetFloat(ID_SurfaceTension, paintMaterial.SurfaceTension);
+            canvasImpactCompute.SetFloat(ID_YieldStress, paintMaterial.YieldStress);
             canvasImpactCompute.SetInt(ID_ShrinkDepositedParticles, shrinkDepositedParticles ? 1 : 0);
             canvasImpactCompute.SetFloat(ID_DepositedParticleRadius, depositedParticleRadiusMeters);
             canvasImpactCompute.SetInt(ID_EnableHybridParticles, enableHybridParticles ? 1 : 0);
@@ -519,12 +509,8 @@ namespace PaintBucketSim.Systems.Canvas
             MpmPaintFilmGrid grid = surface.FilmGrid;
             MpmCanvasSurfaceFrame frame = surface.Frame;
             MpmCanvasSurfaceMaterialSettings surfaceMaterial = surface.MaterialSettings;
-            ResolvePaintMaterial(
-                out float density,
-                out float viscosity,
-                out float surfaceTension,
-                out float yieldStress
-            );
+            MpmCanvasPaintMaterialSample paintMaterial =
+                MpmCanvasPaintMaterial.Resolve(paintFluidSystem);
 
             int dispatchCount = Mathf.Max(_surfaceCapacity, _dropletCapacity);
             float stepDt = Mathf.Max(Mathf.Max(Time.deltaTime, Time.fixedDeltaTime), 1e-5f);
@@ -558,10 +544,10 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
             canvasImpactCompute.SetFloat(ID_SplatSharpness, surfaceMaterial.splatSharpness);
             SetSplatStyleParameters(canvasImpactCompute);
-            canvasImpactCompute.SetFloat(ID_PaintDensity, density);
-            canvasImpactCompute.SetFloat(ID_PaintViscosity, viscosity);
-            canvasImpactCompute.SetFloat(ID_SurfaceTension, surfaceTension);
-            canvasImpactCompute.SetFloat(ID_YieldStress, yieldStress);
+            canvasImpactCompute.SetFloat(ID_PaintDensity, paintMaterial.Density);
+            canvasImpactCompute.SetFloat(ID_PaintViscosity, paintMaterial.Viscosity);
+            canvasImpactCompute.SetFloat(ID_SurfaceTension, paintMaterial.SurfaceTension);
+            canvasImpactCompute.SetFloat(ID_YieldStress, paintMaterial.YieldStress);
             canvasImpactCompute.SetFloat(ID_SurfaceParticleDepositRate, surfaceParticleDepositRate);
             canvasImpactCompute.SetFloat(ID_SurfaceParticleFriction, surfaceParticleFrictionPerSecond);
             canvasImpactCompute.SetFloat(ID_DropletDrag, dropletDragPerSecond);
@@ -594,12 +580,8 @@ namespace PaintBucketSim.Systems.Canvas
             MpmPaintFilmGrid grid = surface.FilmGrid;
             MpmCanvasSurfaceFrame frame = surface.Frame;
             MpmCanvasSurfaceMaterialSettings surfaceMaterial = surface.MaterialSettings;
-            ResolvePaintMaterial(
-                out float density,
-                out float viscosity,
-                out float surfaceTension,
-                out float yieldStress
-            );
+            MpmCanvasPaintMaterialSample paintMaterial =
+                MpmCanvasPaintMaterial.Resolve(paintFluidSystem);
 
             float stepDt = Mathf.Max(Mathf.Max(Time.deltaTime, Time.fixedDeltaTime), 1e-5f);
             canvasImpactCompute.SetBuffer(_kernelEmitEdgeDroplets, ID_FilmCells, grid.CellBuffer);
@@ -626,8 +608,8 @@ namespace PaintBucketSim.Systems.Canvas
             canvasImpactCompute.SetFloat(ID_EdgeDrainFactor, edgeDropletDrainFactor);
             canvasImpactCompute.SetFloat(ID_EdgeDripThreshold, edgeDropletThresholdMeters);
             canvasImpactCompute.SetFloat(ID_Roughness, surfaceMaterial.roughness);
-            canvasImpactCompute.SetFloat(ID_PaintViscosity, viscosity);
-            canvasImpactCompute.SetFloat(ID_YieldStress, yieldStress);
+            canvasImpactCompute.SetFloat(ID_PaintViscosity, paintMaterial.Viscosity);
+            canvasImpactCompute.SetFloat(ID_YieldStress, paintMaterial.YieldStress);
             canvasImpactCompute.SetFloat(ID_CollisionSkin, collisionSkinMeters);
             canvasImpactCompute.SetInt(ID_EnableHybridParticles, enableHybridParticles ? 1 : 0);
             canvasImpactCompute.SetFloat(ID_DropletLifetime, dropletLifetimeSeconds);
@@ -658,11 +640,7 @@ namespace PaintBucketSim.Systems.Canvas
 
         private void SetUvRemapParameters(ComputeShader shader)
         {
-            shader.SetInt(ID_FlipU, surface != null && surface.FlipU ? 1 : 0);
-            shader.SetInt(ID_FlipV, surface != null && surface.FlipV ? 1 : 0);
-            shader.SetInt(ID_SwapUV, surface != null && surface.SwapUV ? 1 : 0);
-            shader.SetInt(ID_Rotate90, surface != null && surface.Rotate90 ? 1 : 0);
-            shader.SetInt(ID_InvertTextureY, surface != null && surface.InvertTextureY ? 1 : 0);
+            MpmCanvasUvRemap.Apply(shader, surface);
         }
 
         private void DispatchCapturePrevious(int particleCount)
@@ -932,37 +910,6 @@ namespace PaintBucketSim.Systems.Canvas
             _kernelEmitEdgeDroplets = FindKernelSafe(canvasImpactCompute, "KEmitEdgeDroplets");
             _kernelCapturePrevious = FindKernelSafe(canvasImpactCompute, "KCapturePreviousPositions");
             _kernelClearCounters = FindKernelSafe(canvasImpactCompute, "KClearDebugCounters");
-        }
-
-        private void ResolvePaintMaterial(
-            out float density,
-            out float viscosity,
-            out float surfaceTension,
-            out float yieldStress)
-        {
-            density = 1050.0f;
-            viscosity = 1.0f;
-            surfaceTension = 0.035f;
-            yieldStress = 0.0f;
-
-            if (paintFluidSystem == null)
-                return;
-
-            PaintMaterialConfig material = paintFluidSystem.MaterialConfig;
-            if (material != null)
-            {
-                density = Mathf.Max(material.densityKgPerM3, 1.0f);
-                viscosity = Mathf.Max(material.EvaluateViscosity(1.0f, 20.0f), 0.0001f);
-                surfaceTension = Mathf.Max(material.surfaceTensionNPerM, 0.0001f);
-                yieldStress = Mathf.Max(material.yieldStressPa, 0.0f);
-            }
-
-            GpuMpmSolverConfig gpuConfig = paintFluidSystem.GpuMpmConfig;
-            if (gpuConfig != null && gpuConfig.enablePaintRheology)
-            {
-                viscosity = Mathf.Max(viscosity, gpuConfig.lowShearViscosity);
-                yieldStress = Mathf.Max(yieldStress, gpuConfig.yieldStress);
-            }
         }
 
         private static int FindKernelSafe(ComputeShader shader, string kernelName)

@@ -31,7 +31,7 @@ namespace PaintBucketSim.Systems.Bucket
         private void Awake()
         {
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (meshFilter == null)
                 meshFilter = GetComponent<MeshFilter>();

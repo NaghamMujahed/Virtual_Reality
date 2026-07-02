@@ -36,7 +36,7 @@ namespace PaintBucketSim.Systems.Fluid
         private void Awake()
         {
             if (gpuBufferSet == null)
-                gpuBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
+                gpuBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
 
             EnsureParticleMesh();
 

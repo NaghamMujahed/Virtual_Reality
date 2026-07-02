@@ -18,6 +18,14 @@ namespace PaintBucketSim.Systems.Diagnostics
     /// </summary>
     public class DebugOverlay : MonoBehaviour
     {
+        private enum OverlayAnchor
+        {
+            TopLeft,
+            TopRight,
+            BottomLeft,
+            BottomRight
+        }
+
         [SerializeField] private SimulationManager simulationManager;
         [SerializeField] private RopeSystem ropeSystem;
         [SerializeField] private BucketSystem bucketSystem;
@@ -32,6 +40,9 @@ namespace PaintBucketSim.Systems.Diagnostics
         [Header("Style")]
         [SerializeField] private int fontSize = 16;
         [SerializeField] private Color textColor = Color.white;
+        [SerializeField] private bool useResponsiveLayout = true;
+        [SerializeField] private OverlayAnchor responsiveAnchor = OverlayAnchor.TopLeft;
+        [Min(0.0f)] [SerializeField] private float responsiveMargin = 15.0f;
         [SerializeField] private Vector2 panelPosition = new Vector2(15, 15);
         [SerializeField] private Vector2 panelSize = new Vector2(430, 220);
 
@@ -41,32 +52,33 @@ namespace PaintBucketSim.Systems.Diagnostics
         private GUIStyle _boxStyle;
         private Vector2 _scrollPosition;
         private bool _stylesInitialized;
+        private int _lastEffectiveFontSize;
 
         private void Awake()
         {
             if (simulationManager == null)
-                simulationManager = FindFirstObjectByType<SimulationManager>();
+                simulationManager = FindAnyObjectByType<SimulationManager>();
 
             if (ropeSystem == null)
-                ropeSystem = FindFirstObjectByType<RopeSystem>();
+                ropeSystem = FindAnyObjectByType<RopeSystem>();
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (ropeBucketCouplingSystem == null)
-                ropeBucketCouplingSystem = FindFirstObjectByType<RopeBucketCouplingSystem>();
+                ropeBucketCouplingSystem = FindAnyObjectByType<RopeBucketCouplingSystem>();
 
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (paintFluidSystem == null)
-                paintFluidSystem = FindFirstObjectByType<PaintFluidSystem>();
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
 
             if (gpuParticleRenderer == null)
-                gpuParticleRenderer = FindFirstObjectByType<GpuParticleIndirectRenderer>();
+                gpuParticleRenderer = FindAnyObjectByType<GpuParticleIndirectRenderer>();
 
             if (gpuFluidBufferSet == null)
-                gpuFluidBufferSet = FindFirstObjectByType<GpuFluidBufferSet>();
+                gpuFluidBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
         }
 
         private void Update()
@@ -90,9 +102,10 @@ namespace PaintBucketSim.Systems.Diagnostics
             EnsureStyles();
 
             DiagnosticsFrame d = simulationManager.Context.Diagnostics;
+            Rect panelRect = GetPanelRect();
 
             GUILayout.BeginArea(
-                new Rect(panelPosition.x, panelPosition.y, panelSize.x, panelSize.y),
+                panelRect,
                 _boxStyle);
 
             _scrollPosition = GUILayout.BeginScrollView(_scrollPosition);
@@ -284,18 +297,14 @@ namespace PaintBucketSim.Systems.Diagnostics
                 GUILayout.Label($"Compute Post Enabled: {bs.computePostProcessEnabled}", _labelStyle);
                 GUILayout.Label($"State Debug Colors: {bs.debugColorByStateEnabled}", _labelStyle);
 
-                //////////////////      G5 Changes      //////////////////
                 GUILayout.Label($"Affine C0 Buffer: {bs.affineC0BufferReady}", _labelStyle);
                 GUILayout.Label($"Affine C1 Buffer: {bs.affineC1BufferReady}", _labelStyle);
                 GUILayout.Label($"Affine C2 Buffer: {bs.affineC2BufferReady}", _labelStyle);
-                //////////////////      End G5 Changes      //////////////////
 
-                //////////////////      G6.A Changes      //////////////////
                 GUILayout.Label($"Volume/J Buffer: {bs.volumeJBufferReady}", _labelStyle);
                 GUILayout.Label($"F0 Buffer: {bs.deformationF0BufferReady}", _labelStyle);
                 GUILayout.Label($"F1 Buffer: {bs.deformationF1BufferReady}", _labelStyle);
                 GUILayout.Label($"F2 Buffer: {bs.deformationF2BufferReady}", _labelStyle);
-                //////////////////      End G6.A Changes      //////////////////
             }
 
             if (gpuParticleRenderer != null)
@@ -326,12 +335,15 @@ namespace PaintBucketSim.Systems.Diagnostics
 
         private void EnsureStyles()
         {
-            if (_stylesInitialized)
+            int effectiveFontSize = GetEffectiveFontSize();
+            if (_stylesInitialized && _lastEffectiveFontSize == effectiveFontSize)
                 return;
 
+            _lastEffectiveFontSize = effectiveFontSize;
             _labelStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = fontSize,
+                fontSize = effectiveFontSize,
+                wordWrap = true,
                 normal = { textColor = textColor }
             };
 
@@ -341,6 +353,55 @@ namespace PaintBucketSim.Systems.Diagnostics
             };
 
             _stylesInitialized = true;
+        }
+
+        private Rect GetPanelRect()
+        {
+            if (!useResponsiveLayout)
+                return new Rect(panelPosition.x, panelPosition.y, panelSize.x, panelSize.y);
+
+            float margin = Mathf.Clamp(responsiveMargin, 0.0f, 64.0f);
+            float availableWidth = Mathf.Max(1.0f, Screen.width - margin * 2.0f);
+            float availableHeight = Mathf.Max(1.0f, Screen.height - margin * 2.0f);
+
+            float width = Mathf.Clamp(
+                Mathf.Min(panelSize.x, Screen.width * 0.42f),
+                Mathf.Min(260.0f, availableWidth),
+                availableWidth
+            );
+
+            float height = Mathf.Clamp(
+                Mathf.Min(panelSize.y, Screen.height * 0.42f),
+                Mathf.Min(120.0f, availableHeight),
+                availableHeight
+            );
+
+            return BuildAnchoredRect(responsiveAnchor, width, height, margin);
+        }
+
+        private Rect BuildAnchoredRect(OverlayAnchor anchor, float width, float height, float margin)
+        {
+            float x = anchor == OverlayAnchor.TopRight || anchor == OverlayAnchor.BottomRight
+                ? Screen.width - margin - width
+                : margin;
+
+            float y = anchor == OverlayAnchor.BottomLeft || anchor == OverlayAnchor.BottomRight
+                ? Screen.height - margin - height
+                : margin;
+
+            x = Mathf.Clamp(x, margin, Mathf.Max(margin, Screen.width - margin - width));
+            y = Mathf.Clamp(y, margin, Mathf.Max(margin, Screen.height - margin - height));
+
+            return new Rect(x, y, width, height);
+        }
+
+        private int GetEffectiveFontSize()
+        {
+            if (!useResponsiveLayout)
+                return fontSize;
+
+            int responsiveSize = Mathf.RoundToInt(Screen.height / 54.0f);
+            return Mathf.Clamp(responsiveSize, 11, Mathf.Max(11, fontSize));
         }
 
         private void DrawFluidCalibration()
@@ -356,15 +417,15 @@ namespace PaintBucketSim.Systems.Diagnostics
             GUILayout.Space(8);
             GUILayout.Label("MLS-MPM Calibration", _labelStyle);
 
-            GUILayout.Label($"Bucket Inner Volume: {stats.bucketInnerVolumeM3:F5} m³", _labelStyle);
-            GUILayout.Label($"Target Paint Volume: {stats.targetPaintVolumeM3:F5} m³", _labelStyle);
-            GUILayout.Label($"Actual Represented Volume: {stats.actualRepresentedVolumeM3:F5} m³", _labelStyle);
+            GUILayout.Label($"Bucket Inner Volume: {stats.bucketInnerVolumeM3:F5} mÂ³", _labelStyle);
+            GUILayout.Label($"Target Paint Volume: {stats.targetPaintVolumeM3:F5} mÂ³", _labelStyle);
+            GUILayout.Label($"Actual Represented Volume: {stats.actualRepresentedVolumeM3:F5} mÂ³", _labelStyle);
 
             GUILayout.Label($"Target Particles: {stats.targetParticleCount}", _labelStyle);
             GUILayout.Label($"Actual Particles: {stats.actualParticleCount}", _labelStyle);
 
-            GUILayout.Label($"Rest Density: {stats.restDensityKgPerM3:F1} kg/m³", _labelStyle);
-            GUILayout.Label($"Rest Volume / Particle: {stats.restVolumePerParticleM3:E3} m³", _labelStyle);
+            GUILayout.Label($"Rest Density: {stats.restDensityKgPerM3:F1} kg/mÂ³", _labelStyle);
+            GUILayout.Label($"Rest Volume / Particle: {stats.restVolumePerParticleM3:E3} mÂ³", _labelStyle);
             GUILayout.Label($"Mass / Particle: {stats.massPerParticleKg:E3} kg", _labelStyle);
 
             GUILayout.Label($"Estimated Spacing: {stats.estimatedParticleSpacingM:F4} m", _labelStyle);

@@ -46,7 +46,7 @@ namespace PaintBucketSim.Systems.Boundary
         private void Awake()
         {
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
         }
 
         private void OnDestroy()
@@ -64,7 +64,7 @@ namespace PaintBucketSim.Systems.Boundary
             }
 
             if (bucketSystem == null)
-                bucketSystem = FindFirstObjectByType<BucketSystem>();
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             if (bucketSystem == null || !bucketSystem.IsInitialized)
             {

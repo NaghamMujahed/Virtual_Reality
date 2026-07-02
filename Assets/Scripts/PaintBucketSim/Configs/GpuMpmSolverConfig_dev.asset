@@ -119,7 +119,7 @@ MonoBehaviour:
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 1
+  enableBottomHoleOpening: 0
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08

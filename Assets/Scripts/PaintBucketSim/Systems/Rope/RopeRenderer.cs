@@ -22,7 +22,7 @@ namespace PaintBucketSim.Systems.Rope
         private void Awake()
         {
             if (ropeSystem == null)
-                ropeSystem = FindFirstObjectByType<RopeSystem>();
+                ropeSystem = FindAnyObjectByType<RopeSystem>();
 
             if (lineRenderer == null)
                 lineRenderer = GetComponent<LineRenderer>();

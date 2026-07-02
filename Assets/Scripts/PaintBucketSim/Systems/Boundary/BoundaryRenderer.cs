@@ -23,7 +23,7 @@ namespace PaintBucketSim.Systems.Boundary
         private void Awake()
         {
             if (boundarySystem == null)
-                boundarySystem = FindFirstObjectByType<BoundarySystem>();
+                boundarySystem = FindAnyObjectByType<BoundarySystem>();
 
             if (boundaryConfig == null && boundarySystem != null)
                 boundaryConfig = boundarySystem.Config;
