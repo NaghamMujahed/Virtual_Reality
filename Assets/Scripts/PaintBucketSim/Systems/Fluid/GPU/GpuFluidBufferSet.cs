@@ -34,6 +34,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         private GpuFluidBufferStats _stats;
 
         public GpuFluidBufferConfig Config => bufferConfig;
+        public ComputeShader UtilityCompute => utilityCompute;
 
         public GraphicsBuffer PositionRadiusBuffer => _positionRadiusBuffer;
         public GraphicsBuffer VelocityMassBuffer => _velocityMassBuffer;

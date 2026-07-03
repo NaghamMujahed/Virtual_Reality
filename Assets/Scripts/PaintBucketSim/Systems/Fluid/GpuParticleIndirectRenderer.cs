@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 
 namespace PaintBucketSim.Systems.Fluid
 {
+    [DefaultExecutionOrder(3000)]
     public class GpuParticleIndirectRenderer : MonoBehaviour
     {
         [Header("References")]
@@ -22,6 +23,11 @@ namespace PaintBucketSim.Systems.Fluid
 
         private GraphicsBuffer _commandBuffer;
         private GraphicsBuffer.IndirectDrawIndexedArgs[] _commandData;
+        private GraphicsBuffer _renderableParticleIndices;
+        private int _renderableParticleCapacity;
+        private ComputeShader _visibilityCompute;
+        private int _kernelBuildRenderableParticleList = -1;
+        private bool _usingGpuVisibilityCompaction;
 
         private MaterialPropertyBlock _mpb;
         private Mesh _generatedParticleMesh;
@@ -54,11 +60,13 @@ namespace PaintBucketSim.Systems.Fluid
         private void OnDisable()
         {
             ReleaseCommandBuffer();
+            ReleaseVisibilityResources();
         }
 
         private void OnDestroy()
         {
             ReleaseCommandBuffer();
+            ReleaseVisibilityResources();
             ReleaseGeneratedMesh();
         }
 
@@ -78,7 +86,9 @@ namespace PaintBucketSim.Systems.Fluid
 
             EnsureParticleMesh();
             EnsureCommandBuffer();
+            EnsureVisibilityResources();
             UpdateCommandBuffer();
+            _usingGpuVisibilityCompaction = BuildRenderableParticleList();
             RenderParticles();
             UpdateStats();
         }
@@ -115,6 +125,54 @@ namespace PaintBucketSim.Systems.Fluid
             _commandBuffer.SetData(_commandData);
         }
 
+        private void EnsureVisibilityResources()
+        {
+            int requestedCapacity = Mathf.Max(
+                1,
+                Mathf.Min(
+                    gpuBufferSet != null ? gpuBufferSet.Capacity : 1,
+                    renderConfig != null ? renderConfig.maxRenderedParticles : 1
+                )
+            );
+
+            if (_renderableParticleIndices == null ||
+                _renderableParticleCapacity != requestedCapacity)
+            {
+                ReleaseVisibilityResources();
+                _renderableParticleIndices = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Append,
+                    requestedCapacity,
+                    sizeof(uint)
+                );
+                _renderableParticleCapacity = requestedCapacity;
+            }
+
+            ComputeShader requestedCompute =
+                gpuBufferSet != null ? gpuBufferSet.UtilityCompute : null;
+
+            if (_visibilityCompute == requestedCompute &&
+                _kernelBuildRenderableParticleList >= 0)
+            {
+                return;
+            }
+
+            _visibilityCompute = requestedCompute;
+            _kernelBuildRenderableParticleList = -1;
+
+            if (_visibilityCompute == null)
+                return;
+
+            try
+            {
+                _kernelBuildRenderableParticleList =
+                    _visibilityCompute.FindKernel("KBuildRenderableParticleList");
+            }
+            catch
+            {
+                _kernelBuildRenderableParticleList = -1;
+            }
+        }
+
         private void UpdateCommandBuffer()
         {
             int uploadedCount = Mathf.Max(0, gpuBufferSet.UploadedParticleCount);
@@ -144,6 +202,62 @@ namespace PaintBucketSim.Systems.Fluid
             _commandBuffer.SetData(_commandData);
         }
 
+        private bool BuildRenderableParticleList()
+        {
+            if (_visibilityCompute == null ||
+                _kernelBuildRenderableParticleList < 0 ||
+                _renderableParticleIndices == null ||
+                _commandBuffer == null)
+            {
+                return false;
+            }
+
+            int uploadedCount = Mathf.Max(0, gpuBufferSet.UploadedParticleCount);
+            if (uploadedCount <= 0)
+                return false;
+
+            _renderableParticleIndices.SetCounterValue(0);
+
+            _visibilityCompute.SetInt("_ParticleCount", uploadedCount);
+            _visibilityCompute.SetInt(
+                "_ParticleIndexStride",
+                Mathf.Max(_effectiveRenderStride, 1)
+            );
+            _visibilityCompute.SetInt(
+                "_HideCanvasAndLostParticles",
+                renderConfig.hideCanvasAndLostParticles ? 1 : 0
+            );
+            _visibilityCompute.SetBuffer(
+                _kernelBuildRenderableParticleList,
+                "_ParticleStateAgeId",
+                gpuBufferSet.StateAgeIdBuffer
+            );
+            _visibilityCompute.SetBuffer(
+                _kernelBuildRenderableParticleList,
+                "_RenderableParticleIndices",
+                _renderableParticleIndices
+            );
+
+            int candidateCount = Mathf.CeilToInt(
+                uploadedCount / (float)Mathf.Max(_effectiveRenderStride, 1)
+            );
+            int groups = Mathf.CeilToInt(candidateCount / 256.0f);
+            _visibilityCompute.Dispatch(
+                _kernelBuildRenderableParticleList,
+                Mathf.Max(groups, 1),
+                1,
+                1
+            );
+
+            // instanceCount is the second uint in IndirectDrawIndexedArgs.
+            GraphicsBuffer.CopyCount(
+                _renderableParticleIndices,
+                _commandBuffer,
+                sizeof(uint)
+            );
+            return true;
+        }
+
         private void RenderParticles()
         {
             if (_commandBuffer == null)
@@ -154,6 +268,11 @@ namespace PaintBucketSim.Systems.Fluid
             _mpb.SetBuffer("_ParticlePositionRadius", gpuBufferSet.PositionRadiusBuffer);
             _mpb.SetBuffer("_ParticleColor", gpuBufferSet.ColorBuffer);
             _mpb.SetBuffer("_ParticleStateAgeId", gpuBufferSet.StateAgeIdBuffer);
+            _mpb.SetBuffer("_RenderableParticleIndices", _renderableParticleIndices);
+            _mpb.SetFloat(
+                "_UseRenderableParticleList",
+                _usingGpuVisibilityCompaction ? 1.0f : 0.0f
+            );
 
             bool useSplat =
                 renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
@@ -172,21 +291,6 @@ namespace PaintBucketSim.Systems.Fluid
             _mpb.SetFloat("_SplatEdgeSoftness", renderConfig.splatEdgeSoftness);
             _mpb.SetFloat("_PaintSpecularStrength", renderConfig.paintSpecularStrength);
             _mpb.SetFloat("_PaintFresnelStrength", renderConfig.paintFresnelStrength);
-
-            Camera camera = Camera.main != null ? Camera.main : Camera.current;
-            if (camera != null)
-            {
-                Transform cameraTransform = camera.transform;
-                _mpb.SetVector("_CameraRightWS", cameraTransform.right);
-                _mpb.SetVector("_CameraUpWS", cameraTransform.up);
-                _mpb.SetVector("_CameraForwardWS", -cameraTransform.forward);
-            }
-            else
-            {
-                _mpb.SetVector("_CameraRightWS", Vector3.right);
-                _mpb.SetVector("_CameraUpWS", Vector3.up);
-                _mpb.SetVector("_CameraForwardWS", Vector3.back);
-            }
 
             RenderParams renderParams = new RenderParams(particleMaterial)
             {
@@ -252,6 +356,7 @@ namespace PaintBucketSim.Systems.Fluid
             _stats.usingCameraFacingSplat =
                 renderConfig != null &&
                 renderConfig.visualMode == GpuParticleVisualMode.CameraFacingSplat;
+            _stats.usingGpuVisibilityCompaction = _usingGpuVisibilityCompaction;
         }
 
         private void ReleaseCommandBuffer()
@@ -264,6 +369,18 @@ namespace PaintBucketSim.Systems.Fluid
 
             _commandData = null;
             _stats = default;
+            _usingGpuVisibilityCompaction = false;
+        }
+
+        private void ReleaseVisibilityResources()
+        {
+            if (_renderableParticleIndices != null)
+            {
+                _renderableParticleIndices.Release();
+                _renderableParticleIndices = null;
+            }
+
+            _renderableParticleCapacity = 0;
         }
 
         private int _effectiveRenderStride = 1;

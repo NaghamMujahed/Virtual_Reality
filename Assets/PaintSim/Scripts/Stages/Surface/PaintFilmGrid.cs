@@ -33,6 +33,12 @@ namespace PaintSim.Scripts.Stages.Surface
         public Vector3 SurfaceAxisU { get; private set; }
         public Vector3 SurfaceAxisV { get; private set; }
         public Vector3 SurfaceNormalWS { get; private set; }
+        public Vector3 PreviousSurfaceOriginWS { get; private set; }
+        public Vector3 PreviousSurfaceAxisU { get; private set; }
+        public Vector3 PreviousSurfaceAxisV { get; private set; }
+        public Vector3 PreviousSurfaceNormalWS { get; private set; }
+        public float PreviousCellSizeU { get; private set; }
+        public float PreviousCellSizeV { get; private set; }
         public float ImpactCaptureDistance { get; private set; }
         public bool DoubleSidedImpact { get; private set; }
 
@@ -57,6 +63,18 @@ namespace PaintSim.Scripts.Stages.Surface
         private static readonly int ID_SurfaceAxisU = Shader.PropertyToID("_SurfaceAxisU");
         private static readonly int ID_SurfaceAxisV = Shader.PropertyToID("_SurfaceAxisV");
         private static readonly int ID_SurfaceNormalWS = Shader.PropertyToID("_SurfaceNormalWS");
+        private static readonly int ID_PreviousSurfaceOriginWS =
+            Shader.PropertyToID("_PreviousSurfaceOriginWS");
+        private static readonly int ID_PreviousSurfaceAxisU =
+            Shader.PropertyToID("_PreviousSurfaceAxisU");
+        private static readonly int ID_PreviousSurfaceAxisV =
+            Shader.PropertyToID("_PreviousSurfaceAxisV");
+        private static readonly int ID_PreviousSurfaceNormalWS =
+            Shader.PropertyToID("_PreviousSurfaceNormalWS");
+        private static readonly int ID_PreviousCellSizeU =
+            Shader.PropertyToID("_PreviousCellSizeU");
+        private static readonly int ID_PreviousCellSizeV =
+            Shader.PropertyToID("_PreviousCellSizeV");
         private static readonly int ID_SurfaceImpactCaptureDistance =
             Shader.PropertyToID("_SurfaceImpactCaptureDistance");
         private static readonly int ID_SurfaceDoubleSidedImpact =
@@ -71,6 +89,8 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_DepositTouchedList");
         private static readonly int ID_DepositResolveDispatchArgs =
             Shader.PropertyToID("_DepositResolveDispatchArgs");
+
+        private int _lastSurfaceFrameRefreshFrame = int.MinValue;
 
         public PaintFilmGrid(
             int gridWidth,
@@ -119,6 +139,12 @@ namespace PaintSim.Scripts.Stages.Surface
             SurfaceAxisU = SafeNormalized(surfaceAxisU, Vector3.right);
             SurfaceAxisV = SafeNormalized(surfaceAxisV, Vector3.forward);
             SurfaceNormalWS = SafeNormalized(surfaceNormalWS, Vector3.up);
+            PreviousSurfaceOriginWS = SurfaceOriginWS;
+            PreviousSurfaceAxisU = SurfaceAxisU;
+            PreviousSurfaceAxisV = SurfaceAxisV;
+            PreviousSurfaceNormalWS = SurfaceNormalWS;
+            PreviousCellSizeU = CellSizeU;
+            PreviousCellSizeV = CellSizeV;
             ImpactCaptureDistance = Mathf.Max(impactCaptureDistance, CellSize);
             DoubleSidedImpact = doubleSidedImpact;
 
@@ -217,6 +243,12 @@ namespace PaintSim.Scripts.Stages.Surface
             shader.SetVector(ID_SurfaceAxisU, SurfaceAxisU);
             shader.SetVector(ID_SurfaceAxisV, SurfaceAxisV);
             shader.SetVector(ID_SurfaceNormalWS, SurfaceNormalWS);
+            shader.SetVector(ID_PreviousSurfaceOriginWS, PreviousSurfaceOriginWS);
+            shader.SetVector(ID_PreviousSurfaceAxisU, PreviousSurfaceAxisU);
+            shader.SetVector(ID_PreviousSurfaceAxisV, PreviousSurfaceAxisV);
+            shader.SetVector(ID_PreviousSurfaceNormalWS, PreviousSurfaceNormalWS);
+            shader.SetFloat(ID_PreviousCellSizeU, PreviousCellSizeU);
+            shader.SetFloat(ID_PreviousCellSizeV, PreviousCellSizeV);
             shader.SetFloat(ID_SurfaceImpactCaptureDistance, ImpactCaptureDistance);
             shader.SetInt(ID_SurfaceDoubleSidedImpact, DoubleSidedImpact ? 1 : 0);
         }
@@ -233,6 +265,21 @@ namespace PaintSim.Scripts.Stages.Surface
             float impactCaptureDistance,
             bool doubleSidedImpact)
         {
+            int refreshFrame = Application.isPlaying
+                ? Time.frameCount
+                : _lastSurfaceFrameRefreshFrame + 1;
+
+            if (refreshFrame != _lastSurfaceFrameRefreshFrame)
+            {
+                PreviousSurfaceOriginWS = SurfaceOriginWS;
+                PreviousSurfaceAxisU = SurfaceAxisU;
+                PreviousSurfaceAxisV = SurfaceAxisV;
+                PreviousSurfaceNormalWS = SurfaceNormalWS;
+                PreviousCellSizeU = CellSizeU;
+                PreviousCellSizeV = CellSizeV;
+                _lastSurfaceFrameRefreshFrame = refreshFrame;
+            }
+
             CellSizeU = Mathf.Max(cellSizeU, 0.0001f);
             CellSizeV = Mathf.Max(cellSizeV, 0.0001f);
             CellSize = Mathf.Sqrt(CellSizeU * CellSizeV);

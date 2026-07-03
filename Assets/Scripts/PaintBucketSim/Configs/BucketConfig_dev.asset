@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d2cd6e91d06cd064ba458f3537c589a3, type: 3}
   m_Name: BucketConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.BucketConfig
-  shapeType: 1
+  shapeType: 0
   heightMeters: 0.55
   topRadiusMeters: 0.18
-  bottomRadiusMeters: 0.14
+  bottomRadiusMeters: 0.18
   wallThicknessMeters: 0.01
   massKg: 1
   automaticInertiaTensor: 1
@@ -67,7 +67,7 @@ MonoBehaviour:
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 1
+    active: 0
   visualRadialSegments: 48
   bucketColor: {r: 0.55, g: 0.55, b: 0.58, a: 1}
   holeColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}

@@ -1,4 +1,5 @@
 using UnityEngine;
+using PaintBucketSim.Configs;
 using PaintSim.Scripts.Core.Data;
 using PaintSim.Scripts.Rendering;
 
@@ -42,23 +43,15 @@ namespace PaintSim.Scripts.Stages.Surface
 
         [Header("Rendering")]
         [SerializeField] private ComputeShader _paintFilmBakerShader;
-        [SerializeField] private float _maxThickness = 0.00003f;
-        [SerializeField] private float _wetnessShine = 0.8f;
         [SerializeField, Min(1)] private int _renderEveryNFrames = 1;
 
-        [Header("Evolution / Drying")]
+        [Header("Evolution")]
         [SerializeField] private bool _enableEvolution = true;
         [SerializeField] private ComputeShader _evaporationShader;
-        [SerializeField] private float _evaporationRate = 0.05f;
-        [SerializeField] private float _diffusionRate = 30.0f;
-        [SerializeField, Min(0.0f)] private float _runoffRate = 0.18f;
-        [SerializeField, Min(0.000001f)] private float _minimumWetThickness = 0.000015f;
-        [SerializeField, Min(0.000001f)] private float _contactLineThickness = 0.000025f;
-        [SerializeField, Range(0.0f, 1.0f)] private float _contactAngleResistance = 0.72f;
-        [SerializeField, Range(0.0f, 1.0f)] private float _substrateFlowVariation = 0.28f;
-        [SerializeField, Range(0.0f, 1.0f)] private float _dripFingerInstability = 0.36f;
-        [SerializeField, Range(0.0f, 1.0f)] private float _thinFilmCohesion = 0.58f;
         [SerializeField, Min(1)] private int _evolveEveryNFrames = 2;
+
+        [Header("Moving Surface Flow")]
+        [SerializeField] private bool _includeSurfaceInertiaInFlow = true;
 
         [Header("Color Mixing / Pigments")]
         [SerializeField] private PaintColorMixingMode _colorMixingMode =
@@ -79,10 +72,13 @@ namespace PaintSim.Scripts.Stages.Surface
         private PaintEvolver _evolver;
         private MeshRenderer _meshRenderer;
         private MeshFilter _meshFilter;
-        private float _filmDensity = 1200.0f;
-        private float _filmViscosity = 0.5f;
-        private float _filmSurfaceTension = 0.04f;
-        private float _filmYieldStress;
+        private PaintSurfaceFilmProfile _filmProfile;
+        private bool _hasConfiguredFilmMaterial;
+        private Vector3 _lastSurfaceMotionCenterWS;
+        private Vector3 _surfaceVelocityWS;
+        private Vector3 _surfaceAccelerationWS;
+        private int _lastSurfaceMotionFrame = -1;
+        private bool _hasSurfaceMotionSample;
 
         private void Awake()
         {
@@ -147,6 +143,10 @@ namespace PaintSim.Scripts.Stages.Surface
                 ),
                 doubleSidedImpact: _doubleSidedImpact
             );
+
+            ResetSurfaceMotionSample(
+                originWS + axisU * (worldWidth * 0.5f) + axisV * (worldHeight * 0.5f)
+            );
         }
 
         public void RefreshSurfaceFrameFromTransform()
@@ -182,6 +182,81 @@ namespace PaintSim.Scripts.Stages.Surface
                 ),
                 _doubleSidedImpact
             );
+
+            UpdateSurfaceMotionSample(
+                originWS + axisU * (worldWidth * 0.5f) + axisV * (worldHeight * 0.5f)
+            );
+        }
+
+        private void ResetSurfaceMotionSample(Vector3 centerWS)
+        {
+            _lastSurfaceMotionCenterWS = centerWS;
+            _surfaceVelocityWS = Vector3.zero;
+            _surfaceAccelerationWS = Vector3.zero;
+            _lastSurfaceMotionFrame = Application.isPlaying ? Time.frameCount : -1;
+            _hasSurfaceMotionSample = true;
+        }
+
+        private void UpdateSurfaceMotionSample(Vector3 centerWS)
+        {
+            if (!_hasSurfaceMotionSample)
+            {
+                ResetSurfaceMotionSample(centerWS);
+                return;
+            }
+
+            if (Application.isPlaying &&
+                _lastSurfaceMotionFrame == Time.frameCount)
+            {
+                return;
+            }
+
+            float dt = Application.isPlaying
+                ? Mathf.Max(Time.deltaTime, 1.0f / 240.0f)
+                : 1.0f / 60.0f;
+
+            Vector3 previousVelocity = _surfaceVelocityWS;
+            Vector3 velocity = (centerWS - _lastSurfaceMotionCenterWS) / dt;
+            Vector3 acceleration = (velocity - previousVelocity) / dt;
+
+            float maxAcceleration = _hasConfiguredFilmMaterial
+                ? Mathf.Max(_filmProfile.maxSurfaceInertialAcceleration, 0.0f)
+                : 0.0f;
+            if (maxAcceleration > 0.0f)
+                acceleration = Vector3.ClampMagnitude(acceleration, maxAcceleration);
+
+            _surfaceVelocityWS = velocity;
+            _surfaceAccelerationWS = acceleration;
+            _lastSurfaceMotionCenterWS = centerWS;
+            _lastSurfaceMotionFrame = Application.isPlaying ? Time.frameCount : _lastSurfaceMotionFrame + 1;
+        }
+
+        private Vector3 EffectiveFilmAccelerationWS()
+        {
+            Vector3 acceleration = Physics.gravity;
+
+            if (_includeSurfaceInertiaInFlow &&
+                _hasConfiguredFilmMaterial &&
+                _filmProfile.surfaceInertiaResponse > 0.0f)
+            {
+                Vector3 inertialAcceleration = _surfaceAccelerationWS;
+                float maxAcceleration = Mathf.Max(
+                    _filmProfile.maxSurfaceInertialAcceleration,
+                    0.0f
+                );
+                if (maxAcceleration > 0.0f)
+                {
+                    inertialAcceleration = Vector3.ClampMagnitude(
+                        inertialAcceleration,
+                        maxAcceleration
+                    );
+                }
+
+                acceleration -= inertialAcceleration *
+                    _filmProfile.surfaceInertiaResponse;
+            }
+
+            return acceleration;
         }
 
         private void ResolveSurfaceFrame(
@@ -401,10 +476,6 @@ namespace PaintSim.Scripts.Stages.Surface
             }
 
             _evolver = new PaintEvolver(_evaporationShader, PaintFilmGrid);
-            _evolver.EvaporationRate = EffectiveEvaporationRate();
-            _evolver.DiffusionRate = EffectiveDiffusionRate();
-            _evolver.RunoffRate = EffectiveRunoffRate();
-            _evolver.MinimumWetThickness = _minimumWetThickness;
             ApplyFilmMaterialToEvolver();
             ApplyColorMixingToEvolver();
         }
@@ -423,8 +494,6 @@ namespace PaintSim.Scripts.Stages.Surface
                 _meshRenderer
             );
 
-            _renderer.MaxThickness = _maxThickness;
-            _renderer.WetnessShine = _wetnessShine;
             ApplySurfaceAppearanceToRenderer();
         }
 
@@ -434,15 +503,17 @@ namespace PaintSim.Scripts.Stages.Surface
 
             if (_enableEvolution &&
                 _evolver != null &&
+                _hasConfiguredFilmMaterial &&
                 Time.frameCount % Mathf.Max(1, _evolveEveryNFrames) == 0)
             {
                 _evolver.EvaporationRate = EffectiveEvaporationRate();
                 _evolver.DiffusionRate = EffectiveDiffusionRate();
                 _evolver.RunoffRate = EffectiveRunoffRate();
-                _evolver.MinimumWetThickness = _minimumWetThickness;
+                _evolver.MinimumWetThickness = _filmProfile.minimumWetThickness;
+                Vector3 filmAcceleration = EffectiveFilmAccelerationWS();
                 _evolver.SurfaceGravity = new Vector2(
-                    Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisU),
-                    Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisV)
+                    Vector3.Dot(filmAcceleration, PaintFilmGrid.SurfaceAxisU),
+                    Vector3.Dot(filmAcceleration, PaintFilmGrid.SurfaceAxisV)
                 );
                 ApplyFilmMaterialToEvolver();
                 ApplyColorMixingToEvolver();
@@ -456,16 +527,10 @@ namespace PaintSim.Scripts.Stages.Surface
             }
         }
 
-        public void ConfigureFilmMaterial(
-            float density,
-            float dynamicViscosity,
-            float surfaceTension,
-            float yieldStress)
+        public void ConfigureFilmMaterial(PaintSurfaceFilmProfile profile)
         {
-            _filmDensity = Mathf.Max(density, 1.0f);
-            _filmViscosity = Mathf.Max(dynamicViscosity, 0.0001f);
-            _filmSurfaceTension = Mathf.Max(surfaceTension, 0.0001f);
-            _filmYieldStress = Mathf.Max(yieldStress, 0.0f);
+            _filmProfile = profile.Sanitized();
+            _hasConfiguredFilmMaterial = true;
             ApplyFilmMaterialToEvolver();
         }
 
@@ -570,15 +635,6 @@ namespace PaintSim.Scripts.Stages.Surface
             _gridHeight = Mathf.Max(1, _gridHeight);
             _cellSize = Mathf.Max(_cellSize, 0.0001f);
             _impactCaptureDistance = Mathf.Max(_impactCaptureDistance, 0.0001f);
-            _evaporationRate = Mathf.Max(_evaporationRate, 0.0f);
-            _diffusionRate = Mathf.Max(_diffusionRate, 0.0f);
-            _runoffRate = Mathf.Max(_runoffRate, 0.0f);
-            _minimumWetThickness = Mathf.Max(_minimumWetThickness, 0.000001f);
-            _contactLineThickness = Mathf.Max(_contactLineThickness, 0.000001f);
-            _contactAngleResistance = Mathf.Clamp01(_contactAngleResistance);
-            _substrateFlowVariation = Mathf.Clamp01(_substrateFlowVariation);
-            _dripFingerInstability = Mathf.Clamp01(_dripFingerInstability);
-            _thinFilmCohesion = Mathf.Clamp01(_thinFilmCohesion);
             _pigmentMixStrength = Mathf.Clamp01(_pigmentMixStrength);
             _pigmentMinReflectance = Mathf.Clamp(
                 _pigmentMinReflectance,
@@ -602,12 +658,15 @@ namespace PaintSim.Scripts.Stages.Surface
 
         private float EffectiveEvaporationRate()
         {
+            if (!_hasConfiguredFilmMaterial)
+                return 0.0f;
+
             SurfaceFilmInteraction preset =
                 SurfaceFilmInteraction.FromType(_surfaceType);
             return Mathf.Max(
                 BlendWithSurfacePreset(
-                    _evaporationRate,
-                    _evaporationRate * preset.EvaporationMultiplier
+                    _filmProfile.evaporationRate,
+                    _filmProfile.evaporationRate * preset.EvaporationMultiplier
                 ),
                 0.0f
             );
@@ -615,12 +674,16 @@ namespace PaintSim.Scripts.Stages.Surface
 
         private float EffectiveDiffusionRate()
         {
-            // Preserve the legacy inspector scale while mapping it to the
-            // conservative capillary flux model. A legacy value of 30 maps to
-            // 7.5 1/s and remains CFL-stable because the shader clamps transport.
+            if (!_hasConfiguredFilmMaterial)
+                return 0.0f;
+
             SurfaceFilmInteraction preset =
                 SurfaceFilmInteraction.FromType(_surfaceType);
-            float baseRate = Mathf.Clamp(_diffusionRate * 0.25f, 0.0f, 12.0f);
+            float baseRate = Mathf.Clamp(
+                _filmProfile.diffusionRate * 0.25f,
+                0.0f,
+                12.0f
+            );
             return Mathf.Clamp(
                 BlendWithSurfacePreset(
                     baseRate,
@@ -633,12 +696,15 @@ namespace PaintSim.Scripts.Stages.Surface
 
         private float EffectiveRunoffRate()
         {
+            if (!_hasConfiguredFilmMaterial)
+                return 0.0f;
+
             SurfaceFilmInteraction preset =
                 SurfaceFilmInteraction.FromType(_surfaceType);
             return Mathf.Max(
                 BlendWithSurfacePreset(
-                    _runoffRate,
-                    _runoffRate * preset.RunoffMultiplier
+                    _filmProfile.runoffRate,
+                    _filmProfile.runoffRate * preset.RunoffMultiplier
                 ),
                 0.0f
             );
@@ -648,15 +714,7 @@ namespace PaintSim.Scripts.Stages.Surface
         {
             SurfaceVisualProperties preset =
                 SurfaceVisualProperties.FromType(_surfaceType);
-            if (!_useSurfacePreset)
-            {
-                preset.MaxThickness = _maxThickness;
-                preset.WetnessShine = _wetnessShine;
-            }
-
             SurfaceVisualProperties baseline = SurfaceVisualProperties.Wood;
-            baseline.MaxThickness = _maxThickness;
-            baseline.WetnessShine = _wetnessShine;
             return LerpSurfaceVisualProperties(
                 baseline,
                 preset,
@@ -700,49 +758,42 @@ namespace PaintSim.Scripts.Stages.Surface
             if (_renderer == null)
                 return;
 
-            if (_useSurfacePreset)
-            {
-                _renderer.ConfigureSurfaceAppearance(
-                    EffectiveSurfaceVisualProperties()
-                );
-                return;
-            }
-
-            _renderer.MaxThickness = _maxThickness;
-            _renderer.WetnessShine = _wetnessShine;
+            _renderer.ConfigureSurfaceAppearance(
+                EffectiveSurfaceVisualProperties()
+            );
         }
 
         private void ApplyFilmMaterialToEvolver()
         {
-            if (_evolver == null)
+            if (_evolver == null || !_hasConfiguredFilmMaterial)
                 return;
 
-            _evolver.PaintDensity = _filmDensity;
-            _evolver.DynamicViscosity = _filmViscosity;
-            _evolver.SurfaceTension = _filmSurfaceTension;
-            _evolver.YieldStress = _filmYieldStress;
+            _evolver.PaintDensity = _filmProfile.densityKgPerM3;
+            _evolver.DynamicViscosity = _filmProfile.dynamicViscosityPaS;
+            _evolver.SurfaceTension = _filmProfile.surfaceTensionNPerM;
+            _evolver.YieldStress = _filmProfile.yieldStressPa;
 
             SurfaceFilmInteraction preset =
                 SurfaceFilmInteraction.FromType(_surfaceType);
             _evolver.ContactLineThickness = BlendWithSurfacePreset(
-                _contactLineThickness,
+                _filmProfile.contactLineThickness,
                 preset.ContactLineThickness
             );
             _evolver.ContactAngleResistance = BlendWithSurfacePreset(
-                _contactAngleResistance,
+                _filmProfile.contactAngleResistance,
                 preset.ContactAngleResistance
             );
             _evolver.SubstrateFlowVariation = BlendWithSurfacePreset(
-                _substrateFlowVariation,
+                _filmProfile.substrateFlowVariation,
                 preset.SubstrateFlowVariation
             );
             _evolver.SurfaceRoughness = SurfaceProperties.Roughness;
             _evolver.DripFingerInstability = BlendWithSurfacePreset(
-                _dripFingerInstability,
+                _filmProfile.dripFingerInstability,
                 preset.DripFingerInstability
             );
             _evolver.ThinFilmCohesion = BlendWithSurfacePreset(
-                _thinFilmCohesion,
+                _filmProfile.thinFilmCohesion,
                 preset.ThinFilmCohesion
             );
             _evolver.SurfaceAbsorptionRate =

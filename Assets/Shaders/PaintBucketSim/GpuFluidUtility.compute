@@ -1,9 +1,14 @@
 ﻿#pragma kernel KDebugColorByState
 
+#pragma kernel KBuildRenderableParticleList
+
 RWStructuredBuffer<float4> _ParticleColor;
 StructuredBuffer<float4> _ParticleStateAgeId;
+AppendStructuredBuffer<uint> _RenderableParticleIndices;
 
 int _ParticleCount;
+int _ParticleIndexStride;
+int _HideCanvasAndLostParticles;
 
 float4 _InsideColor;
 float4 _NearHoleColor;
@@ -48,4 +53,26 @@ void KDebugColorByState(uint3 id : SV_DispatchThreadID)
     }
 
     _ParticleColor[index] = color;
+}
+
+[numthreads(256, 1, 1)]
+void KBuildRenderableParticleList(uint3 id : SV_DispatchThreadID)
+{
+    uint stride = (uint)max(_ParticleIndexStride, 1);
+    uint particleIndex = id.x * stride;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_HideCanvasAndLostParticles != 0)
+    {
+        int state = (int)round(_ParticleStateAgeId[particleIndex].x);
+
+        // Terminal particles are represented by the paint film and must not
+        // be submitted to the indirect particle draw.
+        if (state == 0 || state == 8 || state == 9 || state == 10)
+            return;
+    }
+
+    _RenderableParticleIndices.Append(particleIndex);
 }

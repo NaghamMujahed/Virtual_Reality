@@ -143,13 +143,14 @@ namespace PaintSim.Scripts.Rendering
             else if (mat.HasProperty(ID_Color))
                 _canvasBaseColor = mat.GetColor(ID_Color);
 
-            if (mat.HasProperty(ID_MainTex))
-                mat.SetTexture(ID_MainTex, _paintTexture);
+            bool usesPaintSurfaceData = mat.HasProperty(ID_PaintSurfaceData);
 
             if (mat.HasProperty(ID_BaseMap))
                 mat.SetTexture(ID_BaseMap, _paintTexture);
+            else if (!usesPaintSurfaceData && mat.HasProperty(ID_MainTex))
+                mat.SetTexture(ID_MainTex, _paintTexture);
 
-            if (mat.HasProperty(ID_PaintSurfaceData))
+            if (usesPaintSurfaceData)
                 mat.SetTexture(ID_PaintSurfaceData, _surfaceDataTexture);
 
             if (mat.HasProperty(ID_BaseColor))

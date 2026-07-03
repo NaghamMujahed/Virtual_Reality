@@ -53,6 +53,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
             StructuredBuffer<float4> _ParticlePositionRadius;
             StructuredBuffer<float4> _ParticleColor;
             StructuredBuffer<float4> _ParticleStateAgeId;
+            StructuredBuffer<uint> _RenderableParticleIndices;
 
             float4 _FallbackColor;
             float _VisualRadiusScale;
@@ -64,9 +65,7 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
             float _PaintSpecularStrength;
             float _PaintFresnelStrength;
             float _HideCanvasAndLostParticles;
-            float3 _CameraRightWS;
-            float3 _CameraUpWS;
-            float3 _CameraForwardWS;
+            float _UseRenderableParticleList;
             int _ParticleIndexStride;
             int _ParticleCount;
 
@@ -74,10 +73,12 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
             {
                 Varyings output;
 
-                uint particleIndex = min(
-                    instanceID * (uint)max(_ParticleIndexStride, 1),
-                    (uint)max(_ParticleCount - 1, 0)
-                );
+                uint particleIndex = _UseRenderableParticleList > 0.5
+                    ? _RenderableParticleIndices[instanceID]
+                    : min(
+                        instanceID * (uint)max(_ParticleIndexStride, 1),
+                        (uint)max(_ParticleCount - 1, 0)
+                    );
 
                 float4 pr = _ParticlePositionRadius[particleIndex];
 
@@ -90,10 +91,18 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
                 if (_RenderMode > 0.5)
                 {
                     float2 uv = input.positionOS.xy;
+                    float3x3 viewToWorld =
+                        (float3x3)GetViewToWorldMatrix();
+                    float3 cameraRightWS = normalize(
+                        mul(viewToWorld, float3(1.0, 0.0, 0.0))
+                    );
+                    float3 cameraUpWS = normalize(
+                        mul(viewToWorld, float3(0.0, 1.0, 0.0))
+                    );
                     local =
-                        normalize(_CameraRightWS) * uv.x * radius * 2.0 +
-                        normalize(_CameraUpWS) * uv.y * radius * 2.0;
-                    normalWS = normalize(_CameraForwardWS);
+                        cameraRightWS * uv.x * radius * 2.0 +
+                        cameraUpWS * uv.y * radius * 2.0;
+                    normalWS = normalize(_WorldSpaceCameraPos.xyz - centerWS);
                     output.splatUv = uv;
                 }
                 else
@@ -141,11 +150,22 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
 
                     float dome = sqrt(saturate(1.0 - r2)) *
                         max(_SplatNormalStrength, 0.05);
+                    float3x3 viewToWorld =
+                        (float3x3)GetViewToWorldMatrix();
+                    float3 cameraRightWS = normalize(
+                        mul(viewToWorld, float3(1.0, 0.0, 0.0))
+                    );
+                    float3 cameraUpWS = normalize(
+                        mul(viewToWorld, float3(0.0, 1.0, 0.0))
+                    );
+                    float3 cameraTowardViewerWS = normalize(
+                        mul(viewToWorld, float3(0.0, 0.0, 1.0))
+                    );
 
                     n = normalize(
-                        normalize(_CameraRightWS) * input.splatUv.x +
-                        normalize(_CameraUpWS) * input.splatUv.y +
-                        normalize(_CameraForwardWS) * dome
+                        cameraRightWS * input.splatUv.x +
+                        cameraUpWS * input.splatUv.y +
+                        cameraTowardViewerWS * dome
                     );
                 }
 

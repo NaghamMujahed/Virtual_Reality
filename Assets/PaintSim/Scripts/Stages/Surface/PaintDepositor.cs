@@ -10,7 +10,7 @@ namespace PaintSim.Scripts.Stages.Surface
 
         private readonly ComputeShader _shader;
         private readonly PaintFilmGrid _paintFilmGrid;
-        private readonly PaintProperties _paintProperties;
+        private PaintProperties _paintProperties;
         private readonly int _kernelIndex = -1;
         private readonly int _diagnosticsKernelIndex = -1;
         private readonly int _buildResolveArgsKernelIndex = -1;
@@ -40,8 +40,6 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_PaintViscosity");
         private static readonly int ID_SurfaceTension =
             Shader.PropertyToID("_SurfaceTension");
-        private static readonly int ID_FallbackPaintColor =
-            Shader.PropertyToID("_FallbackPaintColor");
 
         private static readonly int ID_MlsParticlePositionRadius =
             Shader.PropertyToID("_MlsParticlePositionRadius");
@@ -144,6 +142,11 @@ namespace PaintSim.Scripts.Stages.Surface
             _yasudaExponent = Mathf.Clamp(yasudaExponent, 0.25f, 8.0f);
             _flowIndex = Mathf.Clamp(flowIndex, 0.05f, 2.0f);
             _yieldStress = Mathf.Max(yieldStress, 0.0f);
+        }
+
+        public void ConfigurePaintProperties(PaintProperties paintProperties)
+        {
+            _paintProperties = paintProperties;
         }
 
         public void ConfigureColorMixing(
@@ -317,7 +320,6 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_PaintDensity, _paintProperties.Density);
             _shader.SetFloat(ID_PaintViscosity, _paintProperties.DynamicViscosity);
             _shader.SetFloat(ID_SurfaceTension, _paintProperties.SurfaceTension);
-            _shader.SetVector(ID_FallbackPaintColor, _paintProperties.Color);
             _shader.SetInt(ID_ThicknessScale, PaintCellData.ThicknessScale);
 
             _shader.SetFloat(ID_DepositionFraction, surface.DepositionFraction);

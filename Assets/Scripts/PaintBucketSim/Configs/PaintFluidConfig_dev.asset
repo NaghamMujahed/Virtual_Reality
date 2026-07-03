@@ -19,17 +19,15 @@ MonoBehaviour:
   particleRadiusToSpacing: 0.4
   wallClearanceMeters: 0.005
   holeClearanceMeters: 0.01
-  enableColorCompartments: 1
-  colorCompartmentCount: 4
-  colorCompartmentAxis: 2
-  colorDividerGapFraction: 0.035
+  enableColorCompartments: 0
+  colorCompartmentCount: 2
+  colorCompartmentAxis: 0
+  colorDividerGapFraction: 0
   compartmentColors:
   - {r: 0.95, g: 0.04, b: 0.03, a: 1}
-  - {r: 0.9490196, g: 0.88870597, b: 0.031372566, a: 1}
   - {r: 0.03, g: 0.22, b: 0.95, a: 1}
-  - {r: 0.031372566, g: 0.9490196, b: 0.07688622, a: 1}
   enablePhysicalColorDividers: 1
-  colorDividerThicknessMeters: 0.0005
+  colorDividerThicknessMeters: 0.014
   carveInitialParticlesAroundPhysicalDividers: 1
   previewMode: 0
   maxParticleCapacity: 530000

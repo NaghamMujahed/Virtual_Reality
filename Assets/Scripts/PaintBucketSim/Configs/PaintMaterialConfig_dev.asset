@@ -12,8 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a7d0b0d6a4c8fa243afeaba74e3ceb60, type: 3}
   m_Name: PaintMaterialConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintMaterialConfig
+  materialPreset: 3
+  autoApplyMaterialPreset: 1
   densityKgPerM3: 1150
-  baseColor: {r: 0.1, g: 0.35, b: 1, a: 1}
+  baseColor: {r: 0.62, g: 0.86, b: 1, a: 0.55}
   viscosityModel: 1
   constantViscosityPaS: 0.16
   zeroShearViscosityPaS: 2.6

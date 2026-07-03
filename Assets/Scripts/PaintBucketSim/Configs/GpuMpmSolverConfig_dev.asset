@@ -103,6 +103,7 @@ MonoBehaviour:
   maxDeformationGradientValue: 5
   paintMaterialPreset: 3
   autoApplyPaintMaterialPreset: 1
+  usePaintMaterialConfigRheology: 1
   enablePaintRheology: 1
   lowShearViscosity: 2.6
   highShearViscosity: 0.14
@@ -132,7 +133,7 @@ MonoBehaviour:
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 1
+  enableBottomHoleOpening: 0
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08

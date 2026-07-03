@@ -1,4 +1,5 @@
 #pragma kernel Spread
+#pragma kernel Advect
 #pragma kernel Evaporate
 
 struct PaintCellData
@@ -346,15 +347,6 @@ void Spread(uint3 id : SV_DispatchThreadID)
     int2 selfCoordinate = int2(x, y);
     float selfMobility =
         RheologyMobility(self, gravityMagnitude, selfCoordinate);
-    float rightCellMobility =
-        RheologyMobility(right, gravityMagnitude, int2(x + 1, y));
-    float leftCellMobility =
-        RheologyMobility(left, gravityMagnitude, int2(x - 1, y));
-    float upCellMobility =
-        RheologyMobility(up, gravityMagnitude, int2(x, y + 1));
-    float downCellMobility =
-        RheologyMobility(down, gravityMagnitude, int2(x, y - 1));
-
     float mobilityRight = FaceMobility(
         self,
         right,
@@ -384,7 +376,15 @@ void Spread(uint3 id : SV_DispatchThreadID)
         int2(x, y - 1)
     );
 
-    float capillaryDelta = 0.25f * capillaryRate * dt *
+    // A raw explicit coefficient of 0.25 * rate * dt becomes unstable when
+    // rendering is slow and delta time grows. The negative lobes are then
+    // clipped to zero while positive lobes grow, creating checkerboards and
+    // artificial paint volume. This exponential response preserves the
+    // small-dt behavior while keeping the four-neighbour stencil below its
+    // strict stability limit for every frame time.
+    float capillaryAlpha =
+        min(0.245f, 0.25f * (1.0f - exp(-capillaryRate * dt)));
+    float capillaryDelta = capillaryAlpha *
         (
             mobilityRight * (rightThickness - selfThickness) +
             mobilityLeft * (leftThickness - selfThickness) +
@@ -397,102 +397,14 @@ void Spread(uint3 id : SV_DispatchThreadID)
         selfMobility,
         selfCoordinate
     );
-    float2 rightGravityVelocity = SurfaceFlowVelocity(
-        right,
-        rightCellMobility,
-        int2(x + 1, y)
-    );
-    float2 leftGravityVelocity = SurfaceFlowVelocity(
-        left,
-        leftCellMobility,
-        int2(x - 1, y)
-    );
-    float2 upGravityVelocity = SurfaceFlowVelocity(
-        up,
-        upCellMobility,
-        int2(x, y + 1)
-    );
-    float2 downGravityVelocity = SurfaceFlowVelocity(
-        down,
-        downCellMobility,
-        int2(x, y - 1)
-    );
-
     float2 selfVelocity =
         self.FlowVelocity * saturate(self.Wetness) +
         gravityVelocity;
-    float2 rightVelocity =
-        right.FlowVelocity * saturate(right.Wetness) +
-        rightGravityVelocity;
-    float2 leftVelocity =
-        left.FlowVelocity * saturate(left.Wetness) +
-        leftGravityVelocity;
-    float2 upVelocity =
-        up.FlowVelocity * saturate(up.Wetness) +
-        upGravityVelocity;
-    float2 downVelocity =
-        down.FlowVelocity * saturate(down.Wetness) +
-        downGravityVelocity;
-
-    float safeCellU = max(_CellSizeU, 1e-5f);
-    float safeCellV = max(_CellSizeV, 1e-5f);
-    float maxStableSpeed =
-        dt > 1e-6f
-            ? 0.32f * min(safeCellU, safeCellV) / dt
-            : 0.0f;
-
-    selfVelocity = clamp(
-        selfVelocity,
-        -maxStableSpeed.xx,
-        maxStableSpeed.xx
-    );
-    rightVelocity = clamp(rightVelocity, -maxStableSpeed.xx, maxStableSpeed.xx);
-    leftVelocity = clamp(leftVelocity, -maxStableSpeed.xx, maxStableSpeed.xx);
-    upVelocity = clamp(upVelocity, -maxStableSpeed.xx, maxStableSpeed.xx);
-    downVelocity = clamp(downVelocity, -maxStableSpeed.xx, maxStableSpeed.xx);
-
-    float faceVelocityRight =
-        x < _GridWidth - 1 ? 0.5f * (selfVelocity.x + rightVelocity.x) : 0.0f;
-    float faceVelocityLeft =
-        x > 0 ? 0.5f * (leftVelocity.x + selfVelocity.x) : 0.0f;
-    float faceVelocityUp =
-        y < _GridHeight - 1 ? 0.5f * (selfVelocity.y + upVelocity.y) : 0.0f;
-    float faceVelocityDown =
-        y > 0 ? 0.5f * (downVelocity.y + selfVelocity.y) : 0.0f;
-
-    float fluxRight =
-        max(faceVelocityRight, 0.0f) * selfThickness +
-        min(faceVelocityRight, 0.0f) * rightThickness;
-    float fluxLeft =
-        max(faceVelocityLeft, 0.0f) * leftThickness +
-        min(faceVelocityLeft, 0.0f) * selfThickness;
-    float fluxUp =
-        max(faceVelocityUp, 0.0f) * selfThickness +
-        min(faceVelocityUp, 0.0f) * upThickness;
-    float fluxDown =
-        max(faceVelocityDown, 0.0f) * downThickness +
-        min(faceVelocityDown, 0.0f) * selfThickness;
-
-    float advectionDelta =
-        -dt *
-        (
-            (fluxRight - fluxLeft) / safeCellU +
-            (fluxUp - fluxDown) / safeCellV
-        );
 
     float newThickness =
-        max(selfThickness + capillaryDelta + advectionDelta, 0.0f);
+        max(selfThickness + capillaryDelta, 0.0f);
 
-    float incomingRight =
-        max(-faceVelocityRight, 0.0f) * rightThickness * dt / safeCellU;
-    float incomingLeft =
-        max(faceVelocityLeft, 0.0f) * leftThickness * dt / safeCellU;
-    float incomingUp =
-        max(-faceVelocityUp, 0.0f) * upThickness * dt / safeCellV;
-    float incomingDown =
-        max(faceVelocityDown, 0.0f) * downThickness * dt / safeCellV;
-
-    float capillaryMix = saturate(capillaryRate * dt * 0.25f);
+    float capillaryMix = capillaryAlpha;
     float selfColorWeight = max(selfThickness, 1e-9f);
     float colorWeight = selfColorWeight;
     float3 selfColor =
@@ -503,13 +415,13 @@ void Spread(uint3 id : SV_DispatchThreadID)
     float wetnessSum = saturate(self.Wetness) * selfColorWeight;
 
     float rightMix =
-        incomingRight + capillaryMix * mobilityRight * rightThickness;
+        capillaryMix * mobilityRight * rightThickness;
     float leftMix =
-        incomingLeft + capillaryMix * mobilityLeft * leftThickness;
+        capillaryMix * mobilityLeft * leftThickness;
     float upMix =
-        incomingUp + capillaryMix * mobilityUp * upThickness;
+        capillaryMix * mobilityUp * upThickness;
     float downMix =
-        incomingDown + capillaryMix * mobilityDown * downThickness;
+        capillaryMix * mobilityDown * downThickness;
 
     float3 rightColor = SafeColor(right.Color, self.Color).rgb;
     float3 leftColor = SafeColor(left.Color, self.Color).rgb;
@@ -556,13 +468,202 @@ void Spread(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+    int idx = y * _GridWidth + x;
+
+    PaintCellData self = _PaintCellReadBuffer[idx];
+    PaintCellData right = _PaintCellReadBuffer[GetIdx(x + 1, y)];
+    PaintCellData left = _PaintCellReadBuffer[GetIdx(x - 1, y)];
+    PaintCellData up = _PaintCellReadBuffer[GetIdx(x, y + 1)];
+    PaintCellData down = _PaintCellReadBuffer[GetIdx(x, y - 1)];
+
+    float selfThickness = ThicknessMeters(self);
+    float rightThickness = ThicknessMeters(right);
+    float leftThickness = ThicknessMeters(left);
+    float upThickness = ThicknessMeters(up);
+    float downThickness = ThicknessMeters(down);
+
+    if (selfThickness <= 0.0f &&
+        rightThickness <= 0.0f &&
+        leftThickness <= 0.0f &&
+        upThickness <= 0.0f &&
+        downThickness <= 0.0f)
+    {
+        _PaintCellWriteBuffer[idx] = EmptyCell();
+        return;
+    }
+
+    float dt = max(_DeltaTime, 0.0f);
+    float safeCellU = max(_CellSizeU, 1e-5f);
+    float safeCellV = max(_CellSizeV, 1e-5f);
+
+    // This pass is separate from capillary diffusion so each conservative
+    // operator has its own positivity budget. A cell can lose at most 80% of
+    // its thickness through its four faces in one update.
+    float maxStableSpeed =
+        dt > 1e-6f
+            ? 0.24f * min(safeCellU, safeCellV) / dt
+            : 0.0f;
+
+    float2 selfVelocity = clamp(
+        self.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 rightVelocity = clamp(
+        right.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 leftVelocity = clamp(
+        left.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 upVelocity = clamp(
+        up.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 downVelocity = clamp(
+        down.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+
+    // Positive face velocity points right/up. Boundary faces remain open so
+    // liquid can leave the physical board instead of accumulating at an
+    // invisible atlas wall.
+    float faceVelocityRight =
+        x < _GridWidth - 1
+            ? 0.5f * (selfVelocity.x + rightVelocity.x)
+            : max(selfVelocity.x, 0.0f);
+    float faceVelocityLeft =
+        x > 0
+            ? 0.5f * (leftVelocity.x + selfVelocity.x)
+            : min(selfVelocity.x, 0.0f);
+    float faceVelocityUp =
+        y < _GridHeight - 1
+            ? 0.5f * (selfVelocity.y + upVelocity.y)
+            : max(selfVelocity.y, 0.0f);
+    float faceVelocityDown =
+        y > 0
+            ? 0.5f * (downVelocity.y + selfVelocity.y)
+            : min(selfVelocity.y, 0.0f);
+
+    float fluxRight =
+        max(faceVelocityRight, 0.0f) * selfThickness +
+        min(faceVelocityRight, 0.0f) * rightThickness;
+    float fluxLeft =
+        max(faceVelocityLeft, 0.0f) * leftThickness +
+        min(faceVelocityLeft, 0.0f) * selfThickness;
+    float fluxUp =
+        max(faceVelocityUp, 0.0f) * selfThickness +
+        min(faceVelocityUp, 0.0f) * upThickness;
+    float fluxDown =
+        max(faceVelocityDown, 0.0f) * downThickness +
+        min(faceVelocityDown, 0.0f) * selfThickness;
+
+    float transferRight = fluxRight * dt / safeCellU;
+    float transferLeft = fluxLeft * dt / safeCellU;
+    float transferUp = fluxUp * dt / safeCellV;
+    float transferDown = fluxDown * dt / safeCellV;
+    float newThickness = max(
+        selfThickness -
+        transferRight +
+        transferLeft -
+        transferUp +
+        transferDown,
+        0.0f
+    );
+
+    float incomingRight = max(-transferRight, 0.0f);
+    float incomingLeft = max(transferLeft, 0.0f);
+    float incomingUp = max(-transferUp, 0.0f);
+    float incomingDown = max(transferDown, 0.0f);
+    float outgoing =
+        max(transferRight, 0.0f) +
+        max(-transferLeft, 0.0f) +
+        max(transferUp, 0.0f) +
+        max(-transferDown, 0.0f);
+    float remainingSelf = max(selfThickness - outgoing, 0.0f);
+
+    float3 selfColor =
+        SafeColor(self.Color, float4(1.0f, 0.0f, 0.0f, 1.0f)).rgb;
+    float3 rightColor = SafeColor(right.Color, self.Color).rgb;
+    float3 leftColor = SafeColor(left.Color, self.Color).rgb;
+    float3 upColor = SafeColor(up.Color, self.Color).rgb;
+    float3 downColor = SafeColor(down.Color, self.Color).rgb;
+    float colorWeight =
+        remainingSelf +
+        incomingRight +
+        incomingLeft +
+        incomingUp +
+        incomingDown;
+    float3 colorRgbSum =
+        selfColor * remainingSelf +
+        rightColor * incomingRight +
+        leftColor * incomingLeft +
+        upColor * incomingUp +
+        downColor * incomingDown;
+    float3 colorEncodedSum =
+        EncodePaintColorForMix(selfColor) * remainingSelf +
+        EncodePaintColorForMix(rightColor) * incomingRight +
+        EncodePaintColorForMix(leftColor) * incomingLeft +
+        EncodePaintColorForMix(upColor) * incomingUp +
+        EncodePaintColorForMix(downColor) * incomingDown;
+    float wetnessSum =
+        saturate(self.Wetness) * remainingSelf +
+        saturate(right.Wetness) * incomingRight +
+        saturate(left.Wetness) * incomingLeft +
+        saturate(up.Wetness) * incomingUp +
+        saturate(down.Wetness) * incomingDown;
+    float2 velocitySum =
+        selfVelocity * remainingSelf +
+        rightVelocity * incomingRight +
+        leftVelocity * incomingLeft +
+        upVelocity * incomingUp +
+        downVelocity * incomingDown;
+
+    PaintCellData output = self;
+    output.ThicknessInt = (int)round(
+        newThickness * max((float)_ThicknessScale, 1.0f)
+    );
+
+    if (output.ThicknessInt <= 0)
+    {
+        output = EmptyCell();
+    }
+    else
+    {
+        output.Color = float4(
+            WeightedPaintMix(colorRgbSum, colorEncodedSum, colorWeight),
+            1.0f
+        );
+        output.Wetness = saturate(wetnessSum / max(colorWeight, 1e-9f));
+        output.FlowVelocity =
+            velocitySum / max(colorWeight, 1e-9f);
+        output.PaintDensity = max(_PaintDensity, 1.0f);
+        output.IsActive = 1u;
+    }
+
+    _PaintCellWriteBuffer[idx] = output;
+}
+
+[numthreads(8, 8, 1)]
 void Evaporate(uint3 id : SV_DispatchThreadID)
 {
     if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
         return;
 
     int idx = (int)id.y * _GridWidth + (int)id.x;
-    PaintCellData cell = _PaintCellWriteBuffer[idx];
+    PaintCellData cell = _PaintCellBuffer[idx];
 
     if (cell.ThicknessInt <= 0)
     {

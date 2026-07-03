@@ -42,6 +42,12 @@ float3 _SurfaceOriginWS;
 float3 _SurfaceAxisU;
 float3 _SurfaceAxisV;
 float3 _SurfaceNormalWS;
+float3 _PreviousSurfaceOriginWS;
+float3 _PreviousSurfaceAxisU;
+float3 _PreviousSurfaceAxisV;
+float3 _PreviousSurfaceNormalWS;
+float _PreviousCellSizeU;
+float _PreviousCellSizeV;
 float _SurfaceImpactCaptureDistance;
 int _SurfaceDoubleSidedImpact;
 int _ThicknessScale;
@@ -49,7 +55,6 @@ int _ThicknessScale;
 float _PaintDensity;
 float _PaintViscosity;
 float _SurfaceTension;
-float4 _FallbackPaintColor;
 
 float _DepositionFraction;
 float _SplashMultiplier;
@@ -117,9 +122,9 @@ bool InBounds(int i, int j)
 float4 SafePaintColor(float4 color)
 {
     if (color.a <= 1e-5f)
-        color = _FallbackPaintColor;
+        color = float4(1.0f, 1.0f, 1.0f, 1.0f);
 
-    color.a = max(color.a, _FallbackPaintColor.a);
+    color.a = 1.0f;
     return saturate(color);
 }
 
@@ -379,13 +384,16 @@ bool DepositSurfaceImpact(
     float3 axisU = SafeNormalize3(_SurfaceAxisU, float3(1.0f, 0.0f, 0.0f));
     float3 axisV = SafeNormalize3(_SurfaceAxisV, float3(0.0f, 0.0f, 1.0f));
     float3 normalWS = SafeNormalize3(_SurfaceNormalWS, normalize(cross(axisU, axisV)));
+    float3 previousAxisU = SafeNormalize3(_PreviousSurfaceAxisU, axisU);
+    float3 previousAxisV = SafeNormalize3(_PreviousSurfaceAxisV, axisV);
+    float3 previousNormalWS = SafeNormalize3(_PreviousSurfaceNormalWS, normalWS);
 
     float sweptDt = max(_SurfaceImpactDeltaTime, 0.0f);
     float3 previousPosition = position - velocity * sweptDt;
     float3 currentRelative = position - _SurfaceOriginWS;
-    float3 previousRelative = previousPosition - _SurfaceOriginWS;
+    float3 previousRelative = previousPosition - _PreviousSurfaceOriginWS;
     float signedDistance = dot(currentRelative, normalWS);
-    float previousSignedDistance = dot(previousRelative, normalWS);
+    float previousSignedDistance = dot(previousRelative, previousNormalWS);
     float absDistance = abs(signedDistance);
     float captureDistance =
         max(_SurfaceImpactCaptureDistance, max(resolvedRadius, _CellSize) * 1.5f);
@@ -421,6 +429,20 @@ bool DepositSurfaceImpact(
     }
 
     float3 relative = impactPosition - _SurfaceOriginWS;
+    float surfaceU = dot(relative, axisU);
+    float surfaceV = dot(relative, axisV);
+    float3 currentSurfacePoint =
+        _SurfaceOriginWS + axisU * surfaceU + axisV * surfaceV;
+    float3 previousSurfacePoint =
+        _PreviousSurfaceOriginWS +
+        previousAxisU * surfaceU +
+        previousAxisV * surfaceV;
+    float3 surfaceVelocity =
+        sweptDt > 1e-6f
+            ? (currentSurfacePoint - previousSurfacePoint) / sweptDt
+            : float3(0.0f, 0.0f, 0.0f);
+    float3 relativeVelocity = velocity - surfaceVelocity;
+
     float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
     float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
 
@@ -437,8 +459,8 @@ bool DepositSurfaceImpact(
 
     DiagAdd(DIAG_IN_GRID, 1u);
 
-    float speed = length(velocity);
-    float normalVelocity = dot(velocity, normalWS);
+    float speed = length(relativeVelocity);
+    float normalVelocity = dot(relativeVelocity, normalWS);
     float impactSide =
         sweptImpact
             ? (previousSignedDistance >= 0.0f ? 1.0f : -1.0f)
@@ -448,7 +470,7 @@ bool DepositSurfaceImpact(
         impactSide = normalVelocity > 0.0f ? -1.0f : 1.0f;
 
     float3 velDir =
-        speed > 1e-5f ? velocity / speed : -normalWS * impactSide;
+        speed > 1e-5f ? relativeVelocity / speed : -normalWS * impactSide;
 
     float3 tangentDir = velDir - normalWS * dot(velDir, normalWS);
     float tangentLen = length(tangentDir);
@@ -544,14 +566,28 @@ bool DepositSurfaceImpact(
         (splashK < K_SPLASH)    ? 0.2f :
                                   0.5f;
 
-    float3 tangentVelocity = velocity - normalWS * normalVelocity;
-    resolvedVelocity = tangentVelocity * (1.0f - saturate(depositionFraction));
+    float3 tangentVelocity = relativeVelocity - normalWS * normalVelocity;
+    resolvedVelocity =
+        surfaceVelocity +
+        tangentVelocity * (1.0f - saturate(depositionFraction));
     resolvedVelocity += normalWS *
         (abs(normalVelocity) * bounceFactor * energy * impactSide);
 
-    float predictedNormalSpeed = abs(dot(resolvedVelocity, normalWS));
+    float3 predictedRelativeVelocity = resolvedVelocity - surfaceVelocity;
+    float predictedNormalSpeed = abs(dot(predictedRelativeVelocity, normalWS));
+    float lowAdhesionSurface =
+        saturate((max(_SplashMultiplier, 0.0f) - 0.9f) / 1.1f) *
+        saturate((0.78f - depositionFraction) / 0.55f) *
+        (1.0f - absorption01);
+    float fluidResidual =
+        saturate((0.45f - impactViscosity) / 0.40f) *
+        saturate((0.20f - max(_YieldStress, 0.0f)) / 0.20f);
+    float highEnergyResidual =
+        saturate((weber - 1200.0f) / 1600.0f);
+    bool allowSweptResidual =
+        lowAdhesionSurface * fluidResidual * highEnergyResidual > 0.08f;
     bool predictedSettled =
-        sweptImpact ||
+        (sweptImpact && !allowSweptResidual) ||
         weber < WE_DEPOSITION ||
         bounceFactor < 0.05f ||
         predictedNormalSpeed < 0.5f;
@@ -746,7 +782,9 @@ bool DepositSurfaceImpact(
             normalWS * (targetDistance - impactSignedDistance);
     }
 
-    resolvedVelocity -= normalWS * dot(resolvedVelocity, normalWS) * 0.02f;
+    float3 relativeResolvedVelocity = resolvedVelocity - surfaceVelocity;
+    resolvedVelocity -=
+        normalWS * dot(relativeResolvedVelocity, normalWS) * 0.02f;
 
     float remainingFraction = saturate(1.0f - effectiveDepositFraction);
     resolvedMass *= remainingFraction;

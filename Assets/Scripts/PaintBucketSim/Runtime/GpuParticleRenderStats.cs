@@ -25,5 +25,6 @@ namespace PaintBucketSim.Runtime
 
         public bool usingPerParticleColor;
         public bool usingCameraFacingSplat;
+        public bool usingGpuVisibilityCompaction;
     }
 }

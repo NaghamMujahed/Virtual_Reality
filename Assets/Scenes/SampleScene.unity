@@ -9649,13 +9649,8 @@ MonoBehaviour:
   _markMlsMpmParticlesOnImpact: 1
   _enableSurfaceImpactDiagnostics: 0
   _diagnosticLogEveryNFrames: 120
-  _syncPaintPropertiesFromMlsMpmMaterial: 1
-  _paintColor: {r: 1, g: 0, b: 0, a: 1}
-  _paintDensity: 1200
-  _paintViscosity: 0.1
-  _paintSurfaceTension: 0.04
-  _materialViscositySampleShearRate: 5
-  _materialViscositySampleTemperature: 5
+  _syncPaintMaterialEveryFrame: 1
+  _warnWhenGpuSolverPresetDiffersFromMaterial: 1
   _colorMixingMode: 1
   _pigmentMixStrength: 1
   _pigmentMinReflectance: 0.035
@@ -9684,21 +9679,11 @@ MonoBehaviour:
   _impactCaptureDistance: 0.03
   _doubleSidedImpact: 1
   _paintFilmBakerShader: {fileID: 7200000, guid: 66a63eb08b67aba499aad6f41f2ab2f1, type: 3}
-  _maxThickness: 0.00003
-  _wetnessShine: 0.8
   _renderEveryNFrames: 1
   _enableEvolution: 1
   _evaporationShader: {fileID: 7200000, guid: d732c12b1f53b16458bbd821f0f08ad3, type: 3}
-  _evaporationRate: 0.02
-  _diffusionRate: 30
-  _runoffRate: 0.18
-  _minimumWetThickness: 0.000015
-  _contactLineThickness: 0.000025
-  _contactAngleResistance: 0.72
-  _substrateFlowVariation: 0.28
-  _dripFingerInstability: 0.36
-  _thinFilmCohesion: 0.58
   _evolveEveryNFrames: 2
+  _includeSurfaceInertiaInFlow: 1
   _colorMixingMode: 1
   _pigmentMixStrength: 1
   _pigmentMinReflectance: 0.035
@@ -13077,10 +13062,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Bucket.BucketRenderer
   bucketSystem: {fileID: 1657576619}
+  paintFluidSystem: {fileID: 0}
   meshFilter: {fileID: 0}
   meshRenderer: {fileID: 0}
   showAttachmentJoint: 1
   showHoleRing: 1
+  showColorDividers: 1
+  colorDividerColor: {r: 0.78, g: 0.78, b: 0.82, a: 1}
+  dividerVisualThicknessMultiplier: 1.15
+  dividerVisualHeightFraction: 0.92
 --- !u!23 &1657576617
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -13088,7 +13078,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1657576614}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1

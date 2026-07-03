@@ -1970,7 +1970,52 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ////////// G6.A Changes ////////////
             compute.SetInt("_EnableMaterialStress", context.GpuMpmConfig.enableMaterialStress ? 1 : 0);
             compute.SetFloat("_BulkModulus", context.GpuMpmConfig.bulkModulus);
-            compute.SetFloat("_MpmViscosity", context.GpuMpmConfig.mpmViscosity);
+            float mpmViscosity = context.GpuMpmConfig.mpmViscosity;
+            float lowShearViscosity = context.GpuMpmConfig.lowShearViscosity;
+            float highShearViscosity = context.GpuMpmConfig.highShearViscosity;
+            float shearThinningRelaxationTime =
+                context.GpuMpmConfig.shearThinningRelaxationTime;
+            float shearThinningPowerN = context.GpuMpmConfig.shearThinningPowerN;
+            float carreauYasudaExponent = context.GpuMpmConfig.carreauYasudaExponent;
+            float yieldStress = context.GpuMpmConfig.yieldStress;
+
+            if (context.GpuMpmConfig.usePaintMaterialConfigRheology &&
+                context.MaterialConfig != null)
+            {
+                PaintMaterialConfig material = context.MaterialConfig;
+                mpmViscosity = Mathf.Clamp(
+                    material.EvaluateViscosity(20.0f, 20.0f),
+                    0.0001f,
+                    context.GpuMpmConfig.maxEffectiveViscosity
+                );
+                lowShearViscosity = Mathf.Max(
+                    material.EvaluateViscosity(0.05f, 20.0f),
+                    0.0001f
+                );
+                highShearViscosity = Mathf.Max(
+                    material.EvaluateViscosity(80.0f, 20.0f),
+                    0.0001f
+                );
+
+                if (highShearViscosity > lowShearViscosity)
+                    highShearViscosity = lowShearViscosity;
+
+                shearThinningRelaxationTime =
+                    Mathf.Max(material.relaxationTimeSeconds, 0.0001f);
+                shearThinningPowerN = Mathf.Clamp(
+                    material.flowIndex,
+                    0.05f,
+                    1.0f
+                );
+                carreauYasudaExponent = Mathf.Clamp(
+                    material.yasudaExponent,
+                    0.25f,
+                    8.0f
+                );
+                yieldStress = Mathf.Max(material.yieldStressPa, 0.0f);
+            }
+
+            compute.SetFloat("_MpmViscosity", mpmViscosity);
             compute.SetFloat("_MaterialStressStrength", context.GpuMpmConfig.materialStressStrength);
             compute.SetFloat("_MaxStressMagnitude", context.GpuMpmConfig.maxStressMagnitude);
             compute.SetFloat("_MinJ", context.GpuMpmConfig.minJ);
@@ -1981,13 +2026,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ////////// G7 Paint Rheology //////////
             compute.SetInt("_EnablePaintRheology", context.GpuMpmConfig.enablePaintRheology ? 1 : 0);
 
-            compute.SetFloat("_LowShearViscosity", context.GpuMpmConfig.lowShearViscosity);
-            compute.SetFloat("_HighShearViscosity", context.GpuMpmConfig.highShearViscosity);
-            compute.SetFloat("_ShearThinningRelaxationTime", context.GpuMpmConfig.shearThinningRelaxationTime);
-            compute.SetFloat("_ShearThinningPowerN", context.GpuMpmConfig.shearThinningPowerN);
-            compute.SetFloat("_CarreauYasudaExponent", context.GpuMpmConfig.carreauYasudaExponent);
+            compute.SetFloat("_LowShearViscosity", lowShearViscosity);
+            compute.SetFloat("_HighShearViscosity", highShearViscosity);
+            compute.SetFloat("_ShearThinningRelaxationTime", shearThinningRelaxationTime);
+            compute.SetFloat("_ShearThinningPowerN", shearThinningPowerN);
+            compute.SetFloat("_CarreauYasudaExponent", carreauYasudaExponent);
 
-            compute.SetFloat("_YieldStress", context.GpuMpmConfig.yieldStress);
+            compute.SetFloat("_YieldStress", yieldStress);
             compute.SetFloat("_YieldRegularizationRate", context.GpuMpmConfig.yieldRegularizationRate);
             compute.SetFloat("_MaxYieldViscosityContribution", context.GpuMpmConfig.maxYieldViscosityContribution);
             compute.SetFloat("_MaxEffectiveViscosity", context.GpuMpmConfig.maxEffectiveViscosity);

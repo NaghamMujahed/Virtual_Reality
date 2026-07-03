@@ -389,6 +389,9 @@ namespace PaintBucketSim.Configs
         [Tooltip("When true, selecting a named material preset in the inspector drives the numeric rheology/cohesion/incompressibility fields. Turn off if you want to keep a named preset label while manually tuning values.")]
         public bool autoApplyPaintMaterialPreset = true;
 
+        [Tooltip("When true, GPU MLS-MPM rheology values are sourced from PaintMaterialConfig. The fields below remain as legacy fallback / numerical-stability tuning, not the authoritative material definition.")]
+        public bool usePaintMaterialConfigRheology = true;
+
         ////////////////    G7 Changes   //////////////////
         [Header("Paint Rheology / Non-Newtonian Prototype")]
         public bool enablePaintRheology = true;

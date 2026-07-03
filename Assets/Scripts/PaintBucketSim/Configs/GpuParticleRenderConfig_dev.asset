@@ -16,7 +16,7 @@ MonoBehaviour:
   maxRenderedParticles: 400000
   renderStride: 1
   uploadEveryNFrames: 1
-  visualMode: 0
+  visualMode: 1
   visualRadiusScale: 0.8
   splatNormalStrength: 0.85
   splatEdgeSoftness: 0.22

@@ -12,6 +12,9 @@ namespace PaintSim.Scripts.UnityBridge
     [DefaultExecutionOrder(2000)]
     public sealed class PaintSimulationHost : MonoBehaviour
     {
+        private const float MaterialViscositySampleShearRate = 20.0f;
+        private const float MaterialViscositySampleTemperature = 20.0f;
+
         [Header("MLS-MPM Source")]
         [SerializeField] private bool _autoFindMlsMpmSources = true;
         [SerializeField] private PaintFluidSystem _paintFluidSystem;
@@ -34,14 +37,9 @@ namespace PaintSim.Scripts.UnityBridge
         [SerializeField] private bool _enableSurfaceImpactDiagnostics = true;
         [SerializeField, Min(1)] private int _diagnosticLogEveryNFrames = 120;
 
-        [Header("Paint Properties")]
-        [SerializeField] private bool _syncPaintPropertiesFromMlsMpmMaterial = true;
-        [SerializeField] private Color _paintColor = Color.red;
-        [SerializeField] private float _paintDensity = 1200f;
-        [SerializeField] private float _paintViscosity = 0.1f;
-        [SerializeField] private float _paintSurfaceTension = 0.04f;
-        [SerializeField] private float _materialViscositySampleShearRate = 20.0f;
-        [SerializeField] private float _materialViscositySampleTemperature = 20.0f;
+        [Header("Material Source")]
+        [SerializeField] private bool _syncPaintMaterialEveryFrame = true;
+        [SerializeField] private bool _warnWhenGpuSolverPresetDiffersFromMaterial = true;
 
         [Header("Color Mixing / Pigments")]
         [SerializeField] private PaintColorMixingMode _colorMixingMode =
@@ -52,6 +50,11 @@ namespace PaintSim.Scripts.UnityBridge
 
         private PaintProperties _paintProperties;
         private PaintDepositor _paintDepositor;
+        private float _paintDensity = 1200f;
+        private float _paintViscosity = 0.1f;
+        private float _paintSurfaceTension = 0.04f;
+        private int _lastPaintMaterialSignature = int.MinValue;
+        private bool _warnedMaterialPresetMismatch;
 
         private void Awake()
         {
@@ -61,7 +64,7 @@ namespace PaintSim.Scripts.UnityBridge
         private void Start()
         {
             ResolveReferences();
-            SyncPaintPropertiesFromMlsMpmMaterial();
+            SyncPaintPropertiesFromMlsMpmMaterial(true);
             InitPaintProperties();
             InitDepositor();
         }
@@ -76,12 +79,15 @@ namespace PaintSim.Scripts.UnityBridge
         {
             if (_depositInLateUpdate)
                 DispatchMlsMpmDepositor();
+
+            if (_renderPaintSurface)
+                _paintSurface?.Render();
         }
 
         private void Update()
         {
-            if (_renderPaintSurface)
-                _paintSurface?.Render();
+            if (_syncPaintMaterialEveryFrame)
+                SyncPaintPropertiesFromMlsMpmMaterial(false);
         }
 
         private void ResolveReferences()
@@ -99,26 +105,36 @@ namespace PaintSim.Scripts.UnityBridge
                 _paintSurface = FindAnyObjectByType<PaintSurface>();
         }
 
-        private void SyncPaintPropertiesFromMlsMpmMaterial()
+        private bool SyncPaintPropertiesFromMlsMpmMaterial(bool force)
         {
-            if (!_syncPaintPropertiesFromMlsMpmMaterial ||
-                _paintFluidSystem == null ||
+            if (_paintFluidSystem == null ||
                 _paintFluidSystem.MaterialConfig == null)
             {
-                return;
+                return false;
             }
 
             PaintMaterialConfig material = _paintFluidSystem.MaterialConfig;
-            _paintColor = material.baseColor;
+            int signature = ComputeMaterialSignature(material);
+            if (!force && signature == _lastPaintMaterialSignature)
+                return false;
+
+            _lastPaintMaterialSignature = signature;
             _paintDensity = Mathf.Max(material.densityKgPerM3, 1.0f);
             _paintSurfaceTension = Mathf.Max(material.surfaceTensionNPerM, 0.0001f);
             _paintViscosity = Mathf.Max(
                 material.EvaluateViscosity(
-                    _materialViscositySampleShearRate,
-                    _materialViscositySampleTemperature
+                    MaterialViscositySampleShearRate,
+                    MaterialViscositySampleTemperature
                 ),
                 0.0001f
             );
+
+            InitPaintProperties();
+            _paintDepositor?.ConfigurePaintProperties(_paintProperties);
+            ApplyMaterialRheologyToDepositor(material);
+            ApplyMaterialFilmProfileToSurface(material);
+            WarnIfGpuSolverPresetDiffersFromMaterial(material);
+            return true;
         }
 
         private void InitPaintProperties()
@@ -127,7 +143,7 @@ namespace PaintSim.Scripts.UnityBridge
                 density: _paintDensity,
                 dynamicViscosity: _paintViscosity,
                 surfaceTension: _paintSurfaceTension,
-                paintColor: _paintColor
+                paintColor: Color.white
             );
         }
 
@@ -159,25 +175,44 @@ namespace PaintSim.Scripts.UnityBridge
                 _paintFluidSystem.MaterialConfig != null)
             {
                 PaintMaterialConfig material = _paintFluidSystem.MaterialConfig;
-                _paintDepositor.ConfigureImpactRheology(
-                    material.viscosityModel == PaintViscosityModel.CarreauYasuda,
-                    material.zeroShearViscosityPaS,
-                    material.infiniteShearViscosityPaS,
-                    material.relaxationTimeSeconds,
-                    material.yasudaExponent,
-                    material.flowIndex,
-                    material.yieldStressPa
-                );
-
-                _paintSurface.ConfigureFilmMaterial(
-                    material.densityKgPerM3,
-                    material.EvaluateViscosity(1.0f, _materialViscositySampleTemperature),
-                    material.surfaceTensionNPerM,
-                    material.yieldStressPa
-                );
+                ApplyMaterialRheologyToDepositor(material);
+                ApplyMaterialFilmProfileToSurface(material);
             }
 
             ApplyColorMixingConfiguration();
+        }
+
+        private void ApplyMaterialRheologyToDepositor(PaintMaterialConfig material)
+        {
+            if (_paintDepositor == null || material == null)
+                return;
+
+            bool useCarreauYasuda =
+                material.viscosityModel == PaintViscosityModel.CarreauYasuda ||
+                material.viscosityModel == PaintViscosityModel.ShearThinningCarreau;
+
+            _paintDepositor.ConfigureImpactRheology(
+                useCarreauYasuda,
+                material.zeroShearViscosityPaS,
+                material.infiniteShearViscosityPaS,
+                material.relaxationTimeSeconds,
+                material.yasudaExponent,
+                material.flowIndex,
+                material.yieldStressPa
+            );
+        }
+
+        private void ApplyMaterialFilmProfileToSurface(PaintMaterialConfig material)
+        {
+            if (_paintSurface == null || material == null)
+                return;
+
+            _paintSurface.ConfigureFilmMaterial(
+                material.EvaluateSurfaceFilmProfile(
+                    1.0f,
+                    MaterialViscositySampleTemperature
+                )
+            );
         }
 
         private void ApplyColorMixingConfiguration()
@@ -213,6 +248,7 @@ namespace PaintSim.Scripts.UnityBridge
             if (Time.frameCount % Mathf.Max(1, _depositEveryNFrames) != 0)
                 return;
 
+            SyncPaintPropertiesFromMlsMpmMaterial(false);
             _paintSurface.RefreshSurfaceFrameFromTransform();
             ApplyColorMixingConfiguration();
 
@@ -257,11 +293,6 @@ namespace PaintSim.Scripts.UnityBridge
 
         private void OnValidate()
         {
-            _paintDensity = Mathf.Max(_paintDensity, 1.0f);
-            _paintViscosity = Mathf.Max(_paintViscosity, 0.0001f);
-            _paintSurfaceTension = Mathf.Max(_paintSurfaceTension, 0.0001f);
-            _materialViscositySampleShearRate =
-                Mathf.Max(_materialViscositySampleShearRate, 0.0f);
             _pigmentMixStrength = Mathf.Clamp01(_pigmentMixStrength);
             _pigmentMinReflectance = Mathf.Clamp(
                 _pigmentMinReflectance,
@@ -271,6 +302,67 @@ namespace PaintSim.Scripts.UnityBridge
             _pigmentMaxKs = Mathf.Clamp(_pigmentMaxKs, 1.0f, 64.0f);
             _depositEveryNFrames = Mathf.Max(1, _depositEveryNFrames);
             _diagnosticLogEveryNFrames = Mathf.Max(1, _diagnosticLogEveryNFrames);
+        }
+
+        private int ComputeMaterialSignature(PaintMaterialConfig material)
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + material.GetInstanceID();
+                hash = hash * 31 + (int)material.materialPreset;
+                hash = hash * 31 + (material.autoApplyMaterialPreset ? 1 : 0);
+                hash = hash * 31 + Quantize(material.densityKgPerM3);
+                hash = hash * 31 + (int)material.viscosityModel;
+                hash = hash * 31 + Quantize(material.constantViscosityPaS);
+                hash = hash * 31 + Quantize(material.zeroShearViscosityPaS);
+                hash = hash * 31 + Quantize(material.infiniteShearViscosityPaS);
+                hash = hash * 31 + Quantize(material.relaxationTimeSeconds);
+                hash = hash * 31 + Quantize(material.yasudaExponent);
+                hash = hash * 31 + Quantize(material.flowIndex);
+                hash = hash * 31 + Quantize(material.yieldStressPa);
+                hash = hash * 31 + Quantize(material.surfaceTensionNPerM);
+                hash = hash * 31 + Quantize(material.dryingRatePerSecond);
+                hash = hash * 31 + Quantize(material.absorptionRate);
+                return hash;
+            }
+        }
+
+        private static int Quantize(float value)
+        {
+            return Mathf.RoundToInt(value * 100000.0f);
+        }
+
+        private void WarnIfGpuSolverPresetDiffersFromMaterial(PaintMaterialConfig material)
+        {
+            if (!_warnWhenGpuSolverPresetDiffersFromMaterial ||
+                _warnedMaterialPresetMismatch ||
+                _paintFluidSystem == null ||
+                _paintFluidSystem.GpuMpmConfig == null ||
+                material == null)
+            {
+                return;
+            }
+
+            string materialPreset = material.materialPreset.ToString();
+            string gpuPreset =
+                _paintFluidSystem.GpuMpmConfig.paintMaterialPreset.ToString();
+
+            if (materialPreset == "Custom" || gpuPreset == "Custom" ||
+                materialPreset == gpuPreset)
+            {
+                return;
+            }
+
+            _warnedMaterialPresetMismatch = true;
+            Debug.LogWarning(
+                "[PaintSimulationHost] Material preset mismatch: " +
+                $"PaintMaterialConfig={materialPreset}, " +
+                $"GpuMpmSolverConfig={gpuPreset}. " +
+                "PaintMaterialConfig is now the authoritative visual/rheology " +
+                "source for deposition and board-film flow. Use the GPU preset " +
+                "only as a solver-stability package, or match both presets."
+            );
         }
 
         private void OnDestroy()

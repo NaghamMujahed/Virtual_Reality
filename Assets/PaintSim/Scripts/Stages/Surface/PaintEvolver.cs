@@ -9,6 +9,7 @@ namespace PaintSim.Scripts.Stages.Surface
         private readonly PaintFilmGrid _grid;
         private readonly int _evaporateKernel;
         private readonly int _spreadKernel;
+        private readonly int _advectKernel;
 
         private static readonly int ID_PaintCellBuffer =
             Shader.PropertyToID("_PaintCellBuffer");
@@ -101,6 +102,7 @@ namespace PaintSim.Scripts.Stages.Surface
 
             _evaporateKernel = _shader.FindKernel("Evaporate");
             _spreadKernel = _shader.FindKernel("Spread");
+            _advectKernel = _shader.FindKernel("Advect");
         }
 
         public void Evolve(float deltaTime)
@@ -121,9 +123,65 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetBuffer(_spreadKernel, ID_PaintCellWriteBuffer, _grid.ScratchCellBuffer);
             _shader.Dispatch(_spreadKernel, threadGroupsX, threadGroupsY, 1);
 
-            _shader.SetBuffer(_evaporateKernel, ID_PaintCellWriteBuffer, _grid.ScratchCellBuffer);
-            _shader.SetBuffer(_evaporateKernel, ID_PaintCellBuffer, _grid.PaintCellBuffer);
+            int advectionSubsteps = ResolveAdvectionSubsteps(deltaTime);
+            float advectionDeltaTime =
+                Mathf.Max(deltaTime, 0.0f) / advectionSubsteps;
+            _shader.SetFloat(ID_DeltaTime, advectionDeltaTime);
+
+            for (int step = 0; step < advectionSubsteps; step++)
+            {
+                bool readScratch = (step & 1) == 0;
+                _shader.SetBuffer(
+                    _advectKernel,
+                    ID_PaintCellReadBuffer,
+                    readScratch
+                        ? _grid.ScratchCellBuffer
+                        : _grid.PaintCellBuffer
+                );
+                _shader.SetBuffer(
+                    _advectKernel,
+                    ID_PaintCellWriteBuffer,
+                    readScratch
+                        ? _grid.PaintCellBuffer
+                        : _grid.ScratchCellBuffer
+                );
+                _shader.Dispatch(_advectKernel, threadGroupsX, threadGroupsY, 1);
+            }
+
+            _shader.SetFloat(ID_DeltaTime, Mathf.Max(deltaTime, 0.0f));
+            _shader.SetBuffer(
+                _evaporateKernel,
+                ID_PaintCellBuffer,
+                _grid.PaintCellBuffer
+            );
             _shader.Dispatch(_evaporateKernel, threadGroupsX, threadGroupsY, 1);
+        }
+
+        private int ResolveAdvectionSubsteps(float deltaTime)
+        {
+            float gravityRatio = SurfaceGravity.magnitude / 9.81f;
+            float estimatedFlowSpeed =
+                gravityRatio *
+                Mathf.Max(RunoffRate, 0.0f) *
+                0.11f;
+            float stableTravel =
+                0.24f *
+                Mathf.Min(_grid.CellSizeU, _grid.CellSizeV);
+
+            int required = stableTravel > 1e-7f
+                ? Mathf.CeilToInt(
+                    estimatedFlowSpeed *
+                    Mathf.Max(deltaTime, 0.0f) /
+                    stableTravel
+                )
+                : 1;
+            required = Mathf.Clamp(required, 1, 5);
+
+            // An odd count keeps the final ping-pong result in PaintCellBuffer.
+            if ((required & 1) == 0)
+                required = Mathf.Min(required + 1, 5);
+
+            return required;
         }
 
         private void ApplyCommon(float deltaTime)
