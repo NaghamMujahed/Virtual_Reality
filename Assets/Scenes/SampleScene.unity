@@ -9654,8 +9654,12 @@ MonoBehaviour:
   _paintDensity: 1200
   _paintViscosity: 0.1
   _paintSurfaceTension: 0.04
-  _materialViscositySampleShearRate: 20
-  _materialViscositySampleTemperature: 20
+  _materialViscositySampleShearRate: 5
+  _materialViscositySampleTemperature: 5
+  _colorMixingMode: 1
+  _pigmentMixStrength: 1
+  _pigmentMinReflectance: 0.035
+  _pigmentMaxKs: 18
 --- !u!114 &1243977416
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9669,6 +9673,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PaintSim.Scripts.Stages.Surface.PaintSurface
   _surfaceType: 0
+  _useSurfacePreset: 1
+  _surfacePresetStrength: 1
   _sizingMode: 0
   _planeMode: 0
   _gridWidth: 768
@@ -9693,6 +9699,10 @@ MonoBehaviour:
   _dripFingerInstability: 0.36
   _thinFilmCohesion: 0.58
   _evolveEveryNFrames: 2
+  _colorMixingMode: 1
+  _pigmentMixStrength: 1
+  _pigmentMinReflectance: 0.035
+  _pigmentMaxKs: 18
   _debugStampColor: {r: 1, g: 0.05, b: 0.02, a: 1}
   _debugStampThickness: 0.00008
 --- !u!1 &1261355734

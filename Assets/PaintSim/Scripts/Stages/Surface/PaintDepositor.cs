@@ -27,6 +27,10 @@ namespace PaintSim.Scripts.Stages.Surface
         private float _yasudaExponent = 2.0f;
         private float _flowIndex = 0.7f;
         private float _yieldStress;
+        private PaintColorMixingMode _colorMixingMode = PaintColorMixingMode.Rgb;
+        private float _pigmentMixStrength = 1.0f;
+        private float _pigmentMinReflectance = 0.035f;
+        private float _pigmentMaxKs = 18.0f;
 
         private static readonly int ID_ThicknessScale =
             Shader.PropertyToID("_ThicknessScale");
@@ -63,6 +67,8 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_EnableSurfaceImpactDiagnostics");
         private static readonly int ID_SurfaceImpactDiagnostics =
             Shader.PropertyToID("_SurfaceImpactDiagnostics");
+        private static readonly int ID_SurfaceImpactDeltaTime =
+            Shader.PropertyToID("_SurfaceImpactDeltaTime");
         private static readonly int ID_UseCarreauYasuda =
             Shader.PropertyToID("_UseCarreauYasuda");
         private static readonly int ID_ZeroShearViscosity =
@@ -77,6 +83,14 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_FlowIndex");
         private static readonly int ID_YieldStress =
             Shader.PropertyToID("_YieldStress");
+        private static readonly int ID_ColorMixingMode =
+            Shader.PropertyToID("_ColorMixingMode");
+        private static readonly int ID_PigmentMixStrength =
+            Shader.PropertyToID("_PigmentMixStrength");
+        private static readonly int ID_PigmentMinReflectance =
+            Shader.PropertyToID("_PigmentMinReflectance");
+        private static readonly int ID_PigmentMaxKs =
+            Shader.PropertyToID("_PigmentMaxKs");
 
         private static readonly int ID_DepositionFraction =
             Shader.PropertyToID("_DepositionFraction");
@@ -132,6 +146,22 @@ namespace PaintSim.Scripts.Stages.Surface
             _yieldStress = Mathf.Max(yieldStress, 0.0f);
         }
 
+        public void ConfigureColorMixing(
+            PaintColorMixingMode mode,
+            float pigmentMixStrength,
+            float pigmentMinReflectance,
+            float pigmentMaxKs)
+        {
+            _colorMixingMode = mode;
+            _pigmentMixStrength = Mathf.Clamp01(pigmentMixStrength);
+            _pigmentMinReflectance = Mathf.Clamp(
+                pigmentMinReflectance,
+                0.001f,
+                0.35f
+            );
+            _pigmentMaxKs = Mathf.Clamp(pigmentMaxKs, 1.0f, 64.0f);
+        }
+
         public void DispatchFromMlsMpmBuffers(
             GraphicsBuffer positionRadiusBuffer,
             GraphicsBuffer velocityMassBuffer,
@@ -143,7 +173,8 @@ namespace PaintSim.Scripts.Stages.Surface
             bool markParticlesOnImpact = true,
             bool depositOnlyAirDomainParticles = true,
             bool acceptFluidDomainSurfaceHits = true,
-            bool enableDiagnostics = false)
+            bool enableDiagnostics = false,
+            float impactDeltaTime = 0.0f)
         {
             if (_shader == null ||
                 _kernelIndex < 0 ||
@@ -189,6 +220,10 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetInt(
                 ID_EnableSurfaceImpactDiagnostics,
                 enableDiagnostics ? 1 : 0
+            );
+            _shader.SetFloat(
+                ID_SurfaceImpactDeltaTime,
+                Mathf.Max(impactDeltaTime, 0.0f)
             );
             _shader.SetInt(
                 ID_UseMlsParticleVolumeJ,
@@ -299,6 +334,10 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(ID_YasudaExponent, _yasudaExponent);
             _shader.SetFloat(ID_FlowIndex, _flowIndex);
             _shader.SetFloat(ID_YieldStress, _yieldStress);
+            _shader.SetInt(ID_ColorMixingMode, (int)_colorMixingMode);
+            _shader.SetFloat(ID_PigmentMixStrength, _pigmentMixStrength);
+            _shader.SetFloat(ID_PigmentMinReflectance, _pigmentMinReflectance);
+            _shader.SetFloat(ID_PigmentMaxKs, _pigmentMaxKs);
         }
 
         private void ResolveAtomicDeposits()

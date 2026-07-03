@@ -65,6 +65,7 @@ int _AcceptFluidDomainSurfaceHits;
 int _EnableSurfaceImpactDiagnostics;
 int _UseMlsParticleVolumeJ;
 int _UseCarreauYasuda;
+float _SurfaceImpactDeltaTime;
 
 float _ZeroShearViscosity;
 float _InfiniteShearViscosity;
@@ -72,6 +73,10 @@ float _RelaxationTime;
 float _YasudaExponent;
 float _FlowIndex;
 float _YieldStress;
+int _ColorMixingMode;
+float _PigmentMixStrength;
+float _PigmentMinReflectance;
+float _PigmentMaxKs;
 
 #define PI 3.14159265f
 #define WE_DEPOSITION 5.0f
@@ -116,6 +121,72 @@ float4 SafePaintColor(float4 color)
 
     color.a = max(color.a, _FallbackPaintColor.a);
     return saturate(color);
+}
+
+float3 PaintReflectanceToKs(float3 reflectance)
+{
+    float minReflectance = max(_PigmentMinReflectance, 0.001f);
+    float3 r = clamp(
+        saturate(reflectance),
+        float3(minReflectance, minReflectance, minReflectance),
+        float3(0.999f, 0.999f, 0.999f)
+    );
+    float3 one = float3(1.0f, 1.0f, 1.0f);
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    float3 ks = ((one - r) * (one - r)) / (2.0f * r);
+    return min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+}
+
+float3 PaintKsToReflectance(float3 ks)
+{
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    ks = min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+    return saturate(float3(1.0f, 1.0f, 1.0f) + ks - sqrt(ks * ks + 2.0f * ks));
+}
+
+float3 EncodePaintColorForMix(float3 color)
+{
+    if (_ColorMixingMode == 1)
+        return PaintReflectanceToKs(color);
+
+    return saturate(color);
+}
+
+float3 DecodePaintColorFromMix(float3 encodedColor)
+{
+    if (_ColorMixingMode == 1)
+        return PaintKsToReflectance(encodedColor);
+
+    return saturate(encodedColor);
+}
+
+float3 MixPaintColors(
+    float3 previousColor,
+    float previousWeight,
+    float3 depositedEncoded,
+    float depositedWeight,
+    float totalWeight)
+{
+    previousColor = saturate(previousColor);
+    float3 depositedColor = DecodePaintColorFromMix(depositedEncoded);
+    float safeTotalWeight = max(totalWeight, 1.0f);
+    float3 rgbMix =
+        (
+            previousColor * previousWeight +
+            depositedColor * depositedWeight
+        ) / safeTotalWeight;
+
+    if (_ColorMixingMode != 1)
+        return saturate(rgbMix);
+
+    float3 previousEncoded = EncodePaintColorForMix(previousColor);
+    float3 mixedEncoded =
+        (
+            previousEncoded * previousWeight +
+            depositedEncoded * depositedWeight
+        ) / safeTotalWeight;
+    float3 pigmentMix = DecodePaintColorFromMix(mixedEncoded);
+    return saturate(lerp(rgbMix, pigmentMix, saturate(_PigmentMixStrength)));
 }
 
 float EvaluateImpactViscosity(float shearRate)
@@ -197,7 +268,13 @@ void WriteCell(
     _PaintCellBuffer[idx].Age = 0.0f;
 
     float3 safeColor = saturate(SafePaintColor(col).rgb);
-    int3 colorContribution = (int3)round(safeColor * (float)w);
+    float3 encodedColor = EncodePaintColorForMix(safeColor);
+    float3 encodedContribution = clamp(
+        encodedColor * (float)w,
+        float3(0.0f, 0.0f, 0.0f),
+        float3(1000000000.0f, 1000000000.0f, 1000000000.0f)
+    );
+    int3 colorContribution = (int3)round(encodedContribution);
 
     InterlockedAdd(_DepositColorAccumulator[idx].x, colorContribution.x);
     InterlockedAdd(_DepositColorAccumulator[idx].y, colorContribution.y);
@@ -303,22 +380,47 @@ bool DepositSurfaceImpact(
     float3 axisV = SafeNormalize3(_SurfaceAxisV, float3(0.0f, 0.0f, 1.0f));
     float3 normalWS = SafeNormalize3(_SurfaceNormalWS, normalize(cross(axisU, axisV)));
 
-    float3 relative = position - _SurfaceOriginWS;
-    float signedDistance = dot(relative, normalWS);
+    float sweptDt = max(_SurfaceImpactDeltaTime, 0.0f);
+    float3 previousPosition = position - velocity * sweptDt;
+    float3 currentRelative = position - _SurfaceOriginWS;
+    float3 previousRelative = previousPosition - _SurfaceOriginWS;
+    float signedDistance = dot(currentRelative, normalWS);
+    float previousSignedDistance = dot(previousRelative, normalWS);
     float absDistance = abs(signedDistance);
     float captureDistance =
         max(_SurfaceImpactCaptureDistance, max(resolvedRadius, _CellSize) * 1.5f);
+    bool sweptImpact =
+        sweptDt > 1e-6f &&
+        abs(previousSignedDistance - signedDistance) > 1e-6f &&
+        previousSignedDistance * signedDistance <= 0.0f;
+    float closestSegmentDistance = sweptImpact ? 0.0f : absDistance;
 
     if (_SurfaceDoubleSidedImpact != 0)
     {
-        if (absDistance > captureDistance + resolvedRadius)
+        if (closestSegmentDistance > captureDistance + resolvedRadius)
             return false;
     }
-    else if (signedDistance > captureDistance + resolvedRadius)
+    else if (!sweptImpact && signedDistance > captureDistance + resolvedRadius)
     {
         return false;
     }
 
+    float3 impactPosition = position;
+    float impactSignedDistance = signedDistance;
+
+    if (sweptImpact)
+    {
+        float sweepDenominator = previousSignedDistance - signedDistance;
+        float sweepAlpha =
+            abs(sweepDenominator) > 1e-6f
+                ? previousSignedDistance / sweepDenominator
+                : 1.0f;
+        sweepAlpha = saturate(sweepAlpha);
+        impactPosition = lerp(previousPosition, position, sweepAlpha);
+        impactSignedDistance = dot(impactPosition - _SurfaceOriginWS, normalWS);
+    }
+
+    float3 relative = impactPosition - _SurfaceOriginWS;
     float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
     float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
 
@@ -337,7 +439,10 @@ bool DepositSurfaceImpact(
 
     float speed = length(velocity);
     float normalVelocity = dot(velocity, normalWS);
-    float impactSide = signedDistance >= 0.0f ? 1.0f : -1.0f;
+    float impactSide =
+        sweptImpact
+            ? (previousSignedDistance >= 0.0f ? 1.0f : -1.0f)
+            : (signedDistance >= 0.0f ? 1.0f : -1.0f);
 
     if (absDistance < resolvedRadius * 0.5f && abs(normalVelocity) > 1e-5f)
         impactSide = normalVelocity > 0.0f ? -1.0f : 1.0f;
@@ -377,7 +482,13 @@ bool DepositSurfaceImpact(
     else
         regime = 3u;
 
+    float absorption01 = saturate(_AbsorptionRate);
     float depositionFraction = saturate(_DepositionFraction);
+    depositionFraction = lerp(
+        depositionFraction,
+        1.0f,
+        absorption01 * 0.22f
+    );
 
     if (regime == 1u)
         depositionFraction *= 0.95f;
@@ -392,6 +503,7 @@ bool DepositSurfaceImpact(
         sqrt(max(weber, 0.0f)) *
         lerp(0.12f, 0.32f, spreadSpeed);
     baseRadiusCells *= lerp(1.12f, 0.82f, saturate(_Roughness));
+    baseRadiusCells *= lerp(1.0f, 0.84f, absorption01);
     float alongRadius = clamp(
         baseRadiusCells * (1.0f + tangentLen * 2.0f),
         1.0f,
@@ -439,6 +551,7 @@ bool DepositSurfaceImpact(
 
     float predictedNormalSpeed = abs(dot(resolvedVelocity, normalWS));
     bool predictedSettled =
+        sweptImpact ||
         weber < WE_DEPOSITION ||
         bounceFactor < 0.05f ||
         predictedNormalSpeed < 0.5f;
@@ -454,6 +567,7 @@ bool DepositSurfaceImpact(
     float satelliteBudgetFraction =
         saturate(splash01) * lerp(0.08f, 0.22f, saturate(_SplashMultiplier));
     satelliteBudgetFraction = min(satelliteBudgetFraction, 0.25f);
+    satelliteBudgetFraction *= lerp(1.0f, 0.38f, absorption01);
 
     int satelliteBudgetInt =
         (int)round((float)depositInt * satelliteBudgetFraction);
@@ -628,7 +742,8 @@ bool DepositSurfaceImpact(
     if (bounceFactor >= 0.05f && weber >= WE_DEPOSITION)
     {
         float targetDistance = impactSide * (resolvedRadius + 1e-4f);
-        resolvedPosition += normalWS * (targetDistance - signedDistance);
+        resolvedPosition = impactPosition +
+            normalWS * (targetDistance - impactSignedDistance);
     }
 
     resolvedVelocity -= normalWS * dot(resolvedVelocity, normalWS) * 0.02f;
@@ -832,13 +947,15 @@ void ResolveDeposits(uint3 id : SV_DispatchThreadID)
         int previousThickness = max(totalThickness - depositedThickness, 0);
 
         float3 previousColor = SafePaintColor(cell.Color).rgb;
-        float3 depositedColor =
+        float3 depositedEncodedColor =
             (float3)colorAccum.xyz / max((float)depositedThickness, 1.0f);
-        float3 mixedColor =
-            (
-                previousColor * (float)previousThickness +
-                depositedColor * (float)depositedThickness
-            ) / max((float)totalThickness, 1.0f);
+        float3 mixedColor = MixPaintColors(
+            previousColor,
+            (float)previousThickness,
+            depositedEncodedColor,
+            (float)depositedThickness,
+            (float)totalThickness
+        );
 
         float2 depositedFlow =
             (float2)flowAccum /

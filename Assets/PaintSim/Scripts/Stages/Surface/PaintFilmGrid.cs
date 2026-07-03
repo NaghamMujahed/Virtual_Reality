@@ -221,6 +221,31 @@ namespace PaintSim.Scripts.Stages.Surface
             shader.SetInt(ID_SurfaceDoubleSidedImpact, DoubleSidedImpact ? 1 : 0);
         }
 
+        public void ReconfigureSurfaceFrame(
+            float cellSizeU,
+            float cellSizeV,
+            float surfaceY,
+            Vector2 gridOrigin,
+            Vector3 surfaceOriginWS,
+            Vector3 surfaceAxisU,
+            Vector3 surfaceAxisV,
+            Vector3 surfaceNormalWS,
+            float impactCaptureDistance,
+            bool doubleSidedImpact)
+        {
+            CellSizeU = Mathf.Max(cellSizeU, 0.0001f);
+            CellSizeV = Mathf.Max(cellSizeV, 0.0001f);
+            CellSize = Mathf.Sqrt(CellSizeU * CellSizeV);
+            SurfaceY = surfaceY;
+            GridOrigin = gridOrigin;
+            SurfaceOriginWS = surfaceOriginWS;
+            SurfaceAxisU = SafeNormalized(surfaceAxisU, Vector3.right);
+            SurfaceAxisV = SafeNormalized(surfaceAxisV, Vector3.forward);
+            SurfaceNormalWS = SafeNormalized(surfaceNormalWS, Vector3.up);
+            ImpactCaptureDistance = Mathf.Max(impactCaptureDistance, CellSize);
+            DoubleSidedImpact = doubleSidedImpact;
+        }
+
         public void BindDepositWriteBuffers(ComputeShader shader, int kernelIndex)
         {
             shader.SetBuffer(

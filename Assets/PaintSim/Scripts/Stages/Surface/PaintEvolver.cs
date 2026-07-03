@@ -58,6 +58,16 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_DripFingerInstability");
         private static readonly int ID_ThinFilmCohesion =
             Shader.PropertyToID("_ThinFilmCohesion");
+        private static readonly int ID_SurfaceAbsorptionRate =
+            Shader.PropertyToID("_SurfaceAbsorptionRate");
+        private static readonly int ID_ColorMixingMode =
+            Shader.PropertyToID("_ColorMixingMode");
+        private static readonly int ID_PigmentMixStrength =
+            Shader.PropertyToID("_PigmentMixStrength");
+        private static readonly int ID_PigmentMinReflectance =
+            Shader.PropertyToID("_PigmentMinReflectance");
+        private static readonly int ID_PigmentMaxKs =
+            Shader.PropertyToID("_PigmentMaxKs");
 
         public float EvaporationRate { get; set; } = 0.05f;
         public float DiffusionRate { get; set; } = 0.35f;
@@ -74,6 +84,12 @@ namespace PaintSim.Scripts.Stages.Surface
         public float SurfaceRoughness { get; set; } = 0.5f;
         public float DripFingerInstability { get; set; } = 0.36f;
         public float ThinFilmCohesion { get; set; } = 0.58f;
+        public float SurfaceAbsorptionRate { get; set; } = 0.6f;
+        public PaintColorMixingMode ColorMixingMode { get; set; } =
+            PaintColorMixingMode.Rgb;
+        public float PigmentMixStrength { get; set; } = 1.0f;
+        public float PigmentMinReflectance { get; set; } = 0.035f;
+        public float PigmentMaxKs { get; set; } = 18.0f;
 
         public PaintEvolver(ComputeShader shader, PaintFilmGrid grid)
         {
@@ -150,6 +166,23 @@ namespace PaintSim.Scripts.Stages.Surface
             _shader.SetFloat(
                 ID_ThinFilmCohesion,
                 Mathf.Clamp01(ThinFilmCohesion)
+            );
+            _shader.SetFloat(
+                ID_SurfaceAbsorptionRate,
+                Mathf.Clamp01(SurfaceAbsorptionRate)
+            );
+            _shader.SetInt(ID_ColorMixingMode, (int)ColorMixingMode);
+            _shader.SetFloat(
+                ID_PigmentMixStrength,
+                Mathf.Clamp01(PigmentMixStrength)
+            );
+            _shader.SetFloat(
+                ID_PigmentMinReflectance,
+                Mathf.Clamp(PigmentMinReflectance, 0.001f, 0.35f)
+            );
+            _shader.SetFloat(
+                ID_PigmentMaxKs,
+                Mathf.Clamp(PigmentMaxKs, 1.0f, 64.0f)
             );
         }
     }

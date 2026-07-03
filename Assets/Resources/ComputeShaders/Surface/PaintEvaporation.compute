@@ -38,6 +38,11 @@ float _SubstrateFlowVariation;
 float _SurfaceRoughness;
 float _DripFingerInstability;
 float _ThinFilmCohesion;
+float _SurfaceAbsorptionRate;
+int _ColorMixingMode;
+float _PigmentMixStrength;
+float _PigmentMinReflectance;
+float _PigmentMaxKs;
 
 int GetIdx(int x, int y)
 {
@@ -58,6 +63,57 @@ float4 SafeColor(float4 color, float4 fallback)
 
     color.a = 1.0f;
     return saturate(color);
+}
+
+float3 PaintReflectanceToKs(float3 reflectance)
+{
+    float minReflectance = max(_PigmentMinReflectance, 0.001f);
+    float3 r = clamp(
+        saturate(reflectance),
+        float3(minReflectance, minReflectance, minReflectance),
+        float3(0.999f, 0.999f, 0.999f)
+    );
+    float3 one = float3(1.0f, 1.0f, 1.0f);
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    float3 ks = ((one - r) * (one - r)) / (2.0f * r);
+    return min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+}
+
+float3 PaintKsToReflectance(float3 ks)
+{
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    ks = min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+    return saturate(float3(1.0f, 1.0f, 1.0f) + ks - sqrt(ks * ks + 2.0f * ks));
+}
+
+float3 EncodePaintColorForMix(float3 color)
+{
+    if (_ColorMixingMode == 1)
+        return PaintReflectanceToKs(color);
+
+    return saturate(color);
+}
+
+float3 DecodePaintColorFromMix(float3 encodedColor)
+{
+    if (_ColorMixingMode == 1)
+        return PaintKsToReflectance(encodedColor);
+
+    return saturate(encodedColor);
+}
+
+float3 WeightedPaintMix(
+    float3 rgbSum,
+    float3 encodedSum,
+    float colorWeight)
+{
+    float3 rgbMix = saturate(rgbSum / max(colorWeight, 1e-9f));
+    if (_ColorMixingMode != 1)
+        return rgbMix;
+
+    float3 pigmentMix =
+        DecodePaintColorFromMix(encodedSum / max(colorWeight, 1e-9f));
+    return saturate(lerp(rgbMix, pigmentMix, saturate(_PigmentMixStrength)));
 }
 
 float HashCell(int2 cell)
@@ -150,6 +206,15 @@ float RheologyMobility(
         ),
         saturate(_ThinFilmCohesion)
     );
+    float absorptionPinning = lerp(
+        1.0f,
+        0.48f + 0.45f * smoothstep(
+            max(_MinimumWetThickness, 1e-7f) * 0.75f,
+            max(_MinimumWetThickness, 1e-7f) * 4.5f,
+            thickness
+        ),
+        saturate(_SurfaceAbsorptionRate)
+    );
     float substrateVariation =
         1.0f +
         (ValueNoise((float2)cellCoordinate / 7.0f) * 2.0f - 1.0f) *
@@ -161,6 +226,7 @@ float RheologyMobility(
         yieldMobility *
         contactMobility *
         cohesiveFilmMobility *
+        absorptionPinning *
         max(substrateVariation, 0.2f);
 }
 
@@ -429,9 +495,11 @@ void Spread(uint3 id : SV_DispatchThreadID)
     float capillaryMix = saturate(capillaryRate * dt * 0.25f);
     float selfColorWeight = max(selfThickness, 1e-9f);
     float colorWeight = selfColorWeight;
-    float4 colorSum =
-        SafeColor(self.Color, float4(1.0f, 0.0f, 0.0f, 1.0f)) *
-        selfColorWeight;
+    float3 selfColor =
+        SafeColor(self.Color, float4(1.0f, 0.0f, 0.0f, 1.0f)).rgb;
+    float3 colorRgbSum = selfColor * selfColorWeight;
+    float3 colorEncodedSum =
+        EncodePaintColorForMix(selfColor) * selfColorWeight;
     float wetnessSum = saturate(self.Wetness) * selfColorWeight;
 
     float rightMix =
@@ -443,10 +511,19 @@ void Spread(uint3 id : SV_DispatchThreadID)
     float downMix =
         incomingDown + capillaryMix * mobilityDown * downThickness;
 
-    colorSum += SafeColor(right.Color, self.Color) * rightMix;
-    colorSum += SafeColor(left.Color, self.Color) * leftMix;
-    colorSum += SafeColor(up.Color, self.Color) * upMix;
-    colorSum += SafeColor(down.Color, self.Color) * downMix;
+    float3 rightColor = SafeColor(right.Color, self.Color).rgb;
+    float3 leftColor = SafeColor(left.Color, self.Color).rgb;
+    float3 upColor = SafeColor(up.Color, self.Color).rgb;
+    float3 downColor = SafeColor(down.Color, self.Color).rgb;
+
+    colorRgbSum += rightColor * rightMix;
+    colorRgbSum += leftColor * leftMix;
+    colorRgbSum += upColor * upMix;
+    colorRgbSum += downColor * downMix;
+    colorEncodedSum += EncodePaintColorForMix(rightColor) * rightMix;
+    colorEncodedSum += EncodePaintColorForMix(leftColor) * leftMix;
+    colorEncodedSum += EncodePaintColorForMix(upColor) * upMix;
+    colorEncodedSum += EncodePaintColorForMix(downColor) * downMix;
     wetnessSum += saturate(right.Wetness) * rightMix;
     wetnessSum += saturate(left.Wetness) * leftMix;
     wetnessSum += saturate(up.Wetness) * upMix;
@@ -464,7 +541,10 @@ void Spread(uint3 id : SV_DispatchThreadID)
     }
     else
     {
-        output.Color = SafeColor(colorSum / max(colorWeight, 1e-9f), self.Color);
+        output.Color = float4(
+            WeightedPaintMix(colorRgbSum, colorEncodedSum, colorWeight),
+            1.0f
+        );
         output.Wetness = saturate(wetnessSum / max(colorWeight, 1e-9f));
         output.FlowVelocity =
             selfVelocity * exp(-max(_DynamicViscosity, 0.0f) * dt * 1.5f);
@@ -498,14 +578,23 @@ void Evaporate(uint3 id : SV_DispatchThreadID)
     float dryRate =
         max(_EvaporationRate, 0.0f) *
         lerp(1.35f, 0.55f, normalizedThickness);
+    float absorptionDryRate =
+        saturate(_SurfaceAbsorptionRate) *
+        lerp(0.16f, 0.045f, normalizedThickness);
 
     cell.Wetness =
-        max(0.0f, cell.Wetness - dryRate * max(_DeltaTime, 0.0f));
+        max(
+            0.0f,
+            cell.Wetness -
+            (dryRate + absorptionDryRate) * max(_DeltaTime, 0.0f)
+        );
 
     if (thicknessMeters < _MinimumWetThickness && cell.Wetness <= 0.01f)
         cell.Wetness = 0.0f;
 
-    cell.FlowVelocity *= saturate(cell.Wetness * 1.1f);
+    cell.FlowVelocity *=
+        saturate(cell.Wetness * 1.1f) *
+        exp(-saturate(_SurfaceAbsorptionRate) * max(_DeltaTime, 0.0f) * 2.2f);
     cell.IsActive = 1u;
     _PaintCellBuffer[idx] = cell;
 }

@@ -43,6 +43,13 @@ namespace PaintSim.Scripts.UnityBridge
         [SerializeField] private float _materialViscositySampleShearRate = 20.0f;
         [SerializeField] private float _materialViscositySampleTemperature = 20.0f;
 
+        [Header("Color Mixing / Pigments")]
+        [SerializeField] private PaintColorMixingMode _colorMixingMode =
+            PaintColorMixingMode.KubelkaMunkApprox;
+        [SerializeField, Range(0.0f, 1.0f)] private float _pigmentMixStrength = 1.0f;
+        [SerializeField, Range(0.001f, 0.35f)] private float _pigmentMinReflectance = 0.035f;
+        [SerializeField, Range(1.0f, 64.0f)] private float _pigmentMaxKs = 18.0f;
+
         private PaintProperties _paintProperties;
         private PaintDepositor _paintDepositor;
 
@@ -169,6 +176,24 @@ namespace PaintSim.Scripts.UnityBridge
                     material.yieldStressPa
                 );
             }
+
+            ApplyColorMixingConfiguration();
+        }
+
+        private void ApplyColorMixingConfiguration()
+        {
+            _paintDepositor?.ConfigureColorMixing(
+                _colorMixingMode,
+                _pigmentMixStrength,
+                _pigmentMinReflectance,
+                _pigmentMaxKs
+            );
+            _paintSurface?.ConfigureColorMixing(
+                _colorMixingMode,
+                _pigmentMixStrength,
+                _pigmentMinReflectance,
+                _pigmentMaxKs
+            );
         }
 
         private void DispatchMlsMpmDepositor()
@@ -187,6 +212,9 @@ namespace PaintSim.Scripts.UnityBridge
 
             if (Time.frameCount % Mathf.Max(1, _depositEveryNFrames) != 0)
                 return;
+
+            _paintSurface.RefreshSurfaceFrameFromTransform();
+            ApplyColorMixingConfiguration();
 
             if (_skipWhenNoAirDomainParticles &&
                 !_acceptFluidDomainSurfaceHits &&
@@ -214,7 +242,9 @@ namespace PaintSim.Scripts.UnityBridge
                 _markMlsMpmParticlesOnImpact,
                 _depositOnlyAirDomainParticles,
                 _acceptFluidDomainSurfaceHits,
-                _enableSurfaceImpactDiagnostics
+                _enableSurfaceImpactDiagnostics,
+                (_depositInLateUpdate ? Time.deltaTime : Time.fixedDeltaTime) *
+                    Mathf.Max(1, _depositEveryNFrames)
             );
 
             if (_enableSurfaceImpactDiagnostics &&
@@ -232,6 +262,13 @@ namespace PaintSim.Scripts.UnityBridge
             _paintSurfaceTension = Mathf.Max(_paintSurfaceTension, 0.0001f);
             _materialViscositySampleShearRate =
                 Mathf.Max(_materialViscositySampleShearRate, 0.0f);
+            _pigmentMixStrength = Mathf.Clamp01(_pigmentMixStrength);
+            _pigmentMinReflectance = Mathf.Clamp(
+                _pigmentMinReflectance,
+                0.001f,
+                0.35f
+            );
+            _pigmentMaxKs = Mathf.Clamp(_pigmentMaxKs, 1.0f, 64.0f);
             _depositEveryNFrames = Mathf.Max(1, _depositEveryNFrames);
             _diagnosticLogEveryNFrames = Mathf.Max(1, _diagnosticLogEveryNFrames);
         }

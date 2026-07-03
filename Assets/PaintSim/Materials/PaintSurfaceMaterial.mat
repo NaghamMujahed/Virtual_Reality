@@ -106,34 +106,34 @@ Material:
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
     - _CanvasSmoothness: 0.22
-    - _ClearCoatStrength: 0.75
+    - _ClearCoatStrength: 0.72
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
-    - _DryPaintSmoothness: 0.48
-    - _EdgeDarkening: 0.08
-    - _EdgeHighlightStrength: 0.28
-    - _EdgeRidgeStrength: 4
+    - _DryPaintSmoothness: 0.46
+    - _EdgeDarkening: 0.07
+    - _EdgeHighlightStrength: 0.3
+    - _EdgeRidgeStrength: 5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
-    - _EnvironmentReflection: 0.55
+    - _EnvironmentReflection: 0.46
     - _FresnelStrength: 0.18
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _Metallic: 0
-    - _MicroNormalStrength: 0.035
-    - _CanvasGrainScale: 180
-    - _CanvasGrainStrength: 0.045
+    - _MicroNormalStrength: 0.045
+    - _CanvasGrainScale: 155
+    - _CanvasGrainStrength: 0.07
     - _OcclusionStrength: 1
-    - _PaintNormalStrength: 2.5
-    - _PigmentSaturation: 1.1
+    - _PaintNormalStrength: 3.25
+    - _PigmentSaturation: 1.08
     - _Parallax: 0.005
-    - _ParallaxStrength: 0.008
+    - _ParallaxStrength: 0.006
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _Smoothness: 0.5
@@ -142,9 +142,9 @@ Material:
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
-    - _WetPaintSmoothness: 0.94
-    - _WetDarkening: 0.055
-    - _WetSpecularStrength: 0.85
+    - _WetPaintSmoothness: 0.92
+    - _WetDarkening: 0.065
+    - _WetSpecularStrength: 0.88
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1

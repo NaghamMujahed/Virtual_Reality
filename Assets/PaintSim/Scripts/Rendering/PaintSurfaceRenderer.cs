@@ -35,6 +35,40 @@ namespace PaintSim.Scripts.Rendering
         private static readonly int ID_CanvasBaseColor = Shader.PropertyToID("_CanvasBaseColor");
         private static readonly int ID_PaintSurfaceData =
             Shader.PropertyToID("_PaintSurfaceData");
+        private static readonly int ID_CanvasSmoothness =
+            Shader.PropertyToID("_CanvasSmoothness");
+        private static readonly int ID_DryPaintSmoothness =
+            Shader.PropertyToID("_DryPaintSmoothness");
+        private static readonly int ID_WetPaintSmoothness =
+            Shader.PropertyToID("_WetPaintSmoothness");
+        private static readonly int ID_PaintNormalStrength =
+            Shader.PropertyToID("_PaintNormalStrength");
+        private static readonly int ID_ParallaxStrength =
+            Shader.PropertyToID("_ParallaxStrength");
+        private static readonly int ID_EdgeRidgeStrength =
+            Shader.PropertyToID("_EdgeRidgeStrength");
+        private static readonly int ID_EdgeDarkening =
+            Shader.PropertyToID("_EdgeDarkening");
+        private static readonly int ID_MicroNormalStrength =
+            Shader.PropertyToID("_MicroNormalStrength");
+        private static readonly int ID_CanvasGrainStrength =
+            Shader.PropertyToID("_CanvasGrainStrength");
+        private static readonly int ID_CanvasGrainScale =
+            Shader.PropertyToID("_CanvasGrainScale");
+        private static readonly int ID_PigmentSaturation =
+            Shader.PropertyToID("_PigmentSaturation");
+        private static readonly int ID_WetDarkening =
+            Shader.PropertyToID("_WetDarkening");
+        private static readonly int ID_EdgeHighlightStrength =
+            Shader.PropertyToID("_EdgeHighlightStrength");
+        private static readonly int ID_WetSpecularStrength =
+            Shader.PropertyToID("_WetSpecularStrength");
+        private static readonly int ID_ClearCoatStrength =
+            Shader.PropertyToID("_ClearCoatStrength");
+        private static readonly int ID_EnvironmentReflection =
+            Shader.PropertyToID("_EnvironmentReflection");
+        private static readonly int ID_FresnelStrength =
+            Shader.PropertyToID("_FresnelStrength");
 
         public float MaxThickness = 0.0001f;
         public float WetnessShine = 0.8f;
@@ -117,6 +151,58 @@ namespace PaintSim.Scripts.Rendering
 
             if (mat.HasProperty(ID_PaintSurfaceData))
                 mat.SetTexture(ID_PaintSurfaceData, _surfaceDataTexture);
+
+            if (mat.HasProperty(ID_BaseColor))
+                mat.SetColor(ID_BaseColor, Color.white);
+
+            if (mat.HasProperty(ID_Color))
+                mat.SetColor(ID_Color, Color.white);
+        }
+
+        public void ConfigureSurfaceAppearance(SurfaceVisualProperties visual)
+        {
+            Material mat = ResolveSurfaceMaterial();
+            if (mat == null)
+                return;
+
+            _canvasBaseColor = visual.CanvasBaseColor;
+            MaxThickness = Mathf.Max(visual.MaxThickness, 1e-7f);
+            WetnessShine = Mathf.Clamp01(visual.WetnessShine);
+
+            if (mat.HasProperty(ID_CanvasSmoothness))
+                mat.SetFloat(ID_CanvasSmoothness, Mathf.Clamp01(visual.CanvasSmoothness));
+            if (mat.HasProperty(ID_DryPaintSmoothness))
+                mat.SetFloat(ID_DryPaintSmoothness, Mathf.Clamp01(visual.DryPaintSmoothness));
+            if (mat.HasProperty(ID_WetPaintSmoothness))
+                mat.SetFloat(ID_WetPaintSmoothness, Mathf.Clamp01(visual.WetPaintSmoothness));
+            if (mat.HasProperty(ID_PaintNormalStrength))
+                mat.SetFloat(ID_PaintNormalStrength, Mathf.Max(visual.PaintNormalStrength, 0.0f));
+            if (mat.HasProperty(ID_ParallaxStrength))
+                mat.SetFloat(ID_ParallaxStrength, Mathf.Max(visual.ParallaxStrength, 0.0f));
+            if (mat.HasProperty(ID_EdgeRidgeStrength))
+                mat.SetFloat(ID_EdgeRidgeStrength, Mathf.Max(visual.EdgeRidgeStrength, 0.0f));
+            if (mat.HasProperty(ID_EdgeDarkening))
+                mat.SetFloat(ID_EdgeDarkening, Mathf.Clamp01(visual.EdgeDarkening));
+            if (mat.HasProperty(ID_MicroNormalStrength))
+                mat.SetFloat(ID_MicroNormalStrength, Mathf.Max(visual.MicroNormalStrength, 0.0f));
+            if (mat.HasProperty(ID_CanvasGrainStrength))
+                mat.SetFloat(ID_CanvasGrainStrength, Mathf.Clamp01(visual.CanvasGrainStrength));
+            if (mat.HasProperty(ID_CanvasGrainScale))
+                mat.SetFloat(ID_CanvasGrainScale, Mathf.Max(visual.CanvasGrainScale, 1.0f));
+            if (mat.HasProperty(ID_PigmentSaturation))
+                mat.SetFloat(ID_PigmentSaturation, Mathf.Max(visual.PigmentSaturation, 0.0f));
+            if (mat.HasProperty(ID_WetDarkening))
+                mat.SetFloat(ID_WetDarkening, Mathf.Clamp01(visual.WetDarkening));
+            if (mat.HasProperty(ID_EdgeHighlightStrength))
+                mat.SetFloat(ID_EdgeHighlightStrength, Mathf.Max(visual.EdgeHighlightStrength, 0.0f));
+            if (mat.HasProperty(ID_WetSpecularStrength))
+                mat.SetFloat(ID_WetSpecularStrength, Mathf.Max(visual.WetSpecularStrength, 0.0f));
+            if (mat.HasProperty(ID_ClearCoatStrength))
+                mat.SetFloat(ID_ClearCoatStrength, Mathf.Max(visual.ClearCoatStrength, 0.0f));
+            if (mat.HasProperty(ID_EnvironmentReflection))
+                mat.SetFloat(ID_EnvironmentReflection, Mathf.Max(visual.EnvironmentReflection, 0.0f));
+            if (mat.HasProperty(ID_FresnelStrength))
+                mat.SetFloat(ID_FresnelStrength, Mathf.Clamp01(visual.FresnelStrength));
 
             if (mat.HasProperty(ID_BaseColor))
                 mat.SetColor(ID_BaseColor, Color.white);

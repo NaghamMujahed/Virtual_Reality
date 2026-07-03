@@ -23,6 +23,8 @@ namespace PaintSim.Scripts.Stages.Surface
     {
         [Header("Surface Type")]
         [SerializeField] private SurfaceType _surfaceType = SurfaceType.Wood;
+        [SerializeField] private bool _useSurfacePreset = true;
+        [SerializeField, Range(0.0f, 1.0f)] private float _surfacePresetStrength = 1.0f;
 
         [Header("Grid Settings")]
         [SerializeField] private PaintSurfaceSizingMode _sizingMode =
@@ -57,6 +59,13 @@ namespace PaintSim.Scripts.Stages.Surface
         [SerializeField, Range(0.0f, 1.0f)] private float _dripFingerInstability = 0.36f;
         [SerializeField, Range(0.0f, 1.0f)] private float _thinFilmCohesion = 0.58f;
         [SerializeField, Min(1)] private int _evolveEveryNFrames = 2;
+
+        [Header("Color Mixing / Pigments")]
+        [SerializeField] private PaintColorMixingMode _colorMixingMode =
+            PaintColorMixingMode.KubelkaMunkApprox;
+        [SerializeField, Range(0.0f, 1.0f)] private float _pigmentMixStrength = 1.0f;
+        [SerializeField, Range(0.001f, 0.35f)] private float _pigmentMinReflectance = 0.035f;
+        [SerializeField, Range(1.0f, 64.0f)] private float _pigmentMaxKs = 18.0f;
 
         [Header("Debug / Validation")]
         [SerializeField] private Color _debugStampColor = new Color(1.0f, 0.05f, 0.02f, 1.0f);
@@ -137,6 +146,41 @@ namespace PaintSim.Scripts.Stages.Surface
                     Mathf.Max(cellSizeU, cellSizeV) * 1.5f
                 ),
                 doubleSidedImpact: _doubleSidedImpact
+            );
+        }
+
+        public void RefreshSurfaceFrameFromTransform()
+        {
+            if (PaintFilmGrid == null)
+                return;
+
+            ResolveSurfaceFrame(
+                out Vector3 originWS,
+                out Vector3 axisU,
+                out Vector3 axisV,
+                out Vector3 normalWS,
+                out float worldWidth,
+                out float worldHeight
+            );
+
+            float cellSizeU = Mathf.Max(worldWidth / _gridWidth, 0.0001f);
+            float cellSizeV = Mathf.Max(worldHeight / _gridHeight, 0.0001f);
+            _cellSize = Mathf.Sqrt(cellSizeU * cellSizeV);
+
+            PaintFilmGrid.ReconfigureSurfaceFrame(
+                cellSizeU,
+                cellSizeV,
+                originWS.y,
+                new Vector2(originWS.x, originWS.z),
+                originWS,
+                axisU,
+                axisV,
+                normalWS,
+                Mathf.Max(
+                    _impactCaptureDistance,
+                    Mathf.Max(cellSizeU, cellSizeV) * 1.5f
+                ),
+                _doubleSidedImpact
             );
         }
 
@@ -253,8 +297,11 @@ namespace PaintSim.Scripts.Stages.Surface
                     break;
             }
 
-            if (Vector3.Dot(Vector3.Cross(axisU, axisV), normalWS) < 0.0f)
-                normalWS = -normalWS;
+            // Keep the artist-authored visible face normal. For a Unity
+            // XZ floor, cross(right, forward) points downward, so forcing a
+            // right-handed UV frame here would incorrectly move the paint
+            // receiver to the underside of the board.
+            normalWS.Normalize();
         }
 
         private void ResizeTransformForExplicitGrid(
@@ -354,11 +401,12 @@ namespace PaintSim.Scripts.Stages.Surface
             }
 
             _evolver = new PaintEvolver(_evaporationShader, PaintFilmGrid);
-            _evolver.EvaporationRate = _evaporationRate;
+            _evolver.EvaporationRate = EffectiveEvaporationRate();
             _evolver.DiffusionRate = EffectiveDiffusionRate();
-            _evolver.RunoffRate = _runoffRate;
+            _evolver.RunoffRate = EffectiveRunoffRate();
             _evolver.MinimumWetThickness = _minimumWetThickness;
             ApplyFilmMaterialToEvolver();
+            ApplyColorMixingToEvolver();
         }
 
         private void InitRenderer()
@@ -377,28 +425,35 @@ namespace PaintSim.Scripts.Stages.Surface
 
             _renderer.MaxThickness = _maxThickness;
             _renderer.WetnessShine = _wetnessShine;
+            ApplySurfaceAppearanceToRenderer();
         }
 
         public void Render()
         {
+            RefreshSurfaceFrameFromTransform();
+
             if (_enableEvolution &&
                 _evolver != null &&
                 Time.frameCount % Mathf.Max(1, _evolveEveryNFrames) == 0)
             {
-                _evolver.EvaporationRate = _evaporationRate;
+                _evolver.EvaporationRate = EffectiveEvaporationRate();
                 _evolver.DiffusionRate = EffectiveDiffusionRate();
-                _evolver.RunoffRate = _runoffRate;
+                _evolver.RunoffRate = EffectiveRunoffRate();
                 _evolver.MinimumWetThickness = _minimumWetThickness;
                 _evolver.SurfaceGravity = new Vector2(
                     Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisU),
                     Vector3.Dot(Physics.gravity, PaintFilmGrid.SurfaceAxisV)
                 );
                 ApplyFilmMaterialToEvolver();
+                ApplyColorMixingToEvolver();
                 _evolver.Evolve(Time.deltaTime * Mathf.Max(1, _evolveEveryNFrames));
             }
 
             if (Time.frameCount % Mathf.Max(1, _renderEveryNFrames) == 0)
+            {
+                ApplySurfaceAppearanceToRenderer();
                 _renderer?.Render();
+            }
         }
 
         public void ConfigureFilmMaterial(
@@ -412,6 +467,23 @@ namespace PaintSim.Scripts.Stages.Surface
             _filmSurfaceTension = Mathf.Max(surfaceTension, 0.0001f);
             _filmYieldStress = Mathf.Max(yieldStress, 0.0f);
             ApplyFilmMaterialToEvolver();
+        }
+
+        public void ConfigureColorMixing(
+            PaintColorMixingMode mode,
+            float pigmentMixStrength,
+            float pigmentMinReflectance,
+            float pigmentMaxKs)
+        {
+            _colorMixingMode = mode;
+            _pigmentMixStrength = Mathf.Clamp01(pigmentMixStrength);
+            _pigmentMinReflectance = Mathf.Clamp(
+                pigmentMinReflectance,
+                0.001f,
+                0.35f
+            );
+            _pigmentMaxKs = Mathf.Clamp(pigmentMaxKs, 1.0f, 64.0f);
+            ApplyColorMixingToEvolver();
         }
 
         [ContextMenu("PaintSim/Debug Stamp Center")]
@@ -507,9 +579,38 @@ namespace PaintSim.Scripts.Stages.Surface
             _substrateFlowVariation = Mathf.Clamp01(_substrateFlowVariation);
             _dripFingerInstability = Mathf.Clamp01(_dripFingerInstability);
             _thinFilmCohesion = Mathf.Clamp01(_thinFilmCohesion);
+            _pigmentMixStrength = Mathf.Clamp01(_pigmentMixStrength);
+            _pigmentMinReflectance = Mathf.Clamp(
+                _pigmentMinReflectance,
+                0.001f,
+                0.35f
+            );
+            _pigmentMaxKs = Mathf.Clamp(_pigmentMaxKs, 1.0f, 64.0f);
+            _surfacePresetStrength = Mathf.Clamp01(_surfacePresetStrength);
             _renderEveryNFrames = Mathf.Max(1, _renderEveryNFrames);
             _evolveEveryNFrames = Mathf.Max(1, _evolveEveryNFrames);
             SurfaceProperties = SurfaceProperties.FromType(_surfaceType);
+        }
+
+        private float SurfacePresetBlend =>
+            _useSurfacePreset ? Mathf.Clamp01(_surfacePresetStrength) : 0.0f;
+
+        private float BlendWithSurfacePreset(float baseValue, float presetValue)
+        {
+            return Mathf.Lerp(baseValue, presetValue, SurfacePresetBlend);
+        }
+
+        private float EffectiveEvaporationRate()
+        {
+            SurfaceFilmInteraction preset =
+                SurfaceFilmInteraction.FromType(_surfaceType);
+            return Mathf.Max(
+                BlendWithSurfacePreset(
+                    _evaporationRate,
+                    _evaporationRate * preset.EvaporationMultiplier
+                ),
+                0.0f
+            );
         }
 
         private float EffectiveDiffusionRate()
@@ -517,7 +618,98 @@ namespace PaintSim.Scripts.Stages.Surface
             // Preserve the legacy inspector scale while mapping it to the
             // conservative capillary flux model. A legacy value of 30 maps to
             // 7.5 1/s and remains CFL-stable because the shader clamps transport.
-            return Mathf.Clamp(_diffusionRate * 0.25f, 0.0f, 12.0f);
+            SurfaceFilmInteraction preset =
+                SurfaceFilmInteraction.FromType(_surfaceType);
+            float baseRate = Mathf.Clamp(_diffusionRate * 0.25f, 0.0f, 12.0f);
+            return Mathf.Clamp(
+                BlendWithSurfacePreset(
+                    baseRate,
+                    baseRate * preset.DiffusionMultiplier
+                ),
+                0.0f,
+                12.0f
+            );
+        }
+
+        private float EffectiveRunoffRate()
+        {
+            SurfaceFilmInteraction preset =
+                SurfaceFilmInteraction.FromType(_surfaceType);
+            return Mathf.Max(
+                BlendWithSurfacePreset(
+                    _runoffRate,
+                    _runoffRate * preset.RunoffMultiplier
+                ),
+                0.0f
+            );
+        }
+
+        private SurfaceVisualProperties EffectiveSurfaceVisualProperties()
+        {
+            SurfaceVisualProperties preset =
+                SurfaceVisualProperties.FromType(_surfaceType);
+            if (!_useSurfacePreset)
+            {
+                preset.MaxThickness = _maxThickness;
+                preset.WetnessShine = _wetnessShine;
+            }
+
+            SurfaceVisualProperties baseline = SurfaceVisualProperties.Wood;
+            baseline.MaxThickness = _maxThickness;
+            baseline.WetnessShine = _wetnessShine;
+            return LerpSurfaceVisualProperties(
+                baseline,
+                preset,
+                SurfacePresetBlend
+            );
+        }
+
+        private static SurfaceVisualProperties LerpSurfaceVisualProperties(
+            SurfaceVisualProperties from,
+            SurfaceVisualProperties to,
+            float t)
+        {
+            t = Mathf.Clamp01(t);
+            return new SurfaceVisualProperties
+            {
+                CanvasBaseColor = Color.Lerp(from.CanvasBaseColor, to.CanvasBaseColor, t),
+                CanvasSmoothness = Mathf.Lerp(from.CanvasSmoothness, to.CanvasSmoothness, t),
+                DryPaintSmoothness = Mathf.Lerp(from.DryPaintSmoothness, to.DryPaintSmoothness, t),
+                WetPaintSmoothness = Mathf.Lerp(from.WetPaintSmoothness, to.WetPaintSmoothness, t),
+                PaintNormalStrength = Mathf.Lerp(from.PaintNormalStrength, to.PaintNormalStrength, t),
+                ParallaxStrength = Mathf.Lerp(from.ParallaxStrength, to.ParallaxStrength, t),
+                EdgeRidgeStrength = Mathf.Lerp(from.EdgeRidgeStrength, to.EdgeRidgeStrength, t),
+                EdgeDarkening = Mathf.Lerp(from.EdgeDarkening, to.EdgeDarkening, t),
+                MicroNormalStrength = Mathf.Lerp(from.MicroNormalStrength, to.MicroNormalStrength, t),
+                CanvasGrainStrength = Mathf.Lerp(from.CanvasGrainStrength, to.CanvasGrainStrength, t),
+                CanvasGrainScale = Mathf.Lerp(from.CanvasGrainScale, to.CanvasGrainScale, t),
+                PigmentSaturation = Mathf.Lerp(from.PigmentSaturation, to.PigmentSaturation, t),
+                WetDarkening = Mathf.Lerp(from.WetDarkening, to.WetDarkening, t),
+                EdgeHighlightStrength = Mathf.Lerp(from.EdgeHighlightStrength, to.EdgeHighlightStrength, t),
+                WetSpecularStrength = Mathf.Lerp(from.WetSpecularStrength, to.WetSpecularStrength, t),
+                ClearCoatStrength = Mathf.Lerp(from.ClearCoatStrength, to.ClearCoatStrength, t),
+                EnvironmentReflection = Mathf.Lerp(from.EnvironmentReflection, to.EnvironmentReflection, t),
+                FresnelStrength = Mathf.Lerp(from.FresnelStrength, to.FresnelStrength, t),
+                MaxThickness = Mathf.Lerp(from.MaxThickness, to.MaxThickness, t),
+                WetnessShine = Mathf.Lerp(from.WetnessShine, to.WetnessShine, t)
+            };
+        }
+
+        private void ApplySurfaceAppearanceToRenderer()
+        {
+            if (_renderer == null)
+                return;
+
+            if (_useSurfacePreset)
+            {
+                _renderer.ConfigureSurfaceAppearance(
+                    EffectiveSurfaceVisualProperties()
+                );
+                return;
+            }
+
+            _renderer.MaxThickness = _maxThickness;
+            _renderer.WetnessShine = _wetnessShine;
         }
 
         private void ApplyFilmMaterialToEvolver()
@@ -529,12 +721,43 @@ namespace PaintSim.Scripts.Stages.Surface
             _evolver.DynamicViscosity = _filmViscosity;
             _evolver.SurfaceTension = _filmSurfaceTension;
             _evolver.YieldStress = _filmYieldStress;
-            _evolver.ContactLineThickness = _contactLineThickness;
-            _evolver.ContactAngleResistance = _contactAngleResistance;
-            _evolver.SubstrateFlowVariation = _substrateFlowVariation;
+
+            SurfaceFilmInteraction preset =
+                SurfaceFilmInteraction.FromType(_surfaceType);
+            _evolver.ContactLineThickness = BlendWithSurfacePreset(
+                _contactLineThickness,
+                preset.ContactLineThickness
+            );
+            _evolver.ContactAngleResistance = BlendWithSurfacePreset(
+                _contactAngleResistance,
+                preset.ContactAngleResistance
+            );
+            _evolver.SubstrateFlowVariation = BlendWithSurfacePreset(
+                _substrateFlowVariation,
+                preset.SubstrateFlowVariation
+            );
             _evolver.SurfaceRoughness = SurfaceProperties.Roughness;
-            _evolver.DripFingerInstability = _dripFingerInstability;
-            _evolver.ThinFilmCohesion = _thinFilmCohesion;
+            _evolver.DripFingerInstability = BlendWithSurfacePreset(
+                _dripFingerInstability,
+                preset.DripFingerInstability
+            );
+            _evolver.ThinFilmCohesion = BlendWithSurfacePreset(
+                _thinFilmCohesion,
+                preset.ThinFilmCohesion
+            );
+            _evolver.SurfaceAbsorptionRate =
+                Mathf.Lerp(0.0f, SurfaceProperties.AbsorptionRate, SurfacePresetBlend);
+        }
+
+        private void ApplyColorMixingToEvolver()
+        {
+            if (_evolver == null)
+                return;
+
+            _evolver.ColorMixingMode = _colorMixingMode;
+            _evolver.PigmentMixStrength = _pigmentMixStrength;
+            _evolver.PigmentMinReflectance = _pigmentMinReflectance;
+            _evolver.PigmentMaxKs = _pigmentMaxKs;
         }
 
         private void OnDestroy()
