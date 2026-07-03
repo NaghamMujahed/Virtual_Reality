@@ -1,5 +1,6 @@
 ﻿using PaintBucketSim.Configs;
 using PaintBucketSim.Runtime;
+using PaintBucketSim.Systems.Fluid;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -10,6 +11,7 @@ namespace PaintBucketSim.Systems.Bucket
     public class BucketRenderer : MonoBehaviour
     {
         [SerializeField] private BucketSystem bucketSystem;
+        [SerializeField] private PaintFluidSystem paintFluidSystem;
 
         [Header("Visual References")]
         [SerializeField] private MeshFilter meshFilter;
@@ -19,19 +21,33 @@ namespace PaintBucketSim.Systems.Bucket
         [SerializeField] private bool showAttachmentJoint = true;
         [SerializeField] private bool showHoleRing = true;
 
+        [Header("Color Compartments")]
+        [SerializeField] private bool showColorDividers = true;
+        [SerializeField] private Color colorDividerColor =
+            new Color(0.78f, 0.78f, 0.82f, 1.0f);
+        [SerializeField, Range(0.5f, 3.0f)]
+        private float dividerVisualThicknessMultiplier = 1.15f;
+        [SerializeField, Range(0.25f, 1.0f)]
+        private float dividerVisualHeightFraction = 0.92f;
+
         private GameObject _attachmentSphere;
         private LineRenderer _jointRingRenderer;
         private LineRenderer[] _holeRingRenderers;
+        private GameObject[] _colorDividerVisuals;
 
         private Mesh _generatedMesh;
         private Material _runtimeMaterial;
         private Material _holeMaterial;
         private Material _jointMaterial;
+        private Material _colorDividerMaterial;
 
         private void Awake()
         {
             if (bucketSystem == null)
                 bucketSystem = FindAnyObjectByType<BucketSystem>();
+
+            if (paintFluidSystem == null)
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
 
             if (meshFilter == null)
                 meshFilter = GetComponent<MeshFilter>();
@@ -55,6 +71,7 @@ namespace PaintBucketSim.Systems.Bucket
             SyncTransformToBucket();
             UpdateAttachmentJointVisual();
             UpdateHoleVisuals();
+            UpdateColorDividerVisuals();
         }
 
         public void RebuildMeshAndDebugVisuals()
@@ -65,6 +82,7 @@ namespace PaintBucketSim.Systems.Bucket
             CreateBucketMesh(bucketSystem.Config);
             CreateAttachmentVisual();
             CreateHoleVisuals();
+            CreateColorDividerVisuals();
         }
 
         private void SyncTransformToBucket()
@@ -80,6 +98,8 @@ namespace PaintBucketSim.Systems.Bucket
             _runtimeMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
             _holeMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
             _jointMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            _colorDividerMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            SetMaterialColor(_colorDividerMaterial, colorDividerColor);
         }
 
         private void CreateBucketMesh(BucketConfig config)
@@ -95,7 +115,7 @@ namespace PaintBucketSim.Systems.Bucket
 
             if (_runtimeMaterial != null)
             {
-                _runtimeMaterial.color = config.bucketColor;
+                SetMaterialColor(_runtimeMaterial, config.bucketColor);
                 meshRenderer.sharedMaterial = _runtimeMaterial;
             }
         }
@@ -229,7 +249,7 @@ namespace PaintBucketSim.Systems.Bucket
 
                 if (_jointMaterial != null)
                 {
-                    _jointMaterial.color = config.jointColor;
+                    SetMaterialColor(_jointMaterial, config.jointColor);
                     _attachmentSphere.GetComponent<MeshRenderer>().sharedMaterial = _jointMaterial;
                 }
             }
@@ -291,10 +311,61 @@ namespace PaintBucketSim.Systems.Bucket
                 lr.material = _holeMaterial;
 
                 if (_holeMaterial != null)
-                    _holeMaterial.color = config.holeColor;
+                    SetMaterialColor(_holeMaterial, config.holeColor);
 
                 _holeRingRenderers[i] = lr;
             }
+        }
+
+        private void CreateColorDividerVisuals()
+        {
+            DestroyColorDividerVisuals();
+
+            if (!TryGetColorDividerConfig(out PaintFluidConfig fluidConfig) ||
+                bucketSystem == null ||
+                bucketSystem.Config == null)
+            {
+                return;
+            }
+
+            int dividerCount = Mathf.Clamp(fluidConfig.colorCompartmentCount - 1, 0, 15);
+            if (dividerCount <= 0)
+                return;
+
+            _colorDividerVisuals = new GameObject[dividerCount];
+
+            for (int i = 0; i < dividerCount; i++)
+            {
+                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = $"Bucket Color Divider {i + 1}";
+                go.transform.SetParent(transform, false);
+
+                Collider collider = go.GetComponent<Collider>();
+                if (collider != null)
+                    Destroy(collider);
+
+                MeshRenderer renderer = go.GetComponent<MeshRenderer>();
+                if (renderer != null && _colorDividerMaterial != null)
+                    renderer.sharedMaterial = _colorDividerMaterial;
+
+                _colorDividerVisuals[i] = go;
+            }
+
+            UpdateColorDividerVisuals();
+        }
+
+        private void DestroyColorDividerVisuals()
+        {
+            if (_colorDividerVisuals == null)
+                return;
+
+            for (int i = 0; i < _colorDividerVisuals.Length; i++)
+            {
+                if (_colorDividerVisuals[i] != null)
+                    Destroy(_colorDividerVisuals[i]);
+            }
+
+            _colorDividerVisuals = null;
         }
 
         private void UpdateAttachmentJointVisual()
@@ -336,8 +407,129 @@ namespace PaintBucketSim.Systems.Bucket
                 _holeRingRenderers[i].transform.localRotation =
                     Quaternion.LookRotation(localBitangent, localNormal);
 
+                Color ringColor = hole.active
+                    ? config.holeColor
+                    : new Color(0.32f, 0.32f, 0.34f, 0.65f);
+                _holeRingRenderers[i].startColor = ringColor;
+                _holeRingRenderers[i].endColor = ringColor;
+                _holeRingRenderers[i].startWidth = hole.active ? 0.006f : 0.0035f;
+                _holeRingRenderers[i].endWidth = hole.active ? 0.006f : 0.0035f;
+
                 SetLocalHoleShape(_holeRingRenderers[i], config, hole);
             }
+        }
+
+        private void UpdateColorDividerVisuals()
+        {
+            if (!TryGetColorDividerConfig(out PaintFluidConfig fluidConfig) ||
+                bucketSystem == null ||
+                bucketSystem.Config == null)
+            {
+                if (_colorDividerVisuals != null)
+                    DestroyColorDividerVisuals();
+                return;
+            }
+
+            int dividerCount = Mathf.Clamp(fluidConfig.colorCompartmentCount - 1, 0, 15);
+            if (_colorDividerVisuals == null || _colorDividerVisuals.Length != dividerCount)
+            {
+                CreateColorDividerVisuals();
+                return;
+            }
+
+            BucketConfig bucketConfig = bucketSystem.Config;
+            float bottomRadius = bucketConfig.shapeType == BucketShapeType.Cylinder
+                ? bucketConfig.topRadiusMeters
+                : bucketConfig.bottomRadiusMeters;
+            float topRadius = bucketConfig.topRadiusMeters;
+            float visualRadius =
+                Mathf.Max(
+                    Mathf.Min(bottomRadius, topRadius) -
+                    bucketConfig.wallThicknessMeters -
+                    0.006f,
+                    0.01f
+                );
+            float visualDiameter = visualRadius * 2.0f;
+            float height =
+                Mathf.Max(bucketConfig.heightMeters * dividerVisualHeightFraction, 0.02f);
+            float thickness =
+                Mathf.Max(
+                    fluidConfig.colorDividerThicknessMeters,
+                    bucketConfig.wallThicknessMeters * 0.65f
+                ) * Mathf.Max(dividerVisualThicknessMultiplier, 0.1f);
+
+            if (_colorDividerMaterial != null)
+                SetMaterialColor(_colorDividerMaterial, colorDividerColor);
+
+            for (int i = 0; i < dividerCount; i++)
+            {
+                GameObject divider = _colorDividerVisuals[i];
+                if (divider == null)
+                    continue;
+
+                int boundary = i + 1;
+                float t = boundary / (float)Mathf.Max(fluidConfig.colorCompartmentCount, 1);
+
+                switch (fluidConfig.colorCompartmentAxis)
+                {
+                    case FluidColorCompartmentAxis.BucketLocalZ:
+                    {
+                        float z = Mathf.Lerp(-visualRadius, visualRadius, t);
+                        divider.transform.localPosition = new Vector3(0.0f, 0.0f, z);
+                        divider.transform.localRotation = Quaternion.identity;
+                        divider.transform.localScale =
+                            new Vector3(visualDiameter, height, thickness);
+                        break;
+                    }
+
+                    case FluidColorCompartmentAxis.RadialWedges:
+                    {
+                        float angle =
+                            -Mathf.PI +
+                            Mathf.PI * 2.0f * boundary /
+                            Mathf.Max(fluidConfig.colorCompartmentCount, 1);
+                        float angleDegrees = -angle * Mathf.Rad2Deg;
+                        divider.transform.localPosition = Vector3.zero;
+                        divider.transform.localRotation =
+                            Quaternion.Euler(0.0f, angleDegrees, 0.0f);
+                        divider.transform.localScale =
+                            new Vector3(visualDiameter, height, thickness);
+                        break;
+                    }
+
+                    case FluidColorCompartmentAxis.BucketLocalX:
+                    default:
+                    {
+                        float x = Mathf.Lerp(-visualRadius, visualRadius, t);
+                        divider.transform.localPosition = new Vector3(x, 0.0f, 0.0f);
+                        divider.transform.localRotation = Quaternion.identity;
+                        divider.transform.localScale =
+                            new Vector3(thickness, height, visualDiameter);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private bool TryGetColorDividerConfig(out PaintFluidConfig fluidConfig)
+        {
+            fluidConfig = null;
+
+            if (!showColorDividers)
+                return false;
+
+            if (paintFluidSystem == null)
+                paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
+
+            fluidConfig = paintFluidSystem != null
+                ? paintFluidSystem.FluidConfig
+                : null;
+
+            return fluidConfig != null &&
+                   fluidConfig.enableColorCompartments &&
+                   fluidConfig.enablePhysicalColorDividers &&
+                   fluidConfig.colorCompartmentCount > 1 &&
+                   fluidConfig.colorDividerThicknessMeters > 0.0f;
         }
 
         private void SetLocalHoleShape(
@@ -457,6 +649,17 @@ namespace PaintBucketSim.Systems.Bucket
 
                 lr.SetPosition(i, p);
             }
+        }
+
+        private void SetMaterialColor(Material material, Color color)
+        {
+            if (material == null)
+                return;
+
+            material.color = color;
+
+            if (material.HasProperty("_BaseColor"))
+                material.SetColor("_BaseColor", color);
         }
 
         private Vector3 ToVector3(float3 v)

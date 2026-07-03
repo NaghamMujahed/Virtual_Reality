@@ -29,32 +29,45 @@ MonoBehaviour:
   localAttachmentPoint: {x: 0, y: 0.35, z: 0}
   jointVisualRadiusMeters: 0.035
   holes:
-  - name: Bottom Circle Hole
+  - name: Red Compartment Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
-    localCenter: {x: -0.045, y: -0.275, z: -0.025}
+    localCenter: {x: -0.055, y: -0.275, z: -0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.001
-    sizeMeters: {x: 0.044, y: 0.044}
+    radiusMeters: 0.003
+    sizeMeters: {x: 0.006, y: 0.006}
     localTangent: {x: 1, y: 0, z: 0}
-    edgeSoftnessMeters: 0.004
-    flowMultiplier: 1
-    exitVelocityBoostMetersPerSecond: 0.15
+    edgeSoftnessMeters: 0.002
+    flowMultiplier: 0.62
+    exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
     active: 1
-  - name: Bottom Slot Hole
-    shape: 4
+  - name: Blue Compartment Round Hole
+    shape: 0
     autoPlaceAtBottomCenter: 0
-    localCenter: {x: 0.05, y: -0.275, z: 0.03}
+    localCenter: {x: 0.055, y: -0.275, z: 0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.005
-    sizeMeters: {x: 0.04, y: 0.01}
+    radiusMeters: 0.003
+    sizeMeters: {x: 0.006, y: 0.006}
     localTangent: {x: 1, y: 0, z: 0}
-    edgeSoftnessMeters: 0.004
-    flowMultiplier: 1
-    exitVelocityBoostMetersPerSecond: 0.12
+    edgeSoftnessMeters: 0.002
+    flowMultiplier: 0.62
+    exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 0
+    active: 1
+  - name: Inactive Bottom Edge Round Hole
+    shape: 0
+    autoPlaceAtBottomCenter: 0
+    localCenter: {x: 0.095, y: -0.275, z: 0}
+    localNormal: {x: 0, y: -1, z: 0}
+    radiusMeters: 0.003
+    sizeMeters: {x: 0.006, y: 0.006}
+    localTangent: {x: 1, y: 0, z: 0}
+    edgeSoftnessMeters: 0.002
+    flowMultiplier: 0.62
+    exitVelocityBoostMetersPerSecond: 0.1
+    wallThicknessMeters: 0.01
+    active: 1
   visualRadialSegments: 48
   bucketColor: {r: 0.55, g: 0.55, b: 0.58, a: 1}
   holeColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}

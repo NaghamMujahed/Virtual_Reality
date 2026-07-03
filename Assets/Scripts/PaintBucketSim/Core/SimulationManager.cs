@@ -191,7 +191,7 @@ namespace PaintBucketSim.Core
             }
         }
 
-        private void ResetSimulationState()
+        public void ResetSimulationState()
         {
             TimeController.Reset();
 
