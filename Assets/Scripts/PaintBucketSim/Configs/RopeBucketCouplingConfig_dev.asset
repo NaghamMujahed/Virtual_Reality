@@ -20,7 +20,7 @@ MonoBehaviour:
   correctBucket: 1
   maxLinearCorrectionPerSubstep: 0.035
   maxAngularCorrectionPerSubstep: 0.06
-  updateVelocitiesFromCorrection: 0
+  updateVelocitiesFromCorrection: 1
   reconstructBucketVelocityFromFinalPose: 0
   enableVelocityStabilization: 1
   attachmentVelocityDamping: 0.9
@@ -29,7 +29,7 @@ MonoBehaviour:
   twistTorqueStiffness: 0.18
   twistTorqueDamping: 0.025
   maxTwistTorque: 0.45
-  enableBailUprightTorque: 0
+  enableBailUprightTorque: 1
   bailUprightActivationAngleDegrees: 55
   bailUprightFullResponseAngleDegrees: 82
   bailUprightStiffness: 5

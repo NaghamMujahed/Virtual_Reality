@@ -1,41 +1,30 @@
-#pragma kernel KClearGrid
 #pragma kernel KClearMpmDiagnostics
 #pragma kernel KClearAdaptiveActivity
 #pragma kernel KClassifyAdaptiveActivity
-#pragma kernel KP2G
-#pragma kernel KGridUpdate
 #pragma kernel KClearMpmTileData
-#pragma kernel KClearMpmTileOrderedData
 #pragma kernel KMarkMpmActiveTiles
-#pragma kernel KMarkMpmOwnerTilesActive
+#pragma kernel KExpandMpmTileSupportMasks
 #pragma kernel KBucketCollisionMarkMpmActiveTiles
-#pragma kernel KBuildMpmTileParticleOffsets
 #pragma kernel KBuildMpmTileOwnerOffsets
-#pragma kernel KFillMpmTileParticleLists
+#pragma kernel KFillMpmTileOwnerParticleList
 #pragma kernel KClearGridActiveTiles
 #pragma kernel KGridUpdateActiveTiles
-#pragma kernel KP2GTileOrdered
 #pragma kernel KP2GHybridTiled
 #pragma kernel KP2GReferenceDensityStressHybrid
 // Changes after G6.A 
 #pragma kernel KG2PVelocityApic
-#pragma kernel KG2PVelocityApicTileOrdered
 #pragma kernel KG2PVelocityApicBucketCollision
-#pragma kernel KG2PVelocityApicBucketCollisionTileOrdered
 #pragma kernel KUpdateDeformation
-#pragma kernel KUpdateDeformationTileOrdered
 // End Changes after G6.A 
 
 // Changes after G8.A 
 #pragma kernel KBucketCollision
-#pragma kernel KBucketCollisionTileOrdered
 // End Changes after G8.A 
 #pragma kernel KStepAirborneParticles
 
 #pragma kernel KClearProjectionGrid
 #pragma kernel KMarkBucketProjectionSolids
 #pragma kernel KMarkProjectionFluidCells
-#pragma kernel KMarkProjectionFluidCellsTileOrdered
 #pragma kernel KFinalizeProjectionGrid
 #pragma kernel KClearProjectionFluidCellList
 #pragma kernel KBuildProjectionFluidCellDispatchArgs
@@ -85,26 +74,15 @@ StructuredBuffer<float4> _GridVelocityMassRead;
 RWStructuredBuffer<uint> _MpmTileFlags;
 RWStructuredBuffer<uint> _MpmActiveTileIndices;
 RWStructuredBuffer<uint> _MpmTileDispatchArgs;
-RWStructuredBuffer<uint> _MpmTileParticleCounts;
-RWStructuredBuffer<uint> _MpmTileParticleWriteCounts;
-RWStructuredBuffer<uint> _MpmTileParticleOffsets;
-RWStructuredBuffer<uint> _MpmTileParticleIndices;
-RWStructuredBuffer<uint> _MpmTileParticleMeta;
 RWStructuredBuffer<uint> _MpmTileOwnerParticleCounts;
 RWStructuredBuffer<uint> _MpmTileOwnerParticleWriteCounts;
 RWStructuredBuffer<uint> _MpmTileOwnerParticleOffsets;
-RWStructuredBuffer<uint> _MpmTileOrderedParticleIndices;
-RWStructuredBuffer<uint> _MpmTileOrderedParticleDispatchArgs;
-RWStructuredBuffer<uint> _MpmTileOrderedParticleMeta;
+RWStructuredBuffer<uint> _MpmTileOwnerParticleIndices;
+RWStructuredBuffer<uint> _MpmTileSupportMasks;
 StructuredBuffer<uint> _MpmActiveTileIndicesRead;
 StructuredBuffer<uint> _MpmTileFlagsRead;
-StructuredBuffer<uint> _MpmTileParticleCountsRead;
-StructuredBuffer<uint> _MpmTileParticleOffsetsRead;
-StructuredBuffer<uint> _MpmTileParticleIndicesRead;
-StructuredBuffer<uint> _MpmTileOrderedParticleIndicesRead;
-StructuredBuffer<uint> _MpmTileOrderedParticleMetaRead;
+StructuredBuffer<uint> _MpmTileOwnerParticleIndicesRead;
 StructuredBuffer<uint> _MpmTileOwnerParticleCountsRead;
-StructuredBuffer<uint> _MpmTileOwnerParticleWriteCountsRead;
 StructuredBuffer<uint> _MpmTileOwnerParticleOffsetsRead;
 
 StructuredBuffer<float4> _ParticlePositionRadiusRead;
@@ -154,16 +132,10 @@ int _GridNodeCount;
 
 int3 _GridResolution;
 float3 _GridOrigin;
-int _EnableActiveMpmGridBounds;
-int3 _ActiveMpmGridMin;
-int3 _ActiveMpmGridSize;
-int _ActiveMpmGridNodeCount;
 int _EnableMpmTileOccupancy;
 int _EnableTiledMpmGridDispatch;
 int _EnableMpmParticleTileLists;
-int _EnableMpmSupportParticleTileLists;
 int _EnableTiledP2G;
-int _EnableCenteredHybridP2GOwnerTile;
 int _EnableSparseProjectionPressureDispatch;
 int _EnableReferenceDensityEos;
 int _EnableGridDensityEos;
@@ -186,7 +158,6 @@ int3 _MpmTileResolution;
 int _MpmTileCount;
 int _MpmTileSizeCells;
 int _MpmTileSizeShift;
-int _MpmTileParticleListCapacity;
 float _CellSize;
 float _InvCellSize;
 
@@ -394,14 +365,10 @@ static const uint DIAG_SPEED_MAX = 26;
 static const uint DIAG_MPM_ACTIVE_TILES = 27;
 static const uint DIAG_MPM_TILE_COUNT = 28;
 static const uint DIAG_MPM_TILE_MARKS = 29;
-static const uint DIAG_MPM_TILE_PARTICLE_REFS = 30;
-static const uint DIAG_MPM_TILE_MAX_PARTICLE_REFS = 31;
-static const uint DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW = 32;
-static const uint DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY = 33;
-static const uint DIAG_JET_MPM_COLLAR_PARTICLES = 34;
-static const uint DIAG_LOCAL_X_SUM = 35;
-static const uint DIAG_LOCAL_Z_SUM = 36;
-static const uint MPM_DIAGNOSTIC_COUNT = 37;
+static const uint DIAG_JET_MPM_COLLAR_PARTICLES = 30;
+static const uint DIAG_LOCAL_X_SUM = 31;
+static const uint DIAG_LOCAL_Z_SUM = 32;
+static const uint MPM_DIAGNOSTIC_COUNT = 33;
 static const uint MPM_TILE_THREAD_DIM = 8u;
 static const uint MPM_TILE_CELL_COUNT = 512u;
 static const uint MPM_TILE_P2G_THREAD_COUNT = 256u;
@@ -418,28 +385,6 @@ static const int HOLE_SHAPE_SQUARE = 1;
 static const int HOLE_SHAPE_ELLIPSE = 2;
 static const int HOLE_SHAPE_RECTANGLE = 3;
 static const int HOLE_SHAPE_SLOT = 4;
-
-
-int FlattenGridIndex(int3 c)
-{
-    return c.x +
-           c.y * _GridResolution.x +
-           c.z * _GridResolution.x * _GridResolution.y;
-}
-
-int3 UnflattenGridIndex(uint index)
-{
-    uint resolutionX = (uint)_GridResolution.x;
-    uint resolutionY = (uint)_GridResolution.y;
-    uint xy = resolutionX * resolutionY;
-
-    uint z = index / xy;
-    uint rem = index - z * xy;
-    uint y = rem / resolutionX;
-    uint x = rem - y * resolutionX;
-
-    return int3((int)x, (int)y, (int)z);
-}
 
 uint FlattenMpmTileIndex(uint3 tile)
 {
@@ -462,6 +407,27 @@ uint3 UnflattenMpmTileIndex(uint tileIndex)
     uint x = rem - y * resolutionX;
 
     return uint3(x, y, z);
+}
+
+int FlattenGridIndex(int3 c)
+{
+    return c.x +
+           c.y * _GridResolution.x +
+           c.z * _GridResolution.x * _GridResolution.y;
+}
+
+int3 UnflattenGridIndex(uint index)
+{
+    uint resolutionX = (uint)_GridResolution.x;
+    uint resolutionY = (uint)_GridResolution.y;
+    uint xy = resolutionX * resolutionY;
+
+    uint z = index / xy;
+    uint rem = index - z * xy;
+    uint y = rem / resolutionX;
+    uint x = rem - y * resolutionX;
+
+    return int3((int)x, (int)y, (int)z);
 }
 
 bool TryGetMpmTileForCell(int3 cell, out uint tileIndex)
@@ -537,17 +503,6 @@ bool TryGetMpmSupportTileRange(
     minCell = max(minCell, int3(0, 0, 0));
     maxCell = min(maxCell, _GridResolution - int3(1, 1, 1));
 
-    if (_EnableActiveMpmGridBounds != 0)
-    {
-        int3 activeMax =
-            _ActiveMpmGridMin +
-            _ActiveMpmGridSize -
-            int3(1, 1, 1);
-
-        minCell = max(minCell, _ActiveMpmGridMin);
-        maxCell = min(maxCell, activeMax);
-    }
-
     if (minCell.x > maxCell.x ||
         minCell.y > maxCell.y ||
         minCell.z > maxCell.z)
@@ -580,17 +535,14 @@ bool TryGetMpmOwnerTileForStencil(
     ownerTileIndex = 0u;
     bool ownerValid = false;
 
-    if (_EnableCenteredHybridP2GOwnerTile != 0)
+    // The middle node maximizes shared-memory contributions when the
+    // quadratic stencil crosses a tile edge.
+    int3 centerCell = baseCell + int3(1, 1, 1);
+    uint centeredTileIndex = 0u;
+    if (TryGetMpmTileForCell(centerCell, centeredTileIndex))
     {
-        // The middle node maximizes the part of the quadratic 3^3 stencil
-        // accumulated in group-shared memory when support crosses a tile edge.
-        int3 centerCell = baseCell + int3(1, 1, 1);
-        uint centeredTileIndex = 0u;
-        if (TryGetMpmTileForCell(centerCell, centeredTileIndex))
-        {
-            ownerTileIndex = centeredTileIndex;
-            ownerValid = true;
-        }
+        ownerTileIndex = centeredTileIndex;
+        ownerValid = true;
     }
 
     if (!ownerValid)
@@ -656,68 +608,6 @@ bool IsValidCell(int3 c)
            c.x < _GridResolution.x &&
            c.y < _GridResolution.y &&
            c.z < _GridResolution.z;
-}
-
-bool IsInsideActiveMpmGridBounds(int3 cell)
-{
-    if (_EnableActiveMpmGridBounds == 0)
-        return true;
-
-    return
-        cell.x >= _ActiveMpmGridMin.x &&
-        cell.y >= _ActiveMpmGridMin.y &&
-        cell.z >= _ActiveMpmGridMin.z &&
-        cell.x < _ActiveMpmGridMin.x + _ActiveMpmGridSize.x &&
-        cell.y < _ActiveMpmGridMin.y + _ActiveMpmGridSize.y &&
-        cell.z < _ActiveMpmGridMin.z + _ActiveMpmGridSize.z;
-}
-
-bool TryGetMpmGridDispatchCell(
-    uint3 dispatchId,
-    out int gridIndex,
-    out int3 cell)
-{
-    gridIndex = 0;
-    cell = int3(0, 0, 0);
-
-    if (_EnableActiveMpmGridBounds == 0)
-    {
-        if (dispatchId.x >= (uint)_GridResolution.x ||
-            dispatchId.y >= (uint)_GridResolution.y ||
-            dispatchId.z >= (uint)_GridResolution.z)
-        {
-            return false;
-        }
-
-        cell = int3(
-            (int)dispatchId.x,
-            (int)dispatchId.y,
-            (int)dispatchId.z
-        );
-        gridIndex = FlattenGridIndex(cell);
-        return true;
-    }
-
-    if (dispatchId.x >= (uint)_ActiveMpmGridSize.x ||
-        dispatchId.y >= (uint)_ActiveMpmGridSize.y ||
-        dispatchId.z >= (uint)_ActiveMpmGridSize.z)
-    {
-        return false;
-    }
-
-    cell =
-        _ActiveMpmGridMin +
-        int3(
-            (int)dispatchId.x,
-            (int)dispatchId.y,
-            (int)dispatchId.z
-        );
-
-    if (!IsValidCell(cell))
-        return false;
-
-    gridIndex = FlattenGridIndex(cell);
-    return true;
 }
 
 bool IsInsideActiveProjectionBounds(int3 cell)
@@ -821,20 +711,23 @@ bool TryGetProjectionDispatchCell(
 
 bool IsProjectionReadableCell(int3 cell)
 {
-    if (!IsValidCell(cell) ||
-        !IsInsideActiveMpmGridBounds(cell))
+    bool readable = false;
+
+    if (IsValidCell(cell))
     {
-        return false;
+        if (_EnableMpmTileProjectionDispatch != 0)
+        {
+            uint tileIndex = 0u;
+            if (TryGetMpmTileForCell(cell, tileIndex))
+                readable = _MpmTileFlagsRead[tileIndex] != 0u;
+        }
+        else
+        {
+            readable = IsInsideActiveProjectionBounds(cell);
+        }
     }
 
-    if (_EnableMpmTileProjectionDispatch != 0)
-    {
-        uint tileIndex;
-        return TryGetMpmTileForCell(cell, tileIndex) &&
-               _MpmTileFlagsRead[tileIndex] != 0u;
-    }
-
-    return IsInsideActiveProjectionBounds(cell);
+    return readable;
 }
 
 int GetProjectionCellTypeSafe(int3 cell)
@@ -1519,18 +1412,6 @@ void BuildReferenceDensityStressRows(
 //}
 
 [numthreads(8, 8, 8)]
-void KClearGrid(uint3 id : SV_DispatchThreadID)
-{
-    int index;
-    int3 cell;
-    if (!TryGetMpmGridDispatchCell(id, index, cell))
-        return;
-
-    _GridAccumInt[index] = int4(0, 0, 0, 0);
-    _GridVelocityMass[index] = float4(0, 0, 0, 0);
-}
-
-[numthreads(8, 8, 8)]
 void KClearGridActiveTiles(
     uint3 groupId : SV_GroupID,
     uint3 localId : SV_GroupThreadID)
@@ -1564,10 +1445,13 @@ void KClearMpmTileData(uint3 id : SV_DispatchThreadID)
     {
         _MpmTileFlags[index] = 0u;
         _MpmActiveTileIndices[index] = 0u;
-        _MpmTileParticleCounts[index] = 0u;
-        _MpmTileParticleWriteCounts[index] = 0u;
-        _MpmTileParticleOffsets[index] = 0u;
-
+        _MpmTileSupportMasks[index] = 0u;
+        if (_EnableMpmParticleTileLists != 0)
+        {
+            _MpmTileOwnerParticleCounts[index] = 0u;
+            _MpmTileOwnerParticleWriteCounts[index] = 0u;
+            _MpmTileOwnerParticleOffsets[index] = 0u;
+        }
     }
 
     if (index < 3u)
@@ -1575,42 +1459,6 @@ void KClearMpmTileData(uint3 id : SV_DispatchThreadID)
         _MpmTileDispatchArgs[index] = index == 0u ? 0u : 1u;
     }
 
-    if (index < 4u)
-    {
-        _MpmTileParticleMeta[index] = 0u;
-
-    }
-
-    if (index == 0u && _EnableGpuDiagnostics != 0)
-    {
-        _MpmDiagnostics[DIAG_MPM_TILE_COUNT] = (uint)_MpmTileCount;
-        _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY] =
-            (uint)max(_MpmTileParticleListCapacity, 0);
-    }
-}
-
-[numthreads(64, 1, 1)]
-void KClearMpmTileOrderedData(uint3 id : SV_DispatchThreadID)
-{
-    uint index = id.x;
-
-    if (index < (uint)_MpmTileCount)
-    {
-        _MpmTileOwnerParticleCounts[index] = 0u;
-        _MpmTileOwnerParticleWriteCounts[index] = 0u;
-        _MpmTileOwnerParticleOffsets[index] = 0u;
-    }
-
-    if (index < 3u)
-    {
-        _MpmTileOrderedParticleDispatchArgs[index] =
-            index == 0u ? 0u : 1u;
-    }
-
-    if (index < 4u)
-    {
-        _MpmTileOrderedParticleMeta[index] = 0u;
-    }
 }
 
 void MarkMpmTileIndex(uint tileIndex)
@@ -1632,9 +1480,6 @@ void MarkMpmTileIndex(uint tileIndex)
     uint activeTileIndex;
     InterlockedAdd(_MpmTileDispatchArgs[0], 1u, activeTileIndex);
 
-    if (activeTileIndex >= (uint)_MpmTileCount)
-        return;
-
     _MpmActiveTileIndices[activeTileIndex] = tileIndex;
 
     if (_EnableGpuDiagnostics != 0)
@@ -1643,16 +1488,7 @@ void MarkMpmTileIndex(uint tileIndex)
     }
 }
 
-void MarkMpmTileForCell(int3 cell)
-{
-    uint tileIndex;
-    if (!TryGetMpmTileForCell(cell, tileIndex))
-        return;
-
-    MarkMpmTileIndex(tileIndex);
-}
-
-void RecordMpmOwnerParticle(uint tileIndex, uint particleIndex)
+void RecordMpmOwnerParticle(uint tileIndex)
 {
     if (_EnableMpmParticleTileLists != 0)
     {
@@ -1663,15 +1499,104 @@ void RecordMpmOwnerParticle(uint tileIndex, uint particleIndex)
     }
 }
 
-[numthreads(64, 1, 1)]
-void KMarkMpmOwnerTilesActive(uint3 id : SV_DispatchThreadID)
+void RecordMpmTileSupportMask(
+    uint ownerTileIndex,
+    uint3 minTile,
+    uint3 maxTile)
 {
-    uint tileIndex = id.x;
-    if (tileIndex >= (uint)_MpmTileCount)
+    uint3 ownerTile = UnflattenMpmTileIndex(ownerTileIndex);
+    uint supportMask = 0u;
+
+    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
+    {
+        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
+        {
+            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
+            {
+                int3 delta =
+                    int3((int)tx, (int)ty, (int)tz) -
+                    int3(ownerTile);
+                if (any(delta < int3(-1, -1, -1)) ||
+                    any(delta > int3(1, 1, 1)))
+                {
+                    continue;
+                }
+
+                uint bitIndex =
+                    (uint)(delta.x + 1) +
+                    (uint)(delta.y + 1) * 3u +
+                    (uint)(delta.z + 1) * 9u;
+                supportMask |= 1u << bitIndex;
+            }
+        }
+    }
+
+    uint previousMask;
+    InterlockedOr(
+        _MpmTileSupportMasks[ownerTileIndex],
+        supportMask,
+        previousMask
+    );
+}
+
+[numthreads(64, 1, 1)]
+void KExpandMpmTileSupportMasks(uint3 id : SV_DispatchThreadID)
+{
+    uint ownerTileIndex = id.x;
+    if (ownerTileIndex == 0u && _EnableGpuDiagnostics != 0)
+    {
+        _MpmDiagnostics[DIAG_MPM_TILE_COUNT] = (uint)_MpmTileCount;
+    }
+
+    if (ownerTileIndex >= (uint)_MpmTileCount)
         return;
 
-    if (_MpmTileOwnerParticleCountsRead[tileIndex] > 0u)
-        MarkMpmTileIndex(tileIndex);
+    uint supportMask = _MpmTileSupportMasks[ownerTileIndex];
+    if (supportMask == 0u &&
+        _MpmTileOwnerParticleCountsRead[ownerTileIndex] == 0u)
+    {
+        return;
+    }
+
+    uint3 ownerTile = UnflattenMpmTileIndex(ownerTileIndex);
+
+    // A reused owner list may contain a tile no longer touched by the
+    // current support masks. Keep that owner group active so its particles
+    // still execute and spill contributions through global atomics.
+    if (_MpmTileOwnerParticleCountsRead[ownerTileIndex] > 0u)
+        MarkMpmTileIndex(ownerTileIndex);
+
+    uint bitIndex = 0u;
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                uint currentBit = bitIndex++;
+                if ((supportMask & (1u << currentBit)) == 0u)
+                    continue;
+
+                int3 tileCoord =
+                    int3(ownerTile) + int3(dx, dy, dz);
+                if (any(tileCoord < int3(0, 0, 0)) ||
+                    tileCoord.x >= _MpmTileResolution.x ||
+                    tileCoord.y >= _MpmTileResolution.y ||
+                    tileCoord.z >= _MpmTileResolution.z)
+                {
+                    continue;
+                }
+
+                uint tileIndex;
+                if (TryGetMpmTileForCoord(
+                    uint3(tileCoord),
+                    tileIndex))
+                {
+                    MarkMpmTileIndex(tileIndex);
+                }
+            }
+        }
+    }
 }
 
 void RunBucketCollisionParticle(uint particleIndex);
@@ -1681,7 +1606,10 @@ void KMarkMpmActiveTiles(uint3 id : SV_DispatchThreadID)
 {
     uint particleIndex = id.x;
 
-    if (particleIndex >= (uint)_ParticleCount ||
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (
         (_EnableMpmTileOccupancy == 0 &&
          _EnableMpmParticleTileLists == 0))
     {
@@ -1716,55 +1644,19 @@ void KMarkMpmActiveTiles(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    if (_EnableMpmParticleTileLists != 0)
+    uint ownerTileIndex;
+    if (TryGetMpmOwnerTileForStencil(
+        baseCell,
+        minTile,
+        ownerTileIndex))
     {
-        uint ownerTileIndex;
-        if (TryGetMpmOwnerTileForStencil(
-            baseCell,
+        if (_EnableMpmParticleTileLists != 0)
+            RecordMpmOwnerParticle(ownerTileIndex);
+        RecordMpmTileSupportMask(
+            ownerTileIndex,
             minTile,
-            ownerTileIndex))
-        {
-            RecordMpmOwnerParticle(ownerTileIndex, particleIndex);
-        }
-    }
-
-    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
-    {
-        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
-        {
-            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
-            {
-                uint tileIndex;
-                if (!TryGetMpmTileForCoord(uint3(tx, ty, tz), tileIndex))
-                    continue;
-
-                MarkMpmTileIndex(tileIndex);
-
-                if (_EnableMpmSupportParticleTileLists != 0)
-                {
-                    uint previousCount;
-                    InterlockedAdd(
-                        _MpmTileParticleCounts[tileIndex],
-                        1u,
-                        previousCount
-                    );
-
-                    uint newCount = previousCount + 1u;
-
-                    if (_EnableGpuDiagnostics != 0)
-                    {
-                        InterlockedAdd(
-                            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_REFS],
-                            1u
-                        );
-                        InterlockedMax(
-                            _MpmDiagnostics[DIAG_MPM_TILE_MAX_PARTICLE_REFS],
-                            newCount
-                        );
-                    }
-                }
-            }
-        }
+            maxTile
+        );
     }
 
     if (_EnableGpuDiagnostics != 0)
@@ -1783,8 +1675,7 @@ void KBucketCollisionMarkMpmActiveTiles(
 
     RunBucketCollisionParticle(particleIndex);
 
-    if (_EnableMpmTileOccupancy == 0 ||
-        _EnableMpmSupportParticleTileLists != 0)
+    if (_EnableMpmTileOccupancy == 0)
     {
         return;
     }
@@ -1809,75 +1700,23 @@ void KBucketCollisionMarkMpmActiveTiles(
         return;
     }
 
-    if (_EnableMpmParticleTileLists != 0)
+    uint ownerTileIndex;
+    if (TryGetMpmOwnerTileForStencil(
+        baseCell,
+        minTile,
+        ownerTileIndex))
     {
-        uint ownerTileIndex;
-        if (TryGetMpmOwnerTileForStencil(
-            baseCell,
+        if (_EnableMpmParticleTileLists != 0)
+            RecordMpmOwnerParticle(ownerTileIndex);
+        RecordMpmTileSupportMask(
+            ownerTileIndex,
             minTile,
-            ownerTileIndex))
-        {
-            RecordMpmOwnerParticle(ownerTileIndex, particleIndex);
-        }
-    }
-
-    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
-    {
-        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
-        {
-            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
-            {
-                uint tileIndex;
-                if (TryGetMpmTileForCoord(
-                    uint3(tx, ty, tz),
-                    tileIndex))
-                {
-                    MarkMpmTileIndex(tileIndex);
-                }
-            }
-        }
+            maxTile
+        );
     }
 
     if (_EnableGpuDiagnostics != 0)
         InterlockedAdd(_MpmDiagnostics[DIAG_MPM_TILE_MARKS], 1u);
-}
-
-[numthreads(1, 1, 1)]
-void KBuildMpmTileParticleOffsets(uint3 id : SV_DispatchThreadID)
-{
-    if (_EnableMpmSupportParticleTileLists == 0)
-        return;
-
-    uint running = 0u;
-    uint maxRefsPerTile = 0u;
-    uint capacity = (uint)max(_MpmTileParticleListCapacity, 0);
-
-    for (uint tileIndex = 0u; tileIndex < (uint)_MpmTileCount; tileIndex++)
-    {
-        uint count = _MpmTileParticleCounts[tileIndex];
-
-        _MpmTileParticleOffsets[tileIndex] = running;
-        _MpmTileParticleWriteCounts[tileIndex] = 0u;
-
-        running += count;
-        maxRefsPerTile = max(maxRefsPerTile, count);
-    }
-
-    _MpmTileParticleMeta[0] = running;
-    _MpmTileParticleMeta[1] = maxRefsPerTile;
-
-    if (_EnableGpuDiagnostics != 0)
-    {
-        _MpmDiagnostics[DIAG_MPM_TILE_MAX_PARTICLE_REFS] = maxRefsPerTile;
-
-        if (running > capacity)
-        {
-            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW] =
-                running - capacity;
-        }
-
-        _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY] = capacity;
-    }
 }
 
 [numthreads(1, 1, 1)]
@@ -1897,15 +1736,10 @@ void KBuildMpmTileOwnerOffsets(uint3 id : SV_DispatchThreadID)
         ownerRunning += ownerCount;
     }
 
-    _MpmTileOrderedParticleMeta[0] = ownerRunning;
-    _MpmTileOrderedParticleDispatchArgs[0] =
-        (ownerRunning + 255u) >> 8u;
-    _MpmTileOrderedParticleDispatchArgs[1] = 1u;
-    _MpmTileOrderedParticleDispatchArgs[2] = 1u;
 }
 
 [numthreads(256, 1, 1)]
-void KFillMpmTileParticleLists(uint3 id : SV_DispatchThreadID)
+void KFillMpmTileOwnerParticleList(uint3 id : SV_DispatchThreadID)
 {
     if (_EnableMpmParticleTileLists == 0)
         return;
@@ -1934,71 +1768,31 @@ void KFillMpmTileParticleLists(uint3 id : SV_DispatchThreadID)
         return;
 
     uint ownerTileIndex;
-    if (TryGetMpmOwnerTileForStencil(
+    if (!TryGetMpmOwnerTileForStencil(
         baseCell,
         minTile,
         ownerTileIndex))
     {
-        uint ownerLocalSlot;
-        InterlockedAdd(
-            _MpmTileOwnerParticleWriteCounts[ownerTileIndex],
-            1u,
-            ownerLocalSlot
-        );
-
-        uint orderedIndex =
-            _MpmTileOwnerParticleOffsets[ownerTileIndex] +
-            ownerLocalSlot;
-
-        if (orderedIndex < (uint)_ParticleCount)
-        {
-            _MpmTileOrderedParticleIndices[orderedIndex] = particleIndex;
-        }
+        return;
     }
 
-    if (_EnableMpmSupportParticleTileLists == 0)
+    if (ownerTileIndex >= (uint)_MpmTileCount)
         return;
 
-    uint capacity = (uint)max(_MpmTileParticleListCapacity, 0);
+    uint ownerLocalSlot;
+    InterlockedAdd(
+        _MpmTileOwnerParticleWriteCounts[ownerTileIndex],
+        1u,
+        ownerLocalSlot
+    );
 
-    for (uint tz = minTile.z; tz <= maxTile.z; tz++)
-    {
-        for (uint ty = minTile.y; ty <= maxTile.y; ty++)
-        {
-            for (uint tx = minTile.x; tx <= maxTile.x; tx++)
-            {
-                uint tileIndex;
-                if (!TryGetMpmTileForCoord(uint3(tx, ty, tz), tileIndex))
-                    continue;
+    uint orderedIndex =
+        _MpmTileOwnerParticleOffsets[ownerTileIndex] +
+        ownerLocalSlot;
 
-                uint localSlot;
-                InterlockedAdd(
-                    _MpmTileParticleWriteCounts[tileIndex],
-                    1u,
-                    localSlot
-                );
+    if (orderedIndex < (uint)_ParticleCount)
+        _MpmTileOwnerParticleIndices[orderedIndex] = particleIndex;
 
-                uint listIndex =
-                    _MpmTileParticleOffsets[tileIndex] +
-                    localSlot;
-
-                if (listIndex >= capacity)
-                {
-                    if (_EnableGpuDiagnostics != 0)
-                    {
-                        InterlockedAdd(
-                            _MpmDiagnostics[DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW],
-                            1u
-                        );
-                    }
-
-                    continue;
-                }
-
-                _MpmTileParticleIndices[listIndex] = particleIndex;
-            }
-        }
-    }
 }
 
 [numthreads(64, 1, 1)]
@@ -2013,338 +1807,6 @@ void KClearMpmDiagnostics(uint3 id : SV_DispatchThreadID)
         (index == DIAG_J_MIN || index == DIAG_LOCAL_Y_MIN)
             ? 0xffffffffu
             : 0u;
-}
-
-void RunP2GParticle(uint particleIndex)
-{
-    if (particleIndex >= (uint)_ParticleCount)
-        return;
-
-    float4 pr = _ParticlePositionRadius[particleIndex];
-    float4 vm = _ParticleVelocityMass[particleIndex];
-    float4 stateAgeId = _ParticleStateAgeIdRead[particleIndex];
-
-    int state = (int)round(stateAgeId.x);
-
-    if (!IsMpmActiveState(state))
-        return;
-
-    if (_EnableGpuDiagnostics != 0)
-        InterlockedAdd(_MpmDiagnostics[DIAG_ACTIVE_PARTICLES], 1);
-
-    float3 p = pr.xyz;
-    float3 v = vm.xyz;
-    float rawMass = vm.w;
-
-    if (!IsFiniteFloat3(p) ||
-        !IsFiniteFloat3(v) ||
-        !IsFiniteFloat(rawMass))
-    {
-        if (_EnableGpuDiagnostics != 0)
-            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
-        return;
-    }
-
-    if (_EnableGpuDiagnostics != 0)
-    {
-        float3 localPForDiagnostics =
-            mul(_BucketWorldToLocal, float4(p, 1.0)).xyz;
-        float normalizedBucketY = saturate(
-            (localPForDiagnostics.y + 0.5 * _BucketHeight) /
-            max(_BucketHeight, 1e-6)
-        );
-        uint fixedLocalY = (uint)round(
-            normalizedBucketY * DIAG_HEIGHT_FIXED_SCALE
-        );
-        float diagnosticRadius = max(
-            max(_BucketTopRadius, _BucketBottomRadius),
-            1e-6
-        );
-        uint fixedLocalX = (uint)round(
-            saturate(localPForDiagnostics.x / (2.0 * diagnosticRadius) + 0.5) *
-            DIAG_HEIGHT_FIXED_SCALE
-        );
-        uint fixedLocalZ = (uint)round(
-            saturate(localPForDiagnostics.z / (2.0 * diagnosticRadius) + 0.5) *
-            DIAG_HEIGHT_FIXED_SCALE
-        );
-        uint fixedSpeed = (uint)round(
-            min(length(v), 10.0) * DIAG_SPEED_FIXED_SCALE
-        );
-
-        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Y_SUM], fixedLocalY);
-        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_X_SUM], fixedLocalX);
-        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Z_SUM], fixedLocalZ);
-        InterlockedMin(_MpmDiagnostics[DIAG_LOCAL_Y_MIN], fixedLocalY);
-        InterlockedMax(_MpmDiagnostics[DIAG_LOCAL_Y_MAX], fixedLocalY);
-        InterlockedAdd(_MpmDiagnostics[DIAG_SPEED_SUM], fixedSpeed);
-        InterlockedMax(_MpmDiagnostics[DIAG_SPEED_MAX], fixedSpeed);
-    }
-
-    float mass = max(rawMass, 1e-12);
-
-    float3 c0 = _ParticleAffineC0[particleIndex].xyz;
-    float3 c1 = _ParticleAffineC1[particleIndex].xyz;
-    float3 c2 = _ParticleAffineC2[particleIndex].xyz;
-    bool useLinearTransfer = UseLinearTransferStencil(particleIndex);
-
-    //float4 volumeJ = _ParticleVolumeJRead[particleIndex];
-    //float restVolume = max(volumeJ.x, 0.0);
-    //float J = clamp(volumeJ.y, _MinJ, _MaxJ);
-    float4 volumeJ = _ParticleVolumeJRead[particleIndex];
-    float restVolume = max(volumeJ.x, 1e-12);
-    float restDensity = max(volumeJ.z, 1.0);
-    float J = clamp(volumeJ.y, _MinJ, _MaxJ);
-
-    float3 stress0 = float3(0, 0, 0);
-    float3 stress1 = float3(0, 0, 0);
-    float3 stress2 = float3(0, 0, 0);
-
-    if (_EnableMaterialStress != 0 && !useLinearTransfer)
-    {
-        if (_EnableReferenceDensityEos == 0)
-        {
-            BuildStressRows(
-                c0, c1, c2, J,
-                stress0, stress1, stress2
-            );
-        }
-        else if (_EnableGridDensityEos != 0)
-        {
-            BuildPaintViscousStressRows(
-                c0, c1, c2,
-                stress0, stress1, stress2
-            );
-        }
-    }
-
-    //float3 gridPos = WorldToGrid(p);
-
-    //int3 baseCell = (int3)floor(gridPos);
-    //float3 f = frac(gridPos);
-
-    float3 gridPos = WorldToGrid(p);
-
-    if (useLinearTransfer)
-    {
-        int3 linearBaseCell = (int3)floor(gridPos);
-        float3 linearF = gridPos - (float3)linearBaseCell;
-
-        int validNodeCountLinear = 0;
-        float validSupportWeightLinear = 0.0;
-
-        for (int dz = 0; dz <= 1; dz++)
-        {
-            for (int dy = 0; dy <= 1; dy++)
-            {
-                for (int dx = 0; dx <= 1; dx++)
-                {
-                    int3 node = linearBaseCell + int3(dx, dy, dz);
-
-                    if (!IsValidCell(node))
-                        continue;
-
-                    if (!IsInsideActiveMpmGridBounds(node))
-                        continue;
-
-                    float wx = LinearWeight(linearF.x, dx);
-                    float wy = LinearWeight(linearF.y, dy);
-                    float wz = LinearWeight(linearF.z, dz);
-                    float w = wx * wy * wz;
-
-                    validNodeCountLinear++;
-                    validSupportWeightLinear += w;
-
-                    int nodeIndex = FlattenGridIndex(node);
-                    float3 nodeWorld = GridToWorld((float3)node);
-                    float3 dpos = nodeWorld - p;
-                    float3 nodeContributionVelocity =
-                        v + ApplyAffineRows(c0, c1, c2, dpos);
-
-                    float3 momentum =
-                        w * mass * nodeContributionVelocity;
-
-                    int mFixed =
-                        (int)round(w * mass * _MassFixedScale);
-                    int pxFixed =
-                        (int)round(momentum.x * _MomentumFixedScale);
-                    int pyFixed =
-                        (int)round(momentum.y * _MomentumFixedScale);
-                    int pzFixed =
-                        (int)round(momentum.z * _MomentumFixedScale);
-
-                    InterlockedAdd(_GridAccumInt[nodeIndex].x, mFixed);
-                    InterlockedAdd(_GridAccumInt[nodeIndex].y, pxFixed);
-                    InterlockedAdd(_GridAccumInt[nodeIndex].z, pyFixed);
-                    InterlockedAdd(_GridAccumInt[nodeIndex].w, pzFixed);
-                }
-            }
-        }
-
-        if (_EnableGpuDiagnostics != 0)
-        {
-            if (validNodeCountLinear == 0)
-            {
-                InterlockedAdd(_MpmDiagnostics[DIAG_OUTSIDE_GRID], 1);
-            }
-            else if (validSupportWeightLinear < 0.999)
-            {
-                InterlockedAdd(
-                    _MpmDiagnostics[DIAG_PARTIAL_GRID_SUPPORT],
-                    1
-                );
-            }
-        }
-
-        return;
-    }
-
-    ////////   G6.B Changes   ////////
-    // Quadratic B-Spline uses 3 nodes per axis.
-    // We shift by 0.5 so the particle is centered over a 3-node stencil.
-    int3 baseCell = (int3)floor(gridPos - 0.5);
-    float3 f = gridPos - (float3)baseCell;
-
-    float3 wx, wy, wz;
-    float3 dwx, dwy, dwz;
-
-    QuadraticBSplineWeights(f.x, wx, dwx);
-    QuadraticBSplineWeights(f.y, wy, dwy);
-    QuadraticBSplineWeights(f.z, wz, dwz);
-    ////////  End G6.B Changes   ////////
-
-    int validNodeCount = 0;
-    float validSupportWeight = 0.0;
-
-    for (int dz = 0; dz <= 2; dz++)
-    {
-        for (int dy = 0; dy <= 2; dy++)
-        {
-            for (int dx = 0; dx <= 2; dx++)
-            {
-                int3 node = baseCell + int3(dx, dy, dz);
-
-                if (!IsValidCell(node))
-                    continue;
-
-                if (!IsInsideActiveMpmGridBounds(node))
-                    continue;
-
-//                float wx = dx == 0 ? (1.0 - f.x) : f.x;
-//                float wy = dy == 0 ? (1.0 - f.y) : f.y;
-//                float wz = dz == 0 ? (1.0 - f.z) : f.z;
-
-//                float w = wx * wy * wz;
-
-                ////////  G6.B Changes   ////////
-                float wxi = GetV3(wx, dx);
-                float wyi = GetV3(wy, dy);
-                float wzi = GetV3(wz, dz);
-
-                float w = wxi * wyi * wzi;
-                ////////  End G6.B Changes   ////////
-
-                validNodeCount++;
-                validSupportWeight += w;
-
-                int nodeIndex = FlattenGridIndex(node);
-
-                float3 nodeWorld = GridToWorld((float3)node);
-                float3 dpos = nodeWorld - p;
-
-                //float3 affineVelocity = float3(0, 0, 0);
-
-                //if (_EnableApicTransfer != 0)
-                //    affineVelocity = ApplyAffineRows(c0, c1, c2, dpos) * _ApicP2GStrength;
-
-                //float3 nodeContributionVelocity = v + affineVelocity;
-                float3 affineVelocity = ApplyAffineRows(c0, c1, c2, dpos);
-
-                float3 nodeContributionVelocity = v + affineVelocity;
-
-                float3 momentum = w * mass * nodeContributionVelocity;
-
-                if (_EnableMaterialStress != 0 &&
-                    (
-                        _EnableReferenceDensityEos == 0 ||
-                        _EnableGridDensityEos != 0
-                    ) &&
-                    restVolume > 0.0)
-                {
-                    //float3 gradW = WeightGradientWorld(f, dx, dy, dz);
-
-                    ////////  G6.B Changes   ////////
-                    float3 gradW = QuadraticWeightGradientWorld(
-                        wx, wy, wz,
-                        dwx, dwy, dwz,
-                        dx, dy, dz
-                    );
-                    ////////  End G6.B Changes   ////////
-
-                    // Momentum contribution from stress force over dt:
-                    // p += -dt * V0 * stress * gradW
-                    float3 stressForce = -_Dt * restVolume * MatVecRows(stress0, stress1, stress2, gradW) * _MaterialStressStrength;
-
-                    momentum += stressForce;
-                }
-
-                int mFixed = (int)round(w * mass * _MassFixedScale);
-
-                int pxFixed = (int)round(momentum.x * _MomentumFixedScale);
-                int pyFixed = (int)round(momentum.y * _MomentumFixedScale);
-                int pzFixed = (int)round(momentum.z * _MomentumFixedScale);
-
-                InterlockedAdd(_GridAccumInt[nodeIndex].x, mFixed);
-                InterlockedAdd(_GridAccumInt[nodeIndex].y, pxFixed);
-                InterlockedAdd(_GridAccumInt[nodeIndex].z, pyFixed);
-                InterlockedAdd(_GridAccumInt[nodeIndex].w, pzFixed);
-            }
-        }
-    }
-
-    if (_EnableGpuDiagnostics != 0)
-    {
-        if (validNodeCount == 0)
-        {
-            InterlockedAdd(_MpmDiagnostics[DIAG_OUTSIDE_GRID], 1);
-        }
-        else if (validSupportWeight < 0.999)
-        {
-            InterlockedAdd(_MpmDiagnostics[DIAG_PARTIAL_GRID_SUPPORT], 1);
-        }
-    }
-}
-
-[numthreads(256, 1, 1)]
-void KP2G(uint3 id : SV_DispatchThreadID)
-{
-    RunP2GParticle(id.x);
-}
-
-bool TryGetMpmTileOrderedParticleIndex(
-    uint orderedIndex,
-    out uint particleIndex)
-{
-    uint orderedParticleCount = _MpmTileOrderedParticleMetaRead[0];
-
-    if (orderedIndex >= orderedParticleCount)
-    {
-        particleIndex = 0u;
-        return false;
-    }
-
-    particleIndex = _MpmTileOrderedParticleIndicesRead[orderedIndex];
-    return particleIndex < (uint)_ParticleCount;
-}
-
-[numthreads(256, 1, 1)]
-void KP2GTileOrdered(uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunP2GParticle(particleIndex);
 }
 
 groupshared int _TileP2GMass[512];
@@ -2472,9 +1934,6 @@ void AccumulateP2GParticleHybridTile(
                     if (!IsValidCell(node))
                         continue;
 
-                    if (!IsInsideActiveMpmGridBounds(node))
-                        continue;
-
                     int3 localCell = node - tileBaseCell;
                     bool insideOwnerTile =
                         all(localCell >= int3(0, 0, 0)) &&
@@ -2529,12 +1988,12 @@ void AccumulateP2GParticleHybridTile(
                             pzFixed
                         );
                     }
-                    else
-                    {
-                        int nodeIndex = FlattenGridIndex(node);
-                        InterlockedAdd(
-                            _GridAccumInt[nodeIndex].x,
-                            mFixed
+                else
+                {
+                    int nodeIndex = FlattenGridIndex(node);
+                    InterlockedAdd(
+                        _GridAccumInt[nodeIndex].x,
+                        mFixed
                         );
                         InterlockedAdd(
                             _GridAccumInt[nodeIndex].y,
@@ -2589,9 +2048,6 @@ void AccumulateP2GParticleHybridTile(
                 int3 node = baseCell + int3(dx, dy, dz);
 
                 if (!IsValidCell(node))
-                    continue;
-
-                if (!IsInsideActiveMpmGridBounds(node))
                     continue;
 
                 int3 localCell = node - tileBaseCell;
@@ -2739,7 +2195,7 @@ void KP2GHybridTiled(
             continue;
 
         uint particleIndex =
-            _MpmTileOrderedParticleIndicesRead[listIndex];
+            _MpmTileOwnerParticleIndicesRead[listIndex];
 
         if (particleIndex >= (uint)_ParticleCount)
             continue;
@@ -2846,8 +2302,7 @@ void AccumulateReferenceDensityStressHybridTile(
                 int3 node =
                     baseCell +
                     int3(densityDx, densityDy, densityDz);
-                if (!IsValidCell(node) ||
-                    !IsInsideActiveMpmGridBounds(node))
+                if (!IsValidCell(node))
                 {
                     continue;
                 }
@@ -2942,8 +2397,7 @@ void AccumulateReferenceDensityStressHybridTile(
                 int3 node =
                     baseCell +
                     int3(stressDx, stressDy, stressDz);
-                if (!IsValidCell(node) ||
-                    !IsInsideActiveMpmGridBounds(node))
+                if (!IsValidCell(node))
                 {
                     continue;
                 }
@@ -3080,7 +2534,7 @@ void KP2GReferenceDensityStressHybrid(
                 continue;
 
             uint particleIndex =
-                _MpmTileOrderedParticleIndicesRead[listIndex];
+                _MpmTileOwnerParticleIndicesRead[listIndex];
             AccumulateReferenceDensityStressHybridTile(
                 particleIndex,
                 tileBaseCell
@@ -3134,8 +2588,7 @@ void KP2GReferenceDensityStressHybrid(
 
 float ReadGridDensityForGridEos(int3 cell)
 {
-    if (!IsValidCell(cell) ||
-        !IsInsideActiveMpmGridBounds(cell))
+    if (!IsValidCell(cell))
     {
         return 0.0;
     }
@@ -3144,7 +2597,7 @@ float ReadGridDensityForGridEos(int3 cell)
     {
         uint tileIndex;
         if (!TryGetMpmTileForCell(cell, tileIndex) ||
-            _MpmTileFlags[tileIndex] == 0u)
+            _MpmTileFlagsRead[tileIndex] == 0u)
         {
             return 0.0;
         }
@@ -3244,85 +2697,6 @@ float3 EvaluateGridEosVelocityCorrection(
 }
 
 [numthreads(8, 8, 8)]
-void KGridUpdate(uint3 id : SV_DispatchThreadID)
-{
-    int nodeIndex;
-    int3 cell;
-    if (!TryGetMpmGridDispatchCell(id, nodeIndex, cell))
-        return;
-
-    int4 accum = _GridAccumInt[nodeIndex];
-
-    float mass = (float)accum.x / max((float)_MassFixedScale, 1.0);
-
-    if (mass <= 1e-8)
-    {
-        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, 0);
-        return;
-    }
-
-    float3 momentum = float3(
-        (float)accum.y / max((float)_MomentumFixedScale, 1.0),
-        (float)accum.z / max((float)_MomentumFixedScale, 1.0),
-        (float)accum.w / max((float)_MomentumFixedScale, 1.0)
-    );
-
-    float3 v = momentum / mass;
-
-    if (!IsFiniteFloat3(v))
-    {
-        if (_EnableGpuDiagnostics != 0)
-            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
-        _GridVelocityMass[nodeIndex] = float4(0, 0, 0, mass);
-        return;
-    }
-
-    if (_EnableGridDensityEos != 0)
-    {
-        float cellVolume =
-            max(_CellSize * _CellSize * _CellSize, 1e-12);
-        float centerDensity = mass / cellVolume;
-        float3 eosCorrection =
-            EvaluateGridEosVelocityCorrection(cell, centerDensity);
-
-        if (IsFiniteFloat3(eosCorrection))
-        {
-            v += eosCorrection;
-        }
-        else if (_EnableGpuDiagnostics != 0)
-        {
-            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
-        }
-    }
-
-    v += _Gravity * _Dt;
-
-    if (_VelocityDampingPerSecond > 0.0)
-    {
-        float damping = exp(-_VelocityDampingPerSecond * _Dt);
-        v *= damping;
-    }
-
-    //if (_EnableBoxBoundary != 0)
-    //{
-    //    if (x <= 1u && v.x < 0) v.x = -v.x * _BoundaryDamping;
-    //    if (x >= gx - 2u && v.x > 0) v.x = -v.x * _BoundaryDamping;
-
-    //    if (y <= 1u && v.y < 0) v.y = -v.y * _BoundaryDamping;
-    //    if (y >= gy - 2u && v.y > 0) v.y = -v.y * _BoundaryDamping;
-
-    //    uint gz = (uint)_GridResolution.z;
-
-    //    if (z <= 1u && v.z < 0) v.z = -v.z * _BoundaryDamping;
-    //    if (z >= gz - 2u && v.z > 0) v.z = -v.z * _BoundaryDamping;
-    //}
-
-    v = ClampSpeed(v);
-
-    _GridVelocityMass[nodeIndex] = float4(v, mass);
-}
-
-[numthreads(8, 8, 8)]
 void KGridUpdateActiveTiles(
     uint3 groupId : SV_GroupID,
     uint3 localId : SV_GroupThreadID)
@@ -3333,7 +2707,6 @@ void KGridUpdateActiveTiles(
         return;
 
     int4 accum = _GridAccumInt[nodeIndex];
-
     float mass = (float)accum.x / max((float)_MassFixedScale, 1.0);
 
     if (mass <= 1e-8)
@@ -3456,9 +2829,6 @@ void RunG2PVelocityApicParticle(uint particleIndex)
                     if (!IsValidCell(node))
                         continue;
 
-                    if (!IsInsideActiveMpmGridBounds(node))
-                        continue;
-
                     float wx = LinearWeight(linearF.x, dx);
                     float wy = LinearWeight(linearF.y, dy);
                     float wz = LinearWeight(linearF.z, dz);
@@ -3495,9 +2865,6 @@ void RunG2PVelocityApicParticle(uint particleIndex)
                 int3 node = baseCell + int3(dx, dy, dz);
 
                 if (!IsValidCell(node))
-                    continue;
-
-                if (!IsInsideActiveMpmGridBounds(node))
                     continue;
 
                 //float wx = dx == 0 ? (1.0 - f.x) : f.x;
@@ -3797,32 +3164,10 @@ void KG2PVelocityApic(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(256, 1, 1)]
-void KG2PVelocityApicTileOrdered(uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunG2PVelocityApicParticle(particleIndex);
-}
-
-[numthreads(256, 1, 1)]
 void KG2PVelocityApicBucketCollision(uint3 id : SV_DispatchThreadID)
 {
     RunG2PVelocityApicParticle(id.x);
     RunBucketCollisionParticle(id.x);
-}
-
-[numthreads(256, 1, 1)]
-void KG2PVelocityApicBucketCollisionTileOrdered(
-    uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunG2PVelocityApicParticle(particleIndex);
-    RunBucketCollisionParticle(particleIndex);
 }
 
 
@@ -4948,9 +4293,6 @@ void RunMarkProjectionFluidCellsParticle(uint particleIndex)
                 if (!IsValidCell(node))
                     continue;
 
-                if (!IsInsideActiveMpmGridBounds(node))
-                    continue;
-
                 if (!IsInsideActiveProjectionBounds(node))
                     continue;
 
@@ -4983,16 +4325,6 @@ void RunMarkProjectionFluidCellsParticle(uint particleIndex)
 void KMarkProjectionFluidCells(uint3 id : SV_DispatchThreadID)
 {
     RunMarkProjectionFluidCellsParticle(id.x);
-}
-
-[numthreads(256, 1, 1)]
-void KMarkProjectionFluidCellsTileOrdered(uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunMarkProjectionFluidCellsParticle(particleIndex);
 }
 
 [numthreads(1, 1, 1)]
@@ -5095,9 +4427,6 @@ void KApplyMovingBucketProjectionBoundaryVelocity(
     {
         return;
     }
-
-    if (!IsInsideActiveMpmGridBounds(cell))
-        return;
 
     float4 velocityMass = _GridVelocityMass[index];
 
@@ -6039,9 +5368,6 @@ void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    if (!IsInsideActiveMpmGridBounds(cell))
-        return;
-
     float4 velocityMass = _GridVelocityMass[index];
 
     if (velocityMass.w <= 1e-8)
@@ -6552,16 +5878,6 @@ void KBucketCollision(uint3 id : SV_DispatchThreadID)
     RunBucketCollisionParticle(id.x);
 }
 
-[numthreads(256, 1, 1)]
-void KBucketCollisionTileOrdered(uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunBucketCollisionParticle(particleIndex);
-}
-
 /// /// /// /// /// /// /// /// End G8.A Changes  /// /// /// /// /// /// /// /// /// ///
 
 void RunUpdateDeformationParticle(uint particleIndex)
@@ -6679,16 +5995,6 @@ void RunUpdateDeformationParticle(uint particleIndex)
 void KUpdateDeformation(uint3 id : SV_DispatchThreadID)
 {
     RunUpdateDeformationParticle(id.x);
-}
-
-[numthreads(256, 1, 1)]
-void KUpdateDeformationTileOrdered(uint3 id : SV_DispatchThreadID)
-{
-    uint particleIndex;
-    if (!TryGetMpmTileOrderedParticleIndex(id.x, particleIndex))
-        return;
-
-    RunUpdateDeformationParticle(particleIndex);
 }
 
 bool IsAirDomainState(int state)

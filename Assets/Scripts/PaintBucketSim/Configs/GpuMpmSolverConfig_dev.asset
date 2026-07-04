@@ -21,21 +21,8 @@ MonoBehaviour:
   rejectUndersizedGrid: 1
   enableGpuDenseMpm: 1
   gravityScale: 1
-  velocityDampingPerSecond: 0.05
+  velocityDampingPerSecond: 1.1
   maxParticleSpeed: 3
-  enableActiveMpmGridBounds: 0
-  activeMpmGridBoundsPaddingMeters: 0.04
-  activeMpmGridBoundsPaddingCells: 2
-  activeMpmGridMaxFullGridFraction: 0.95
-  enableMpmTileOccupancy: 1
-  enableTiledMpmGridDispatch: 0
-  enableMpmParticleTileLists: 0
-  enableTiledP2G: 0
-  enableTileOrderedParticlePipeline: 0
-  enableHybridTiledP2G: 1
-  enableCenteredHybridP2GOwnerTile: 1
-  enableFusedG2PPostCollision: 1
-  enableFusedPreCollisionTileMark: 1
   enableAdaptiveTransferStencil: 1
   enableAdaptiveG2PTransferStencil: 0
   adaptiveTransferMinParticles: 200000
@@ -48,8 +35,8 @@ MonoBehaviour:
   enableGpuDiagnostics: 0
   enableGpuStageProfiling: 0
   diagnosticsReadbackInterval: 15
-  affineDamping: 0.02
-  maxAffineMagnitude: 25
+  affineDamping: 0.18
+  maxAffineMagnitude: 8
   useAutomaticApicDInverse: 1
   manualApicDInverse: 625
   enableProjectionGridInfrastructure: 1
@@ -58,9 +45,9 @@ MonoBehaviour:
   enableSparseProjectionPressureDispatch: 1
   enableMpmTileProjectionDispatch: 1
   enableProjectionDensityDriftCorrection: 1
-  projectionDensityDriftStrength: 0.2
+  projectionDensityDriftStrength: 0.18
   projectionDensityDriftMinRatio: 1.02
-  projectionDensityDriftMaxDivergence: 12
+  projectionDensityDriftMaxDivergence: 10
   enableAdaptiveMultiRate: 1
   adaptiveActivitySampleInterval: 8
   calmInteriorDeformationInterval: 1
@@ -77,7 +64,7 @@ MonoBehaviour:
   adaptiveProjectionBucketLinearSpeed: 0.08
   adaptiveProjectionBucketAngularSpeed: 0.25
   enablePressureWarmStart: 1
-  pressureWarmStartFactor: 0.75
+  pressureWarmStartFactor: 0.35
   projectionMassFixedScale: 1000000
   minFluidCellMass: 0.0000001
   enableBucketProjectionSolidCells: 1
@@ -92,12 +79,12 @@ MonoBehaviour:
   referenceClampNegativePressure: 1
   referenceEnableProjectionFallback: 1
   enableGridDensityEos: 1
-  gridDensityEosPressureScale: 4
-  gridDensityEosMaxVelocityCorrection: 1.5
-  bulkModulus: 1000
-  mpmViscosity: 0.16
-  materialStressStrength: 1
-  maxStressMagnitude: 8000
+  gridDensityEosPressureScale: 2.8
+  gridDensityEosMaxVelocityCorrection: 1.1
+  bulkModulus: 850
+  mpmViscosity: 0.28
+  materialStressStrength: 0.65
+  maxStressMagnitude: 5200
   minJ: 0.65
   maxJ: 1.35
   maxDeformationGradientValue: 5
@@ -105,40 +92,40 @@ MonoBehaviour:
   autoApplyPaintMaterialPreset: 1
   usePaintMaterialConfigRheology: 1
   enablePaintRheology: 1
-  lowShearViscosity: 2.6
-  highShearViscosity: 0.14
+  lowShearViscosity: 3.2
+  highShearViscosity: 0.16
   shearThinningRelaxationTime: 0.8
   shearThinningPowerN: 0.55
   carreauYasudaExponent: 2.2
-  yieldStress: 0
+  yieldStress: 0.08
   yieldRegularizationRate: 25
   maxYieldViscosityContribution: 3
-  maxEffectiveViscosity: 8
+  maxEffectiveViscosity: 9
   rheologyStrength: 1
   enableFreeSurfacePolish: 1
   freeSurfaceGradientScale: 0.08
-  freeSurfaceNormalDampingPerSecond: 2.5
-  freeSurfaceCohesionAcceleration: 0.75
-  maxFreeSurfaceVelocityCorrection: 0.35
+  freeSurfaceNormalDampingPerSecond: 4.5
+  freeSurfaceCohesionAcceleration: 0.25
+  maxFreeSurfaceVelocityCorrection: 0.18
   enableJetCohesion: 1
-  jetCohesionAcceleration: 0.25
-  maxJetCohesionVelocityCorrection: 0.12
+  jetCohesionAcceleration: 0.15
+  maxJetCohesionVelocityCorrection: 0.08
   enableGpuBucketCollision: 1
   useRealBucketCollision: 1
-  bucketCollisionPadding: 0.002
+  bucketCollisionPadding: 0.004
   bucketRestitution: 0
-  bucketFriction: 0.35
+  bucketFriction: 0.55
   enablePostG2PBucketCollision: 1
   enableAdaptivePostG2PBucketCollision: 1
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 0
+  enableBottomHoleOpening: 1
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
-  holeRadialPaddingMeters: 0.02
-  holeOutflowExitDistanceMeters: 0.004
+  holeRadialPaddingMeters: 0.012
+  holeOutflowExitDistanceMeters: 0.0025
   enableAirborneParticleAdvection: 1
   enableSmartAirborneDispatch: 1
   airborneDragPerSecond: 0.15
@@ -160,16 +147,16 @@ MonoBehaviour:
   enableJacobiPressureSolve: 1
   pressureSolveMode: 1
   pressureJacobiIterations: 12
-  pressureRedBlackSorIterations: 4
+  pressureRedBlackSorIterations: 6
   pressureRhsScale: 1
   pressureJacobiRelaxation: 0.8
-  pressureRedBlackSorOmega: 1.35
+  pressureRedBlackSorOmega: 1.12
   maxProjectionPressure: 1000
   projectionAirPressureZero: 1
   projectionSolidPressureNeumann: 1
   enablePressureGradientSubtraction: 1
   pressureGradientScale: 1
-  maxPressureVelocityCorrection: 3
+  maxPressureVelocityCorrection: 2.2
   invertPressureGradientSign: 0
   pressureCorrectionFluidCellsOnly: 1
   useStaggeredFaceProjection: 1
