@@ -534,6 +534,11 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             EnsureBuffers();
         }
 
+        public void ReleaseBuffersPublic()
+        {
+            ReleaseBuffers();
+        }
+
         public void UploadFromCpuParticlesNow()
         {
             EnsureBuffers();

@@ -95,6 +95,27 @@ namespace PaintBucketSim.Configs
         [Tooltip("Used only if automaticInertiaTensor is false.")]
         public Vector3 manualInertiaTensor = new Vector3(0.025f, 0.02f, 0.025f);
 
+        [Header("Contained Paint Load")]
+        [Tooltip("Include paint still inside the bucket in total mass, center of mass, and inertia.")]
+        public bool enableContainedFluidLoad = true;
+
+        [Range(0.0f, 2.0f)]
+        public float containedFluidMassScale = 1.0f;
+
+        [Min(0.1f)]
+        public float maxContainedFluidMassKg = 45.0f;
+
+        [Tooltip("Response rate for asynchronously sampled fluid load data.")]
+        [Min(0.1f)]
+        public float fluidLoadResponsePerSecond = 8.0f;
+
+        [Range(0.1f, 3.0f)]
+        public float fluidInertiaScale = 1.0f;
+
+        [Tooltip("Maximum horizontal paint center-of-mass displacement used by rigid-body coupling.")]
+        [Min(0.0f)]
+        public float maxFluidCenterOfMassOffsetMeters = 0.14f;
+
         [Header("Motion")]
         public BucketMotionMode motionMode = BucketMotionMode.LockedInitialPose;
 
@@ -118,6 +139,30 @@ namespace PaintBucketSim.Configs
 
         [Min(0.005f)]
         public float jointVisualRadiusMeters = 0.035f;
+
+        [Header("Bail Handle Hinge")]
+        public bool enableBailHinge = false;
+
+        [Range(5.0f, 88.0f)]
+        public float bailHingeMaxAngleDegrees = 82.0f;
+
+        [Min(0.1f)]
+        public float bailHingeResponse = 32.0f;
+
+        [Min(0.0f)]
+        public float bailHingeDamping = 9.0f;
+
+        [Min(0.005f)]
+        public float bailLugVerticalOffsetMeters = 0.025f;
+
+        [Min(0.005f)]
+        public float bailLugRadiusMeters = 0.024f;
+
+        [Min(0.003f)]
+        public float bailLugDepthMeters = 0.018f;
+
+        [Min(0.01f)]
+        public float bailGripLengthMeters = 0.10f;
 
         [Header("Holes")]
         public BucketHoleConfig[] holes =
@@ -149,6 +194,22 @@ namespace PaintBucketSim.Configs
 
             if (massKg < 0.01f)
                 massKg = 0.01f;
+
+            if (maxContainedFluidMassKg < 0.1f)
+                maxContainedFluidMassKg = 0.1f;
+
+            if (fluidLoadResponsePerSecond < 0.1f)
+                fluidLoadResponsePerSecond = 0.1f;
+
+            if (maxFluidCenterOfMassOffsetMeters < 0.0f)
+                maxFluidCenterOfMassOffsetMeters = 0.0f;
+
+            bailHingeMaxAngleDegrees = Mathf.Clamp(
+                bailHingeMaxAngleDegrees,
+                5.0f,
+                88.0f);
+            bailHingeResponse = Mathf.Max(bailHingeResponse, 0.1f);
+            bailHingeDamping = Mathf.Max(bailHingeDamping, 0.0f);
 
             if (visualRadialSegments < 8)
                 visualRadialSegments = 8;
@@ -190,6 +251,22 @@ namespace PaintBucketSim.Configs
                 return localAttachmentPoint;
 
             return new Vector3(0.0f, heightMeters * 0.5f + handleHeightMeters, 0.0f);
+        }
+
+        public Vector3 GetBailHingeCenterLocal()
+        {
+            return new Vector3(
+                0.0f,
+                heightMeters * 0.5f - bailLugVerticalOffsetMeters,
+                0.0f);
+        }
+
+        public float GetBailRadiusMeters()
+        {
+            return Mathf.Max(
+                GetResolvedAttachmentLocalPoint().y -
+                GetBailHingeCenterLocal().y,
+                0.04f);
         }
 
         public Vector3 GetResolvedHoleLocalCenter(BucketHoleConfig hole)

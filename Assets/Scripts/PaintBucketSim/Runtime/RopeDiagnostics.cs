@@ -13,6 +13,15 @@
         public float maxTensionEstimate;
         public float maxStrain;
 
+        public float maxBendAngleRadians;
+        public float averageBendAngleRadians;
+
+        public float endpointTwistRadians;
+        public float endpointTwistAngularVelocity;
+        public float maxTwistGradientRadians;
+        public float twistKineticEnergy;
+        public float twistElasticEnergy;
+
         public int isBroken;
         public int brokenSegmentIndex;
         public float breakTension;

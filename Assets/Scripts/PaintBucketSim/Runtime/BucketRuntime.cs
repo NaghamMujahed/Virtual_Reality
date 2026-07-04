@@ -12,6 +12,9 @@ namespace PaintBucketSim.Runtime
 
         public float mass;
         public float inverseMass;
+        public float dryMass;
+        public float containedFluidMass;
+        public float3 centerOfMassLocal;
 
         public float3 inertiaTensorBody;
         public float3 inverseInertiaTensorBody;
@@ -56,6 +59,13 @@ namespace PaintBucketSim.Runtime
 
         public float kineticEnergyLinear;
         public float kineticEnergyAngular;
+        public float dryMass;
+        public float containedFluidMass;
+        public float totalMass;
+        public float3 centerOfMassLocal;
+        public float3 centerOfMassWorld;
+        public float bailHingeAngleRadians;
+        public float bailHingeAngularVelocity;
 
         public float3 attachmentWorldPosition;
         public float3 attachmentWorldVelocity;

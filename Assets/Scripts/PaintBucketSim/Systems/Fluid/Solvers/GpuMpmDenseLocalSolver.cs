@@ -172,7 +172,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
 
-        private const int DiagnosticsValueCount = 35;
+        private const int DiagnosticsValueCount = 37;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 1000.0f;
@@ -194,6 +194,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private const int DiagnosticMpmTileParticleListOverflow = 32;
         private const int DiagnosticMpmTileParticleListCapacity = 33;
         private const int DiagnosticJetMpmCollarParticles = 34;
+        private const int DiagnosticLocalXSum = 35;
+        private const int DiagnosticLocalZSum = 36;
         private const int MaxMpmSupportTilesPerParticle = 8;
 
         public FluidSolverType SolverType => FluidSolverType.GpuSparseMpmPrototype;
@@ -5310,8 +5312,16 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 Mathf.Max(
                     0.0f,
                     _stats.gpuMaximumFillHeight01 -
-                    _stats.gpuMinimumFillHeight01
+                      _stats.gpuMinimumFillHeight01
                 );
+            _stats.gpuAverageLocalX01 =
+                values[DiagnosticLocalXSum] /
+                DiagnosticsHeightScale /
+                safeActiveParticles;
+            _stats.gpuAverageLocalZ01 =
+                values[DiagnosticLocalZSum] /
+                DiagnosticsHeightScale /
+                safeActiveParticles;
             _stats.gpuAverageParticleSpeed =
                 values[DiagnosticSpeedSum] /
                 DiagnosticsSpeedScale /

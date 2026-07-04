@@ -11,6 +11,13 @@ namespace PaintBucketSim.Runtime
         public float attachmentError;
         public float maxAttachmentError;
         public float estimatedConstraintForce;
+        public float attachmentImpulse;
+
+        public int twistEnabled;
+        public float targetTwistRadians;
+        public float endpointTwistRadians;
+        public float twistErrorRadians;
+        public float appliedTwistTorque;
 
         public float3 ropeEndPosition;
         public float3 bucketAttachmentPosition;

@@ -119,6 +119,8 @@
         public float gpuMinimumFillHeight01;
         public float gpuMaximumFillHeight01;
         public float gpuEstimatedFillSpan01;
+        public float gpuAverageLocalX01;
+        public float gpuAverageLocalZ01;
         public float gpuAverageParticleSpeed;
         public float gpuMaximumParticleSpeed;
         public bool gpuReferenceDensityEosRequested;

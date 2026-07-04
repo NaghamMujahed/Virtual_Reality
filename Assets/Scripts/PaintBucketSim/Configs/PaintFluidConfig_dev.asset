@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: PaintFluidConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintFluidConfig
   initializationMode: 0
-  targetParticleCount: 350000
+  targetParticleCount: 100000
   manualParticleSpacingMeters: 0.035
   fillFraction01: 0.5
   particleRadiusToSpacing: 0.4

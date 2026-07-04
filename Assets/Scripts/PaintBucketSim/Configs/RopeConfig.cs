@@ -99,6 +99,13 @@ namespace PaintBucketSim.Configs
         [Range(1, 64)]
         public int solverIterations = 12;
 
+        [Tooltip("Apply a final unilateral strain limit. This keeps heavy endpoint payloads from defeating iterative XPBD convergence.")]
+        public bool enforceMaximumSegmentStrain = true;
+
+        [Tooltip("Maximum per-segment extension after the XPBD solve.")]
+        [Range(0.0f, 0.2f)]
+        public float maximumSegmentStrain = 0.02f;
+
         public RopeBendingModel bendingModel = RopeBendingModel.AngleArccos;
         public bool enableBending = true;
 
@@ -144,6 +151,25 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float pivotNoiseSpeed = 0.5f;
 
+        [Tooltip("Maximum physical anchor speed. Prevents low frame-rate Transform sampling from becoming a teleport impulse.")]
+        [Min(0.1f)]
+        public float maxPivotSpeedMetersPerSecond = 0.6f;
+
+        [Header("Interactive Grab")]
+        public bool enableInteractiveGrab = true;
+
+        [Tooltip("Softness of the rope grab constraint. Lower values feel more direct; higher values feel springier.")]
+        [Min(0.0f)]
+        public float grabCompliance = 1e-6f;
+
+        [Tooltip("Maximum world-space correction the grab constraint can request per solver iteration.")]
+        [Min(0.001f)]
+        public float maxGrabCorrectionPerIteration = 0.045f;
+
+        [Tooltip("Maximum physical speed for the interactive grab target.")]
+        [Min(0.1f)]
+        public float maxGrabSpeedMetersPerSecond = 1.2f;
+
         [Header("Air Drag")]
         public RopeAirDragMode airDragMode = RopeAirDragMode.Linear;
 
@@ -159,17 +185,53 @@ namespace PaintBucketSim.Configs
         [Range(0.0f, 2.0f)]
         public float gravityScale = 1.0f;
 
-        [Header("Twist Scaffold")]
-        [Tooltip("Creates twist-related data for later bucket coupling. True twist torque becomes meaningful when the bucket provides endpoint rotation.")]
+        [Header("Rod Torsion")]
+        [Tooltip("Enables the inertial discrete-rod torsion solve and material frames.")]
         public bool enableTwistData = true;
 
-        [Tooltip("Approximate twist stiffness scale for later bucket coupling.")]
+        [Tooltip("Multiplier applied to the physical torsional rigidity.")]
         [Min(0.0f)]
         public float twistStiffnessScale = 1.0f;
 
-        [Tooltip("Approximate twist damping for later bucket coupling.")]
+        [Tooltip("Angular velocity damping per second for segment material frames.")]
         [Min(0.0f)]
         public float twistDamping = 0.1f;
+
+        [Tooltip("Effective GJ torsional rigidity in N*m^2. Braided rope is much softer in torsion than a solid cylinder.")]
+        [Min(0.0001f)]
+        public float torsionalRigidityNewtonMeterSquared = 0.035f;
+
+        [Tooltip("Scales polar segment inertia to account for rotating strands and unresolved fibers.")]
+        [Min(0.01f)]
+        public float twistInertiaScale = 6.0f;
+
+        [Tooltip("Safety clamp for segment angular velocity around the rope axis.")]
+        [Min(1.0f)]
+        public float maxTwistAngularSpeedRadiansPerSecond = 45.0f;
+
+        [Tooltip("Number of scalar torsion smoothing iterations used by the material-frame rope stage.")]
+        [Range(0, 24)]
+        public int torsionSolverIterations = 6;
+
+        [Tooltip("How strongly neighboring material frames resist twist discontinuities.")]
+        [Range(0.0f, 1.0f)]
+        public float torsionPropagationStrength = 0.28f;
+
+        [Tooltip("How strongly the ceiling end resists axial twist. 1 means the top material frame is fixed.")]
+        [Range(0.0f, 1.0f)]
+        public float topTwistAnchorStrength = 0.65f;
+
+        [Tooltip("Maximum allowed twist change between neighboring segments after smoothing.")]
+        [Min(0.001f)]
+        public float maxTwistGradientRadians = 0.42f;
+
+        [Tooltip("Legacy endpoint-follow value retained for old assets. Torque coupling is used by the current rod solver.")]
+        [Range(0.0f, 1.0f)]
+        public float endpointTwistFollow = 0.35f;
+
+        [Tooltip("Maximum endpoint twist correction per substep in radians.")]
+        [Min(0.001f)]
+        public float maxEndpointTwistCorrectionRadians = 0.12f;
 
         [Header("Diagnostics")]
         public bool enableTensionDiagnostics = true;
@@ -194,8 +256,38 @@ namespace PaintBucketSim.Configs
             if (initialDirection.sqrMagnitude < 1e-6f)
                 initialDirection = Vector3.down;
 
+            if (maxPivotSpeedMetersPerSecond < 0.1f)
+                maxPivotSpeedMetersPerSecond = 0.1f;
+
+            if (grabCompliance < 0.0f)
+                grabCompliance = 0.0f;
+
+            if (maxGrabCorrectionPerIteration < 0.001f)
+                maxGrabCorrectionPerIteration = 0.001f;
+
+            if (maxGrabSpeedMetersPerSecond < 0.1f)
+                maxGrabSpeedMetersPerSecond = 0.1f;
+
             if (youngModulusPa < 1000.0f)
                 youngModulusPa = 1000.0f;
+
+            if (maxEndpointTwistCorrectionRadians < 0.001f)
+                maxEndpointTwistCorrectionRadians = 0.001f;
+
+            if (torsionalRigidityNewtonMeterSquared < 0.0001f)
+                torsionalRigidityNewtonMeterSquared = 0.0001f;
+
+            if (twistInertiaScale < 0.01f)
+                twistInertiaScale = 0.01f;
+
+            if (maxTwistAngularSpeedRadiansPerSecond < 1.0f)
+                maxTwistAngularSpeedRadiansPerSecond = 1.0f;
+
+            if (torsionSolverIterations < 0)
+                torsionSolverIterations = 0;
+
+            if (maxTwistGradientRadians < 0.001f)
+                maxTwistGradientRadians = 0.001f;
         }
     }
 }

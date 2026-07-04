@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: EnvironmentConfig_Default
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.EnvironmentConfig
   gravity: {x: 0, y: -9.81, z: 0}
-  windVelocity: {x: 2, y: 0, z: 0}
+  windVelocity: {x: 0, y: 0, z: 0}
   airDensity: 1.225
   airViscosity: 0.000018
   temperatureCelsius: 20

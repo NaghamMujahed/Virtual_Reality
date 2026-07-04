@@ -399,7 +399,9 @@ static const uint DIAG_MPM_TILE_MAX_PARTICLE_REFS = 31;
 static const uint DIAG_MPM_TILE_PARTICLE_LIST_OVERFLOW = 32;
 static const uint DIAG_MPM_TILE_PARTICLE_LIST_CAPACITY = 33;
 static const uint DIAG_JET_MPM_COLLAR_PARTICLES = 34;
-static const uint MPM_DIAGNOSTIC_COUNT = 35;
+static const uint DIAG_LOCAL_X_SUM = 35;
+static const uint DIAG_LOCAL_Z_SUM = 36;
+static const uint MPM_DIAGNOSTIC_COUNT = 37;
 static const uint MPM_TILE_THREAD_DIM = 8u;
 static const uint MPM_TILE_CELL_COUNT = 512u;
 static const uint MPM_TILE_P2G_THREAD_COUNT = 256u;
@@ -2054,11 +2056,25 @@ void RunP2GParticle(uint particleIndex)
         uint fixedLocalY = (uint)round(
             normalizedBucketY * DIAG_HEIGHT_FIXED_SCALE
         );
+        float diagnosticRadius = max(
+            max(_BucketTopRadius, _BucketBottomRadius),
+            1e-6
+        );
+        uint fixedLocalX = (uint)round(
+            saturate(localPForDiagnostics.x / (2.0 * diagnosticRadius) + 0.5) *
+            DIAG_HEIGHT_FIXED_SCALE
+        );
+        uint fixedLocalZ = (uint)round(
+            saturate(localPForDiagnostics.z / (2.0 * diagnosticRadius) + 0.5) *
+            DIAG_HEIGHT_FIXED_SCALE
+        );
         uint fixedSpeed = (uint)round(
             min(length(v), 10.0) * DIAG_SPEED_FIXED_SCALE
         );
 
         InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Y_SUM], fixedLocalY);
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_X_SUM], fixedLocalX);
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Z_SUM], fixedLocalZ);
         InterlockedMin(_MpmDiagnostics[DIAG_LOCAL_Y_MIN], fixedLocalY);
         InterlockedMax(_MpmDiagnostics[DIAG_LOCAL_Y_MAX], fixedLocalY);
         InterlockedAdd(_MpmDiagnostics[DIAG_SPEED_SUM], fixedSpeed);
@@ -2376,11 +2392,25 @@ void AccumulateP2GParticleHybridTile(
         uint fixedLocalY = (uint)round(
             normalizedBucketY * DIAG_HEIGHT_FIXED_SCALE
         );
+        float diagnosticRadius = max(
+            max(_BucketTopRadius, _BucketBottomRadius),
+            1e-6
+        );
+        uint fixedLocalX = (uint)round(
+            saturate(localPForDiagnostics.x / (2.0 * diagnosticRadius) + 0.5) *
+            DIAG_HEIGHT_FIXED_SCALE
+        );
+        uint fixedLocalZ = (uint)round(
+            saturate(localPForDiagnostics.z / (2.0 * diagnosticRadius) + 0.5) *
+            DIAG_HEIGHT_FIXED_SCALE
+        );
         uint fixedSpeed = (uint)round(
             min(length(v), 10.0) * DIAG_SPEED_FIXED_SCALE
         );
 
         InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Y_SUM], fixedLocalY);
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_X_SUM], fixedLocalX);
+        InterlockedAdd(_MpmDiagnostics[DIAG_LOCAL_Z_SUM], fixedLocalZ);
         InterlockedMin(_MpmDiagnostics[DIAG_LOCAL_Y_MIN], fixedLocalY);
         InterlockedMax(_MpmDiagnostics[DIAG_LOCAL_Y_MAX], fixedLocalY);
         InterlockedAdd(_MpmDiagnostics[DIAG_SPEED_SUM], fixedSpeed);

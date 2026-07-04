@@ -22,10 +22,25 @@ namespace PaintBucketSim.Systems.Rope
         private bool _initialized;
 
         private Vector3 _basePivotPosition;
+        private float3 _simulatedPivotPosition;
+        private float3 _simulatedPivotVelocity;
+        private float3 _fixedStepPivotStart;
+        private float3 _fixedStepPivotTarget;
+        private int _pivotSubstepCursor;
+        private float _externalEndpointTwistTorque;
+        private bool _grabActive;
+        private int _grabSegmentIndex = -1;
+        private float _grabSegmentT;
+        private float3 _requestedGrabTarget;
+        private float3 _simulatedGrabTarget;
+        private float3 _simulatedGrabVelocity;
 
         public RopeConfig Config => ropeConfig;
         public bool IsInitialized => _initialized && _data != null && _data.IsCreated;
         public int ParticleCount => IsInitialized ? _data.ParticleCount : 0;
+        public bool IsGrabActive => _grabActive;
+        public int GrabSegmentIndex => _grabActive ? _grabSegmentIndex : -1;
+        public float GrabSegmentT => _grabActive ? _grabSegmentT : 0.0f;
 
         public bool IsBroken => IsInitialized && _data.BreakState[0].isBroken != 0;
         public int BrokenSegmentIndex => IsInitialized ? _data.BreakState[0].brokenSegmentIndex : -1;
@@ -61,8 +76,23 @@ namespace PaintBucketSim.Systems.Rope
             _data.Allocate(ropeConfig.segmentCount, Allocator.Persistent);
 
             _basePivotPosition = pivotTransform != null ? pivotTransform.position : transform.position;
+            _simulatedPivotPosition = new float3(
+                _basePivotPosition.x,
+                _basePivotPosition.y,
+                _basePivotPosition.z);
+            _simulatedPivotVelocity = float3.zero;
+            _fixedStepPivotStart = _simulatedPivotPosition;
+            _fixedStepPivotTarget = _simulatedPivotPosition;
+            _pivotSubstepCursor = 0;
 
             InitializeRopeParticles();
+            _externalEndpointTwistTorque = 0.0f;
+            _grabActive = false;
+            _grabSegmentIndex = -1;
+            _grabSegmentT = 0.0f;
+            _requestedGrabTarget = float3.zero;
+            _simulatedGrabTarget = float3.zero;
+            _simulatedGrabVelocity = float3.zero;
 
             _initialized = true;
         }
@@ -91,13 +121,18 @@ namespace PaintBucketSim.Systems.Rope
             float segmentRestLength = ropeConfig.lengthMeters / math.max(ropeConfig.segmentCount, 1);
             float stretchCompliance = ComputeStretchCompliance(segmentRestLength);
             float bendCompliance = ComputeBendCompliance(segmentRestLength);
+            float torsionCompliance = ComputeTorsionCompliance(segmentRestLength);
+            float endpointTwistTorque = _externalEndpointTwistTorque;
+            _externalEndpointTwistTorque = 0.0f;
 
             int brokenSegment = _data.BreakState[0].isBroken != 0
                 ? _data.BreakState[0].brokenSegmentIndex
                 : -1;
 
-            float3 pivot = GetPivotPosition(context);
+            float3 pivot = GetPivotPosition(context, dt);
+            _data.Velocities[0] = float3.zero;
             float3 gravity = (float3)context.EnvironmentState.gravity * ropeConfig.gravityScale;
+            float3 grabTarget = UpdateGrabTarget(dt);
 
             bool useRelativeDamping =
                 ropeConfig.dampingMode == RopeDampingMode.RelativeSegment ||
@@ -160,8 +195,21 @@ namespace PaintBucketSim.Systems.Rope
                 bendCompliance = bendCompliance,
                 enableBending = ropeConfig.enableBending,
                 bendingModel = (int)ropeConfig.bendingModel,
+                enforceMaximumSegmentStrain =
+                    ropeConfig.enforceMaximumSegmentStrain,
+                maximumSegmentStrain = ropeConfig.maximumSegmentStrain,
+                enableGrabConstraint =
+                    _grabActive &&
+                    ropeConfig.enableInteractiveGrab,
+                grabSegmentIndex = _grabSegmentIndex,
+                grabSegmentT = _grabSegmentT,
+                grabTarget = grabTarget,
+                grabCompliance = ropeConfig.grabCompliance,
+                maxGrabCorrectionPerIteration =
+                    ropeConfig.maxGrabCorrectionPerIteration,
                 brokenSegmentIndex = brokenSegment,
                 positions = _data.Positions,
+                previousPositions = _data.PreviousPositions,
                 inverseMasses = _data.InverseMasses,
                 stretchRestLengths = _data.StretchRestLengths,
                 stretchLambdas = _data.StretchLambdas,
@@ -191,6 +239,34 @@ namespace PaintBucketSim.Systems.Rope
 
             handle = velocityJob.Schedule(_data.ParticleCount, 32, handle);
 
+            var materialFrameJob = new RopeMaterialFrameUpdateJob
+            {
+                dt = dt,
+                solverIterations = ropeConfig.enableTwistData
+                    ? ropeConfig.torsionSolverIterations
+                    : 0,
+                torsionCompliance = torsionCompliance,
+                torsionPropagationStrength = ropeConfig.torsionPropagationStrength,
+                topTwistAnchorStrength = ropeConfig.topTwistAnchorStrength,
+                maxTwistGradientRadians = ropeConfig.maxTwistGradientRadians,
+                maxTwistAngularSpeed = ropeConfig.maxTwistAngularSpeedRadiansPerSecond,
+                twistDamping = ropeConfig.twistDamping,
+                externalEndpointTorque = ropeConfig.enableTwistData
+                    ? endpointTwistTorque
+                    : 0.0f,
+                brokenSegmentIndex = brokenSegment,
+                positions = _data.Positions,
+                segmentRestTwistAngles = _data.SegmentRestTwistAngles,
+                segmentTwistAngles = _data.SegmentTwistAngles,
+                segmentPreviousTwistAngles = _data.SegmentPreviousTwistAngles,
+                segmentTwistAngularVelocities = _data.SegmentTwistAngularVelocities,
+                segmentInverseTwistInertias = _data.SegmentInverseTwistInertias,
+                twistLambdas = _data.TwistLambdas,
+                segmentFrames = _data.SegmentFrames
+            };
+
+            handle = materialFrameJob.Schedule(handle);
+
             var breakJob = new RopeBreakDetectionJob
             {
                 dt = dt,
@@ -213,6 +289,11 @@ namespace PaintBucketSim.Systems.Rope
                 positions = _data.Positions,
                 stretchRestLengths = _data.StretchRestLengths,
                 stretchLambdas = _data.StretchLambdas,
+                segmentTwistAngles = _data.SegmentTwistAngles,
+                segmentTwistAngularVelocities = _data.SegmentTwistAngularVelocities,
+                segmentInverseTwistInertias = _data.SegmentInverseTwistInertias,
+                segmentRestTwistAngles = _data.SegmentRestTwistAngles,
+                torsionStiffness = 1.0f / Mathf.Max(torsionCompliance, 1e-8f),
                 breakState = _data.BreakState,
                 diagnostics = _data.Diagnostics
             };
@@ -244,12 +325,154 @@ namespace PaintBucketSim.Systems.Rope
             return new Vector3(p.x, p.y, p.z);
         }
 
+        public bool TryFindClosestSegment(
+            Ray ray,
+            float maxDistanceMeters,
+            out int segmentIndex,
+            out float segmentT,
+            out Vector3 grabPoint,
+            out float distanceMeters)
+        {
+            segmentIndex = -1;
+            segmentT = 0.0f;
+            grabPoint = Vector3.zero;
+            distanceMeters = float.PositiveInfinity;
+
+            if (!IsInitialized || _data.SegmentCount <= 0)
+                return false;
+
+            float pickDistance = Mathf.Max(maxDistanceMeters, 0.001f);
+            int brokenSegment = BrokenSegmentIndex;
+
+            for (int c = 0; c < _data.SegmentCount; c++)
+            {
+                if (c == brokenSegment)
+                    continue;
+
+                Vector3 p0 = ToVector3(_data.Positions[c]);
+                Vector3 p1 = ToVector3(_data.Positions[c + 1]);
+
+                float distance = DistanceRayToSegment(
+                    ray,
+                    p0,
+                    p1,
+                    out float t,
+                    out Vector3 closestOnSegment);
+
+                if (distance >= distanceMeters || distance > pickDistance)
+                    continue;
+
+                segmentIndex = c;
+                segmentT = ClampGrabSegmentT(c, t);
+                grabPoint = Vector3.Lerp(p0, p1, segmentT);
+                distanceMeters = distance;
+            }
+
+            return segmentIndex >= 0;
+        }
+
+        public bool BeginGrab(int segmentIndex, float segmentT, Vector3 worldPosition)
+        {
+            if (!IsInitialized ||
+                ropeConfig == null ||
+                !ropeConfig.enableInteractiveGrab ||
+                segmentIndex < 0 ||
+                segmentIndex >= _data.SegmentCount ||
+                segmentIndex == BrokenSegmentIndex)
+            {
+                return false;
+            }
+
+            float t = ClampGrabSegmentT(segmentIndex, segmentT);
+            float b0 = 1.0f - t;
+            float b1 = t;
+            float weightedInverseMass =
+                b0 * b0 * _data.InverseMasses[segmentIndex] +
+                b1 * b1 * _data.InverseMasses[segmentIndex + 1];
+
+            if (weightedInverseMass <= 1e-8f)
+                return false;
+
+            _grabActive = true;
+            _grabSegmentIndex = segmentIndex;
+            _grabSegmentT = t;
+            _requestedGrabTarget = new float3(
+                worldPosition.x,
+                worldPosition.y,
+                worldPosition.z);
+            _simulatedGrabTarget = _requestedGrabTarget;
+            _simulatedGrabVelocity = float3.zero;
+            return true;
+        }
+
+        public void MoveGrab(Vector3 worldPosition)
+        {
+            if (!_grabActive)
+                return;
+
+            _requestedGrabTarget = new float3(
+                worldPosition.x,
+                worldPosition.y,
+                worldPosition.z);
+        }
+
+        public void EndGrab()
+        {
+            _grabActive = false;
+            _grabSegmentIndex = -1;
+            _grabSegmentT = 0.0f;
+            _simulatedGrabVelocity = float3.zero;
+        }
+
+        public Vector3 GetGrabTargetPosition()
+        {
+            if (!_grabActive)
+                return Vector3.zero;
+
+            return ToVector3(_simulatedGrabTarget);
+        }
+
+        public Vector3 GetGrabTargetVelocity()
+        {
+            if (!_grabActive)
+                return Vector3.zero;
+
+            return ToVector3(_simulatedGrabVelocity);
+        }
+
         public Vector3 GetRopeEndPosition()
         {
             if (!IsInitialized)
                 return Vector3.zero;
 
             return GetParticlePosition(_data.ParticleCount - 1);
+        }
+
+        public float GetMechanicalEnergy(Vector3 gravity)
+        {
+            if (!IsInitialized)
+                return 0.0f;
+
+            float3 gravityFloat = new float3(
+                gravity.x,
+                gravity.y,
+                gravity.z);
+            float energy = 0.0f;
+
+            for (int i = 1; i < _data.ParticleCount; i++)
+            {
+                float inverseMass = _data.InverseMasses[i];
+                if (inverseMass <= 1e-8f)
+                    continue;
+
+                float mass = 1.0f / inverseMass;
+                float3 velocity = _data.Velocities[i];
+                float3 position = _data.Positions[i];
+                energy += 0.5f * mass * math.lengthsq(velocity);
+                energy -= mass * math.dot(gravityFloat, position);
+            }
+
+            return energy;
         }
 
         private void InitializeRopeParticles()
@@ -303,8 +526,27 @@ namespace PaintBucketSim.Systems.Rope
                 _data.StretchLambdas[c] = 0.0f;
 
                 _data.SegmentTwistAngles[c] = 0.0f;
+                _data.SegmentPreviousTwistAngles[c] = 0.0f;
                 _data.SegmentTwistAngularVelocities[c] = 0.0f;
                 _data.SegmentRestTwistAngles[c] = 0.0f;
+                _data.TwistLambdas[c] = 0.0f;
+
+                float segmentMass = Mathf.Max(
+                    ropeConfig.ropeMassKg / Mathf.Max(segments, 1),
+                    1e-6f);
+                float radius = Mathf.Max(ropeConfig.physicalRadiusMeters, 1e-5f);
+                float polarInertia =
+                    0.5f *
+                    segmentMass *
+                    radius *
+                    radius *
+                    Mathf.Max(ropeConfig.twistInertiaScale, 0.01f);
+                _data.SegmentInverseTwistInertias[c] =
+                    1.0f / Mathf.Max(polarInertia, 1e-8f);
+
+                quaternion frame = BuildSegmentFrame(c, 0.0f);
+                _data.SegmentFrames[c] = frame;
+                _data.SegmentRestFrames[c] = frame;
             }
 
             for (int c = 0; c < _data.BendConstraintCount; c++)
@@ -333,6 +575,13 @@ namespace PaintBucketSim.Systems.Rope
                 averageStretchError = 0.0f,
                 maxTensionEstimate = 0.0f,
                 maxStrain = 0.0f,
+                maxBendAngleRadians = 0.0f,
+                averageBendAngleRadians = 0.0f,
+                endpointTwistRadians = 0.0f,
+                endpointTwistAngularVelocity = 0.0f,
+                maxTwistGradientRadians = 0.0f,
+                twistKineticEnergy = 0.0f,
+                twistElasticEnergy = 0.0f,
                 isBroken = 0,
                 brokenSegmentIndex = -1
             };
@@ -368,7 +617,43 @@ namespace PaintBucketSim.Systems.Rope
             return compliance * ropeConfig.bendComplianceScale;
         }
 
-        private float3 GetPivotPosition(SimulationContext context)
+        private float ComputeTorsionCompliance(float segmentRestLength)
+        {
+            float rigidity =
+                Mathf.Max(ropeConfig.torsionalRigidityNewtonMeterSquared, 0.0001f) *
+                Mathf.Max(ropeConfig.twistStiffnessScale, 0.001f);
+
+            return segmentRestLength / rigidity;
+        }
+
+        private float3 UpdateGrabTarget(float dt)
+        {
+            if (!_grabActive)
+                return float3.zero;
+
+            float safeDt = Mathf.Max(dt, 1e-8f);
+            float maximumDistance =
+                Mathf.Max(
+                    ropeConfig != null
+                        ? ropeConfig.maxGrabSpeedMetersPerSecond
+                        : 1.0f,
+                    0.1f) *
+                safeDt;
+            float3 previous = _simulatedGrabTarget;
+            float3 delta = _requestedGrabTarget - previous;
+            float distance = math.length(delta);
+
+            if (distance > maximumDistance && distance > 1e-8f)
+                _simulatedGrabTarget = previous + delta / distance * maximumDistance;
+            else
+                _simulatedGrabTarget = _requestedGrabTarget;
+
+            _simulatedGrabVelocity =
+                (_simulatedGrabTarget - previous) / safeDt;
+            return _simulatedGrabTarget;
+        }
+
+        private float3 GetPivotPosition(SimulationContext context, float dt)
         {
             Vector3 basePosition = pivotTransform != null
                 ? pivotTransform.position
@@ -396,7 +681,146 @@ namespace PaintBucketSim.Systems.Rope
             }
 
             Vector3 p = basePosition + offset;
-            return new float3(p.x, p.y, p.z);
+            float3 target = new float3(p.x, p.y, p.z);
+            int substeps = context != null && context.SimulationConfig != null
+                ? Mathf.Max(context.SimulationConfig.substeps, 1)
+                : 1;
+            float fixedStepDuration = Mathf.Max(dt * substeps, 1e-8f);
+            int localSubstep = Mathf.Clamp(
+                _pivotSubstepCursor,
+                0,
+                substeps - 1);
+
+            if (localSubstep == 0)
+            {
+                _fixedStepPivotStart = _simulatedPivotPosition;
+                float3 targetDelta = target - _fixedStepPivotStart;
+                float targetDistance = math.length(targetDelta);
+                float maximumDistance =
+                    Mathf.Max(
+                        ropeConfig.maxPivotSpeedMetersPerSecond,
+                        0.1f) *
+                    fixedStepDuration;
+                _fixedStepPivotTarget =
+                    targetDistance > maximumDistance &&
+                    targetDistance > 1e-8f
+                        ? _fixedStepPivotStart +
+                          targetDelta / targetDistance * maximumDistance
+                        : target;
+            }
+
+            _simulatedPivotVelocity =
+                (_fixedStepPivotTarget - _fixedStepPivotStart) /
+                fixedStepDuration;
+            float interpolation =
+                Mathf.Clamp01((localSubstep + 1.0f) / substeps);
+            _simulatedPivotPosition = math.lerp(
+                _fixedStepPivotStart,
+                _fixedStepPivotTarget,
+                interpolation);
+            _pivotSubstepCursor = (localSubstep + 1) % substeps;
+            return _simulatedPivotPosition;
+        }
+
+        private float ClampGrabSegmentT(int segmentIndex, float t)
+        {
+            float clamped = Mathf.Clamp01(t);
+
+            if (segmentIndex == 0)
+                clamped = Mathf.Max(clamped, 0.08f);
+
+            return clamped;
+        }
+
+        private static Vector3 ToVector3(float3 value)
+        {
+            return new Vector3(value.x, value.y, value.z);
+        }
+
+        private static float DistanceRayToSegment(
+            Ray ray,
+            Vector3 segmentStart,
+            Vector3 segmentEnd,
+            out float segmentT,
+            out Vector3 closestOnSegment)
+        {
+            Vector3 rayDirection = ray.direction;
+            if (rayDirection.sqrMagnitude < 1e-10f)
+            {
+                segmentT = 0.0f;
+                closestOnSegment = segmentStart;
+                return float.PositiveInfinity;
+            }
+
+            rayDirection.Normalize();
+            Vector3 segment = segmentEnd - segmentStart;
+            float segmentLengthSq = segment.sqrMagnitude;
+            if (segmentLengthSq < 1e-10f)
+            {
+                segmentT = 0.0f;
+                closestOnSegment = segmentStart;
+                return Vector3.Cross(segmentStart - ray.origin, rayDirection).magnitude;
+            }
+
+            Vector3 w0 = ray.origin - segmentStart;
+            float a = 1.0f;
+            float b = Vector3.Dot(rayDirection, segment);
+            float c = segmentLengthSq;
+            float d = Vector3.Dot(rayDirection, w0);
+            float e = Vector3.Dot(segment, w0);
+            float denominator = a * c - b * b;
+
+            float rayT;
+            if (denominator > 1e-8f)
+            {
+                rayT = (b * e - c * d) / denominator;
+                segmentT = (a * e - b * d) / denominator;
+            }
+            else
+            {
+                rayT = 0.0f;
+                segmentT = e / c;
+            }
+
+            if (rayT < 0.0f)
+            {
+                rayT = 0.0f;
+                segmentT = Mathf.Clamp01(e / c);
+            }
+            else if (segmentT < 0.0f)
+            {
+                segmentT = 0.0f;
+                rayT = Mathf.Max(-d / a, 0.0f);
+            }
+            else if (segmentT > 1.0f)
+            {
+                segmentT = 1.0f;
+                rayT = Mathf.Max((b - d) / a, 0.0f);
+            }
+            else
+            {
+                segmentT = Mathf.Clamp01(segmentT);
+            }
+
+            Vector3 closestOnRay = ray.origin + rayDirection * rayT;
+            closestOnSegment = segmentStart + segment * segmentT;
+            return Vector3.Distance(closestOnRay, closestOnSegment);
+        }
+
+        public Vector3 GetSimulatedPivotPosition()
+        {
+            return new Vector3(
+                _simulatedPivotPosition.x,
+                _simulatedPivotPosition.y,
+                _simulatedPivotPosition.z);
+        }
+
+        public Vector3 GetSimulatedPivotVelocity()
+        {
+            return new Vector3(
+                _simulatedPivotVelocity.x,
+                _simulatedPivotVelocity.y,
+                _simulatedPivotVelocity.z);
         }
 
         public float GetRopeEndInverseMass()
@@ -418,6 +842,133 @@ namespace PaintBucketSim.Systems.Rope
             return new Vector3(v.x, v.y, v.z);
         }
 
+        public Vector3 GetRopeEndTangent()
+        {
+            if (!IsInitialized || _data.ParticleCount < 2)
+                return Vector3.down;
+
+            int end = _data.ParticleCount - 1;
+            float3 delta = _data.Positions[end] - _data.Positions[end - 1];
+
+            if (math.lengthsq(delta) < 1e-10f)
+                return Vector3.down;
+
+            delta = math.normalize(delta);
+            return new Vector3(delta.x, delta.y, delta.z);
+        }
+
+        public float GetRopeEndTwistRadians()
+        {
+            if (!IsInitialized ||
+                !_data.SegmentTwistAngles.IsCreated ||
+                _data.SegmentTwistAngles.Length == 0)
+            {
+                return 0.0f;
+            }
+
+            return _data.SegmentTwistAngles[_data.SegmentTwistAngles.Length - 1];
+        }
+
+        public float GetRopeEndTwistAngularVelocity()
+        {
+            if (!IsInitialized ||
+                !_data.SegmentTwistAngularVelocities.IsCreated ||
+                _data.SegmentTwistAngularVelocities.Length == 0)
+            {
+                return 0.0f;
+            }
+
+            return _data.SegmentTwistAngularVelocities[
+                _data.SegmentTwistAngularVelocities.Length - 1];
+        }
+
+        public Vector3 GetRopeEndMaterialNormal()
+        {
+            if (!IsInitialized ||
+                !_data.SegmentFrames.IsCreated ||
+                _data.SegmentFrames.Length == 0)
+            {
+                return Vector3.up;
+            }
+
+            quaternion frame = _data.SegmentFrames[_data.SegmentFrames.Length - 1];
+            float3 normal = math.rotate(frame, new float3(0.0f, 1.0f, 0.0f));
+            return new Vector3(normal.x, normal.y, normal.z);
+        }
+
+        public void SetEndpointPayloadMass(float payloadMassKg)
+        {
+            if (!IsInitialized || ropeConfig == null)
+                return;
+
+            int index = _data.ParticleCount - 1;
+            float ropeParticleMass =
+                ropeConfig.ropeMassKg /
+                Mathf.Max(1, _data.ParticleCount - 1);
+            float totalTipMass =
+                ropeParticleMass +
+                Mathf.Max(ropeConfig.temporaryTipMassKg, 0.0f) +
+                Mathf.Max(payloadMassKg, 0.0f);
+
+            _data.InverseMasses[index] =
+                1.0f / Mathf.Max(totalTipMass, 1e-6f);
+        }
+
+        public void AddEndpointTwistTorque(float torqueNewtonMeters)
+        {
+            if (!IsInitialized || IsBroken || ropeConfig == null || !ropeConfig.enableTwistData)
+                return;
+
+            _externalEndpointTwistTorque += torqueNewtonMeters;
+        }
+
+        public void CopyTwistAnglesTo(float[] target)
+        {
+            if (!IsInitialized ||
+                target == null ||
+                !_data.SegmentTwistAngles.IsCreated)
+            {
+                return;
+            }
+
+            int count = Mathf.Min(target.Length, _data.SegmentTwistAngles.Length);
+            for (int i = 0; i < count; i++)
+                target[i] = _data.SegmentTwistAngles[i];
+        }
+
+        public void CopySegmentFramesTo(Quaternion[] target)
+        {
+            if (!IsInitialized ||
+                target == null ||
+                !_data.SegmentFrames.IsCreated)
+            {
+                return;
+            }
+
+            int count = Mathf.Min(target.Length, _data.SegmentFrames.Length);
+            for (int i = 0; i < count; i++)
+            {
+                quaternion q = _data.SegmentFrames[i];
+                target[i] = new Quaternion(q.value.x, q.value.y, q.value.z, q.value.w);
+            }
+        }
+
+        public float ApplyEndpointTwistTarget(float targetTwistRadians, float dt)
+        {
+            if (!IsInitialized ||
+                ropeConfig == null ||
+                !ropeConfig.enableTwistData ||
+                !_data.SegmentTwistAngles.IsCreated ||
+                _data.SegmentTwistAngles.Length == 0)
+            {
+                return 0.0f;
+            }
+
+            int end = _data.SegmentTwistAngles.Length - 1;
+            return NormalizeAngleRadians(
+                targetTwistRadians - _data.SegmentTwistAngles[end]);
+        }
+
         public void ApplyRopeEndPositionCorrection(Vector3 correction, float dt, bool updateVelocity)
         {
             if (!IsInitialized || IsBroken)
@@ -437,6 +988,122 @@ namespace PaintBucketSim.Systems.Rope
                 _data.PreviousPositions[index] =
                     _data.Positions[index] - _data.Velocities[index] * dt;
             }
+        }
+
+        public void ApplyRopeEndImpulse(Vector3 impulse, float dt)
+        {
+            if (!IsInitialized || IsBroken)
+                return;
+
+            int index = _data.ParticleCount - 1;
+            float inverseMass = _data.InverseMasses[index];
+            if (inverseMass <= 0.0f)
+                return;
+
+            _data.Velocities[index] +=
+                new float3(impulse.x, impulse.y, impulse.z) * inverseMass;
+
+            if (dt > 1e-8f)
+            {
+                _data.PreviousPositions[index] =
+                    _data.Positions[index] - _data.Velocities[index] * dt;
+            }
+        }
+
+        private void ApplyTwistDamping(float dt)
+        {
+            if (!_data.SegmentTwistAngularVelocities.IsCreated)
+                return;
+
+            float damping = Mathf.Exp(
+                -Mathf.Max(ropeConfig != null ? ropeConfig.twistDamping : 0.0f, 0.0f) *
+                Mathf.Max(dt, 0.0f)
+            );
+
+            for (int i = 0; i < _data.SegmentTwistAngularVelocities.Length; i++)
+                _data.SegmentTwistAngularVelocities[i] *= damping;
+        }
+
+        private void RebuildMaterialFramesFromCurrentCenterline()
+        {
+            if (!IsInitialized || !_data.SegmentFrames.IsCreated)
+                return;
+
+            Vector3 baseNormal = ChooseInitialNormal(GetSegmentTangentVector(0));
+
+            for (int i = 0; i < _data.SegmentFrames.Length; i++)
+            {
+                Vector3 tangent = GetSegmentTangentVector(i);
+                Vector3 transportedNormal = Vector3.ProjectOnPlane(baseNormal, tangent);
+
+                if (transportedNormal.sqrMagnitude < 1e-8f)
+                    transportedNormal = ChooseInitialNormal(tangent);
+                else
+                    transportedNormal.Normalize();
+
+                Vector3 binormal = Vector3.Cross(tangent, transportedNormal).normalized;
+                float twist = _data.SegmentTwistAngles[i];
+
+                Vector3 materialNormal =
+                    transportedNormal * Mathf.Cos(twist) +
+                    binormal * Mathf.Sin(twist);
+
+                Quaternion frame = Quaternion.LookRotation(tangent, materialNormal.normalized);
+                _data.SegmentFrames[i] = new quaternion(frame.x, frame.y, frame.z, frame.w);
+
+                baseNormal = transportedNormal;
+            }
+        }
+
+        private quaternion BuildSegmentFrame(int segmentIndex, float twistRadians)
+        {
+            Vector3 tangent = GetSegmentTangentVector(segmentIndex);
+            Vector3 normal = ChooseInitialNormal(tangent);
+            Vector3 binormal = Vector3.Cross(tangent, normal).normalized;
+
+            Vector3 materialNormal =
+                normal * Mathf.Cos(twistRadians) +
+                binormal * Mathf.Sin(twistRadians);
+
+            Quaternion frame = Quaternion.LookRotation(tangent, materialNormal.normalized);
+            return new quaternion(frame.x, frame.y, frame.z, frame.w);
+        }
+
+        private Vector3 GetSegmentTangentVector(int segmentIndex)
+        {
+            if (_data == null || !_data.Positions.IsCreated || _data.ParticleCount < 2)
+                return Vector3.down;
+
+            int i0 = Mathf.Clamp(segmentIndex, 0, Mathf.Max(0, _data.ParticleCount - 2));
+            int i1 = Mathf.Clamp(i0 + 1, 0, Mathf.Max(0, _data.ParticleCount - 1));
+
+            float3 delta = _data.Positions[i1] - _data.Positions[i0];
+            if (math.lengthsq(delta) < 1e-10f)
+                return Vector3.down;
+
+            delta = math.normalize(delta);
+            return new Vector3(delta.x, delta.y, delta.z);
+        }
+
+        private static Vector3 ChooseInitialNormal(Vector3 tangent)
+        {
+            Vector3 normal = Vector3.ProjectOnPlane(Vector3.up, tangent);
+            if (normal.sqrMagnitude > 1e-8f)
+                return normal.normalized;
+
+            normal = Vector3.ProjectOnPlane(Vector3.right, tangent);
+            if (normal.sqrMagnitude > 1e-8f)
+                return normal.normalized;
+
+            return Vector3.forward;
+        }
+
+        private static float NormalizeAngleRadians(float angle)
+        {
+            const float TwoPi = Mathf.PI * 2.0f;
+
+            angle = Mathf.Repeat(angle + Mathf.PI, TwoPi) - Mathf.PI;
+            return angle;
         }
     }
 }

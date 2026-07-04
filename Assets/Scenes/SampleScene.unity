@@ -2173,13 +2173,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 232214412}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.4504248, y: 0.5450849, z: -0.4504248, w: 0.5450849}
-  m_LocalPosition: {x: -0.78, y: 4.802, z: 0}
+  m_LocalRotation: {x: 0.48598248, y: 0.51363516, z: -0.48598248, w: 0.51363516}
+  m_LocalPosition: {x: -0.22, y: 4.802, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1851241737}
-  m_LocalEulerAnglesHint: {x: 79.136, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 86.831, y: 90, z: 0}
 --- !u!114 &232214414
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2712,9 +2712,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Rope.RopeRenderer
   ropeSystem: {fileID: 303841547}
   lineRenderer: {fileID: 303841545}
+  meshFilter: {fileID: 0}
+  meshRenderer: {fileID: 0}
   ropeColor: {r: 0.85, g: 0.75, b: 0.55, a: 1}
   brokenPartColor: {r: 1, g: 0.45, b: 0.25, a: 1}
   fallbackWidth: 0.02
+  useProceduralTube: 1
+  useBraidedStrands: 1
+  radialSegments: 12
+  strandCount: 3
+  helicalTurnsPerMeter: 3.4
+  strandRadiusRatio: 0.46
+  strandOrbitRadiusRatio: 0.48
+  strandRadialSegments: 8
 --- !u!120 &303841545
 LineRenderer:
   serializedVersion: 3
@@ -2872,13 +2882,13 @@ MonoBehaviour:
   ropeBucketCouplingSystem: {fileID: 303841546}
   boundarySystem: {fileID: 303841551}
   paintFluidSystem: {fileID: 303841553}
-  gpuFluidBufferSet: {fileID: 0}
+  gpuFluidBufferSet: {fileID: 303841555}
   visible: 1
   fontSize: 13
   textColor: {r: 1, g: 1, b: 1, a: 1}
   panelPosition: {x: 10, y: 10}
   panelSize: {x: 250, y: 630}
-  gpuParticleRenderer: {fileID: 0}
+  gpuParticleRenderer: {fileID: 303841554}
 --- !u!114 &303841549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9539,7 +9549,7 @@ Transform:
   m_GameObject: {fileID: 1243977410}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.43, z: 0}
+  m_LocalPosition: {x: 0, y: 0.29, z: 0}
   m_LocalScale: {x: 8, y: 0.01, z: 8}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -13066,11 +13076,17 @@ MonoBehaviour:
   meshFilter: {fileID: 0}
   meshRenderer: {fileID: 0}
   showAttachmentJoint: 1
-  showHoleRing: 1
+  showHoleRing: 0
+  showBailHandle: 1
+  bailHandleRadiusMeters: 0.006
+  bailHandleSegments: 36
   showColorDividers: 1
   colorDividerColor: {r: 0.78, g: 0.78, b: 0.82, a: 1}
   dividerVisualThicknessMultiplier: 1.15
   dividerVisualHeightFraction: 0.92
+  showFluidSurface: 1
+  fluidSurfaceSegments: 64
+  fluidSurfaceWallInsetMeters: 0.006
 --- !u!23 &1657576617
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -13078,7 +13094,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1657576614}
-  m_Enabled: 0
+  m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1

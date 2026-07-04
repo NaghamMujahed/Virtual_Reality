@@ -13,12 +13,12 @@ MonoBehaviour:
   m_Name: RopeConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeConfig
   lengthMeters: 4
-  segmentCount: 24
-  physicalRadiusMeters: 0.024
-  visualRadiusMeters: 0.024
+  segmentCount: 56
+  physicalRadiusMeters: 0.016
+  visualRadiusMeters: 0.018
   initialDirection: {x: 0, y: -1, z: 0}
-  ropeMassKg: 0.12
-  temporaryTipMassKg: 0
+  ropeMassKg: 0.26
+  temporaryTipMassKg: 0.6
   integrationMode: 0
   complianceMode: 1
   manualStretchCompliance: 0.000001
@@ -26,7 +26,9 @@ MonoBehaviour:
   youngModulusPa: 100000000
   stretchComplianceScale: 1
   bendComplianceScale: 1
-  solverIterations: 12
+  solverIterations: 18
+  enforceMaximumSegmentStrain: 1
+  maximumSegmentStrain: 0.02
   bendingModel: 1
   enableBending: 1
   restBendAngleDegrees: 0
@@ -42,11 +44,25 @@ MonoBehaviour:
   pivotMotionFrequencyHz: 0.5
   pivotNoiseStrength: 0.02
   pivotNoiseSpeed: 0.5
+  maxPivotSpeedMetersPerSecond: 0.6
+  enableInteractiveGrab: 1
+  grabCompliance: 0.000001
+  maxGrabCorrectionPerIteration: 0.045
+  maxGrabSpeedMetersPerSecond: 1.2
   airDragMode: 1
   linearAirDragKgPerSecond: 0.015
   quadraticDragCoefficient: 1.1
   gravityScale: 1
   enableTwistData: 1
   twistStiffnessScale: 1
-  twistDamping: 0.1
+  twistDamping: 0.45
+  torsionalRigidityNewtonMeterSquared: 0.035
+  twistInertiaScale: 6
+  maxTwistAngularSpeedRadiansPerSecond: 45
+  torsionSolverIterations: 8
+  torsionPropagationStrength: 0.32
+  topTwistAnchorStrength: 0.7
+  maxTwistGradientRadians: 0.38
+  endpointTwistFollow: 0.35
+  maxEndpointTwistCorrectionRadians: 0.1
   enableTensionDiagnostics: 1

@@ -17,27 +17,41 @@ MonoBehaviour:
   topRadiusMeters: 0.18
   bottomRadiusMeters: 0.18
   wallThicknessMeters: 0.01
-  massKg: 1
+  massKg: 1.2
   automaticInertiaTensor: 1
   manualInertiaTensor: {x: 0.025, y: 0.02, z: 0.025}
+  enableContainedFluidLoad: 1
+  containedFluidMassScale: 1
+  maxContainedFluidMassKg: 45
+  fluidLoadResponsePerSecond: 8
+  fluidInertiaScale: 1
+  maxFluidCenterOfMassOffsetMeters: 0.14
   motionMode: 1
   applyGravityInDynamicMode: 1
-  linearDampingPerSecond: 0.15
-  angularDampingPerSecond: 0.15
+  linearDampingPerSecond: 0.22
+  angularDampingPerSecond: 0.8
   autoPlaceAttachmentTopCenter: 1
-  handleHeightMeters: 0.08
+  handleHeightMeters: 0.18
   localAttachmentPoint: {x: 0, y: 0.35, z: 0}
-  jointVisualRadiusMeters: 0.035
+  jointVisualRadiusMeters: 0.022
+  enableBailHinge: 1
+  bailHingeMaxAngleDegrees: 82
+  bailHingeResponse: 32
+  bailHingeDamping: 9
+  bailLugVerticalOffsetMeters: 0.025
+  bailLugRadiusMeters: 0.024
+  bailLugDepthMeters: 0.018
+  bailGripLengthMeters: 0.1
   holes:
   - name: Red Compartment Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
     localCenter: {x: -0.055, y: -0.275, z: -0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.003
-    sizeMeters: {x: 0.006, y: 0.006}
+    radiusMeters: 0.006
+    sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
-    edgeSoftnessMeters: 0.002
+    edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
@@ -47,10 +61,10 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: 0.055, y: -0.275, z: 0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.003
-    sizeMeters: {x: 0.006, y: 0.006}
+    radiusMeters: 0.006
+    sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
-    edgeSoftnessMeters: 0.002
+    edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
@@ -60,15 +74,15 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: 0.095, y: -0.275, z: 0}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.003
-    sizeMeters: {x: 0.006, y: 0.006}
+    radiusMeters: 0.006
+    sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
-    edgeSoftnessMeters: 0.002
+    edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
     active: 0
-  visualRadialSegments: 48
-  bucketColor: {r: 0.55, g: 0.55, b: 0.58, a: 1}
-  holeColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
-  jointColor: {r: 1, g: 0.75, b: 0.25, a: 1}
+  visualRadialSegments: 96
+  bucketColor: {r: 0.58, g: 0.62, b: 0.65, a: 1}
+  holeColor: {r: 0.055, g: 0.065, b: 0.075, a: 1}
+  jointColor: {r: 0.32, g: 0.36, b: 0.39, a: 1}

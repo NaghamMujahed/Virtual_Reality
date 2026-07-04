@@ -23,10 +23,17 @@ namespace PaintBucketSim.Data
         public NativeArray<float> BendRestLengths;
         public NativeArray<float> BendLambdas;
 
-        // Twist scaffold. It becomes physically active when bucket rotation is connected.
+        // Material frame state. SegmentFrames map local +Z to segment tangent and
+        // local +Y to the rope material normal after twist.
+        public NativeArray<quaternion> SegmentFrames;
+        public NativeArray<quaternion> SegmentRestFrames;
+
         public NativeArray<float> SegmentTwistAngles;
+        public NativeArray<float> SegmentPreviousTwistAngles;
         public NativeArray<float> SegmentTwistAngularVelocities;
         public NativeArray<float> SegmentRestTwistAngles;
+        public NativeArray<float> SegmentInverseTwistInertias;
+        public NativeArray<float> TwistLambdas;
 
         public NativeArray<RopeDiagnostics> Diagnostics;
         public NativeArray<RopeBreakState> BreakState;
@@ -57,9 +64,15 @@ namespace PaintBucketSim.Data
             BendRestLengths = new NativeArray<float>(BendConstraintCount, allocator);
             BendLambdas = new NativeArray<float>(BendConstraintCount, allocator);
 
+            SegmentFrames = new NativeArray<quaternion>(SegmentCount, allocator);
+            SegmentRestFrames = new NativeArray<quaternion>(SegmentCount, allocator);
+
             SegmentTwistAngles = new NativeArray<float>(SegmentCount, allocator);
+            SegmentPreviousTwistAngles = new NativeArray<float>(SegmentCount, allocator);
             SegmentTwistAngularVelocities = new NativeArray<float>(SegmentCount, allocator);
             SegmentRestTwistAngles = new NativeArray<float>(SegmentCount, allocator);
+            SegmentInverseTwistInertias = new NativeArray<float>(SegmentCount, allocator);
+            TwistLambdas = new NativeArray<float>(SegmentCount, allocator);
 
             Diagnostics = new NativeArray<RopeDiagnostics>(1, allocator);
             BreakState = new NativeArray<RopeBreakState>(1, allocator);
@@ -79,9 +92,15 @@ namespace PaintBucketSim.Data
             if (BendRestLengths.IsCreated) BendRestLengths.Dispose();
             if (BendLambdas.IsCreated) BendLambdas.Dispose();
 
+            if (SegmentFrames.IsCreated) SegmentFrames.Dispose();
+            if (SegmentRestFrames.IsCreated) SegmentRestFrames.Dispose();
+
             if (SegmentTwistAngles.IsCreated) SegmentTwistAngles.Dispose();
+            if (SegmentPreviousTwistAngles.IsCreated) SegmentPreviousTwistAngles.Dispose();
             if (SegmentTwistAngularVelocities.IsCreated) SegmentTwistAngularVelocities.Dispose();
             if (SegmentRestTwistAngles.IsCreated) SegmentRestTwistAngles.Dispose();
+            if (SegmentInverseTwistInertias.IsCreated) SegmentInverseTwistInertias.Dispose();
+            if (TwistLambdas.IsCreated) TwistLambdas.Dispose();
 
             if (Diagnostics.IsCreated) Diagnostics.Dispose();
             if (BreakState.IsCreated) BreakState.Dispose();

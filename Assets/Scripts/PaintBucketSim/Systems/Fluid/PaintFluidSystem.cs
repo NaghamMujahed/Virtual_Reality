@@ -118,6 +118,7 @@ namespace PaintBucketSim.Systems.Fluid
 
             UpdateDiagnostics();
             UpdatePoolStats();
+            UpdateBucketFluidLoad(1.0f / 60.0f);
 
             if (pbfSolverConfig.enableWarmupOnInitialize &&
                 pbfSolverConfig.enablePbf &&
@@ -180,6 +181,7 @@ namespace PaintBucketSim.Systems.Fluid
 
                 UpdateDiagnostics();
                 UpdatePoolStats();
+                UpdateBucketFluidLoad(dt);
 
                 return;
             }
@@ -203,6 +205,81 @@ namespace PaintBucketSim.Systems.Fluid
 
                 UpdatePoolStats();
             }
+
+            UpdateBucketFluidLoad(dt);
+        }
+
+        private void UpdateBucketFluidLoad(float dt)
+        {
+            if (bucketSystem == null ||
+                !bucketSystem.IsInitialized ||
+                bucketSystem.Config == null)
+            {
+                return;
+            }
+
+            BucketConfig config = bucketSystem.Config;
+            float height = Mathf.Max(config.heightMeters, 0.01f);
+            float radius = Mathf.Max(
+                config.GetRepresentativeRadius() - config.wallThicknessMeters,
+                0.01f);
+
+            float mass;
+            float3 localCenter;
+            float fillHeight;
+
+            FluidSolverStats stats = SolverStats;
+            if (IsGpuSolverActive && stats.gpuDiagnosticsReady)
+            {
+                float particleMass = Mathf.Max(
+                    _calibrationStats.massPerParticleKg,
+                    0.0f);
+                mass = stats.gpuActiveParticleCount * particleMass;
+
+                localCenter = new float3(
+                    (stats.gpuAverageLocalX01 - 0.5f) * radius * 2.0f,
+                    (stats.gpuAverageFillHeight01 - 0.5f) * height,
+                    (stats.gpuAverageLocalZ01 - 0.5f) * radius * 2.0f);
+                fillHeight = Mathf.Max(
+                    stats.gpuEstimatedFillSpan01 * height,
+                    0.01f);
+            }
+            else if (!IsGpuSolverActive)
+            {
+                FluidDiagnostics diagnostics = Diagnostics;
+                mass = Mathf.Max(diagnostics.insideMass, 0.0f);
+                localCenter = mass > 1e-6f
+                    ? bucketSystem.WorldToLocalPoint(diagnostics.centerOfMassWorld)
+                    : float3.zero;
+                fillHeight = EstimateFillHeightFromMass(mass, radius);
+            }
+            else
+            {
+                mass = Mathf.Max(_calibrationStats.initialPaintMassKg, 0.0f);
+                fillHeight = Mathf.Clamp01(paintFluidConfig.fillFraction01) * height;
+                localCenter = new float3(
+                    0.0f,
+                    -height * 0.5f + fillHeight * 0.5f,
+                    0.0f);
+            }
+
+            bucketSystem.SetContainedFluidLoad(
+                mass,
+                localCenter,
+                fillHeight,
+                dt);
+        }
+
+        private float EstimateFillHeightFromMass(float mass, float radius)
+        {
+            float density = paintMaterialConfig != null
+                ? Mathf.Max(paintMaterialConfig.densityKgPerM3, 1.0f)
+                : 1000.0f;
+            float area = Mathf.PI * radius * radius;
+            return Mathf.Clamp(
+                mass / Mathf.Max(density * area, 1e-6f),
+                0.01f,
+                bucketSystem.Config.heightMeters);
         }
 
         private bool ValidateRequiredReferences()
