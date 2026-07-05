@@ -36,9 +36,9 @@ MonoBehaviour:
   exponentialDampingPerSecond: 0.08
   segmentDampingRatio: 0.08
   enableBreakByTension: 0
-  breakTensionNewton: 340
-  enableBreakByStrain: 0
-  breakStrain: 0.35
+  breakTensionNewton: 850
+  enableBreakByStrain: 1
+  breakStrain: 0.25
   pivotMotionMode: 0
   pivotMotionAmplitude: {x: 0.05, y: 0, z: 0}
   pivotMotionFrequencyHz: 0.5
@@ -48,7 +48,7 @@ MonoBehaviour:
   enableInteractiveGrab: 1
   grabCompliance: 0.000001
   maxGrabCorrectionPerIteration: 0.045
-  maxGrabSpeedMetersPerSecond: 1.2
+  maxGrabSpeedMetersPerSecond: 0.9
   airDragMode: 1
   linearAirDragKgPerSecond: 0.015
   quadraticDragCoefficient: 1.1

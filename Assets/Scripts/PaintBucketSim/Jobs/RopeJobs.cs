@@ -313,9 +313,35 @@ namespace PaintBucketSim.Jobs
 
         private void EnforceMaximumStretch()
         {
-            float strain = math.clamp(maximumSegmentStrain, 0.0f, 0.2f);
+            float strain = math.clamp(maximumSegmentStrain, 0.0f, 0.6f);
 
-            for (int c = 0; c < stretchRestLengths.Length; c++)
+            if (enableGrabConstraint &&
+                grabSegmentIndex >= 0 &&
+                grabSegmentIndex < stretchRestLengths.Length)
+            {
+                // A grabbed point behaves like a temporary internal handle.
+                // Clamp each side independently so the upper section cannot
+                // push correction through the grab into the bucket side.
+                EnforceMaximumStretchRange(0, grabSegmentIndex, strain);
+                EnforceMaximumStretchRange(
+                    grabSegmentIndex + 1,
+                    stretchRestLengths.Length,
+                    strain);
+                return;
+            }
+
+            EnforceMaximumStretchRange(0, stretchRestLengths.Length, strain);
+        }
+
+        private void EnforceMaximumStretchRange(
+            int startInclusive,
+            int endExclusive,
+            float strain)
+        {
+            int start = math.clamp(startInclusive, 0, stretchRestLengths.Length);
+            int end = math.clamp(endExclusive, start, stretchRestLengths.Length);
+
+            for (int c = start; c < end; c++)
             {
                 if (c == brokenSegmentIndex)
                     continue;
@@ -331,8 +357,8 @@ namespace PaintBucketSim.Jobs
                 if (length <= maximumLength || length < 1e-7f)
                     continue;
 
-                // The rope is ceiling-anchored, so propagate the hard material
-                // limit from parent to child. XPBD still handles elastic motion.
+                // Propagate the hard material limit within this anchored span.
+                // XPBD still handles elastic motion before this safety pass.
                 float3 corrected = p0 + delta / length * maximumLength;
                 positions[i1] = corrected;
 
@@ -831,9 +857,8 @@ namespace PaintBucketSim.Jobs
 
             float dt2 = math.max(dt * dt, 1e-8f);
 
-            float maxTension = 0.0f;
-            float maxStrain = 0.0f;
-            int selectedSegment = -1;
+            float strongestFailureRatio = 1.0f;
+            int failingSegment = -1;
 
             for (int c = 0; c < stretchRestLengths.Length; c++)
             {
@@ -846,33 +871,42 @@ namespace PaintBucketSim.Jobs
                 float strain = math.max(0.0f, (len - rest) / rest);
                 float tension = math.abs(stretchLambdas[c]) / dt2;
 
-                if (tension > maxTension)
-                    maxTension = tension;
-
-                if (strain > maxStrain)
-                {
-                    maxStrain = strain;
-                    selectedSegment = c;
-                }
-
                 bool breaksByTension = enableBreakByTension && tension > breakTension;
                 bool breaksByStrain = enableBreakByStrain && strain > breakStrain;
 
                 if (breaksByTension || breaksByStrain)
                 {
-                    state.isBroken = 1;
-                    state.brokenSegmentIndex = c;
-                    state.breakTime = simulationTime;
-                    state.breakTension = tension;
-                    state.breakStrain = strain;
+                    float tensionRatio = breaksByTension
+                        ? tension / math.max(breakTension, 1e-6f)
+                        : 0.0f;
+                    float strainRatio = breaksByStrain
+                        ? strain / math.max(breakStrain, 1e-6f)
+                        : 0.0f;
+                    float failureRatio = math.max(tensionRatio, strainRatio);
 
-                    breakState[0] = state;
-                    return;
+                    if (failureRatio >= strongestFailureRatio)
+                    {
+                        strongestFailureRatio = failureRatio;
+                        failingSegment = c;
+                    }
                 }
             }
 
-            if (selectedSegment < 0)
-                selectedSegment = 0;
+            if (failingSegment >= 0)
+            {
+                float3 p0 = positions[failingSegment];
+                float3 p1 = positions[failingSegment + 1];
+                float rest = math.max(stretchRestLengths[failingSegment], 1e-8f);
+                float len = math.length(p1 - p0);
+
+                state.isBroken = 1;
+                state.brokenSegmentIndex = failingSegment;
+                state.breakTime = simulationTime;
+                state.breakTension = math.abs(stretchLambdas[failingSegment]) / dt2;
+                state.breakStrain = math.max(0.0f, (len - rest) / rest);
+
+                breakState[0] = state;
+            }
         }
     }
 

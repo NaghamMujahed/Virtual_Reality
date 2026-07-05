@@ -13072,7 +13072,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Bucket.BucketRenderer
   bucketSystem: {fileID: 1657576619}
-  paintFluidSystem: {fileID: 0}
+  paintFluidSystem: {fileID: 303841553}
   meshFilter: {fileID: 0}
   meshRenderer: {fileID: 0}
   showAttachmentJoint: 1
@@ -13084,7 +13084,7 @@ MonoBehaviour:
   colorDividerColor: {r: 0.78, g: 0.78, b: 0.82, a: 1}
   dividerVisualThicknessMultiplier: 1.15
   dividerVisualHeightFraction: 0.92
-  showFluidSurface: 1
+  showFluidSurface: 0
   fluidSurfaceSegments: 64
   fluidSurfaceWallInsetMeters: 0.006
 --- !u!23 &1657576617

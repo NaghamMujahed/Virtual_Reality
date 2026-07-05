@@ -125,14 +125,18 @@ namespace PaintBucketSim.Systems.Rope
             float endpointTwistTorque = _externalEndpointTwistTorque;
             _externalEndpointTwistTorque = 0.0f;
 
-            int brokenSegment = _data.BreakState[0].isBroken != 0
-                ? _data.BreakState[0].brokenSegmentIndex
-                : -1;
-
             float3 pivot = GetPivotPosition(context, dt);
             _data.Velocities[0] = float3.zero;
             float3 gravity = (float3)context.EnvironmentState.gravity * ropeConfig.gravityScale;
             float3 grabTarget = UpdateGrabTarget(dt);
+            TryBreakFromGrabOverextension(
+                pivot,
+                grabTarget,
+                context != null ? (float)context.Diagnostics.simulationTime : Time.time);
+
+            int brokenSegment = _data.BreakState[0].isBroken != 0
+                ? _data.BreakState[0].brokenSegmentIndex
+                : -1;
 
             bool useRelativeDamping =
                 ropeConfig.dampingMode == RopeDampingMode.RelativeSegment ||
@@ -272,7 +276,7 @@ namespace PaintBucketSim.Systems.Rope
                 dt = dt,
                 simulationTime = (float)context.Diagnostics.simulationTime,
                 enableBreakByTension = ropeConfig.enableBreakByTension,
-                enableBreakByStrain = ropeConfig.enableBreakByStrain,
+                enableBreakByStrain = ropeConfig.enableBreakByStrain && !_grabActive,
                 breakTension = ropeConfig.breakTensionNewton,
                 breakStrain = ropeConfig.breakStrain,
                 positions = _data.Positions,
@@ -651,6 +655,110 @@ namespace PaintBucketSim.Systems.Rope
             _simulatedGrabVelocity =
                 (_simulatedGrabTarget - previous) / safeDt;
             return _simulatedGrabTarget;
+        }
+
+        private bool TryBreakFromGrabOverextension(
+            float3 pivot,
+            float3 grabTarget,
+            float simulationTime)
+        {
+            if (!_grabActive ||
+                ropeConfig == null ||
+                !ropeConfig.enableBreakByStrain ||
+                !IsInitialized ||
+                IsBroken ||
+                _grabSegmentIndex < 0 ||
+                _grabSegmentIndex >= _data.SegmentCount)
+            {
+                return false;
+            }
+
+            float breakStrain = Mathf.Max(ropeConfig.breakStrain, 0.001f);
+            float materialPoint = Mathf.Clamp(
+                _grabSegmentIndex + _grabSegmentT,
+                0.001f,
+                _data.SegmentCount - 0.001f);
+            float segmentRestLength =
+                ropeConfig.lengthMeters / Mathf.Max(_data.SegmentCount, 1);
+
+            float upperRestLength = segmentRestLength * materialPoint;
+            float lowerRestLength =
+                segmentRestLength * (_data.SegmentCount - materialPoint);
+
+            float upperStrain = ComputePathDemandStrain(
+                ToVector3(pivot),
+                ToVector3(grabTarget),
+                upperRestLength);
+            float lowerStrain = ComputePathDemandStrain(
+                ToVector3(grabTarget),
+                GetRopeEndPosition(),
+                lowerRestLength);
+
+            bool upperFails = upperStrain > breakStrain;
+            bool lowerFails = lowerStrain > breakStrain;
+            if (!upperFails && !lowerFails)
+                return false;
+
+            bool breakUpperSide = upperStrain >= lowerStrain;
+            int breakSegment = breakUpperSide
+                ? FindMostStretchedSegment(0, _grabSegmentIndex + 1)
+                : FindMostStretchedSegment(_grabSegmentIndex, _data.SegmentCount);
+
+            if (breakSegment < 0)
+            {
+                breakSegment = breakUpperSide
+                    ? Mathf.Clamp(_grabSegmentIndex / 2, 0, _data.SegmentCount - 1)
+                    : Mathf.Clamp(
+                        (_grabSegmentIndex + _data.SegmentCount) / 2,
+                        0,
+                        _data.SegmentCount - 1);
+            }
+
+            _data.BreakState[0] = new RopeBreakState
+            {
+                isBroken = 1,
+                brokenSegmentIndex = breakSegment,
+                breakTime = simulationTime,
+                breakTension = 0.0f,
+                breakStrain = Mathf.Max(upperStrain, lowerStrain)
+            };
+
+            return true;
+        }
+
+        private int FindMostStretchedSegment(int startInclusive, int endExclusive)
+        {
+            int start = Mathf.Clamp(startInclusive, 0, _data.SegmentCount - 1);
+            int end = Mathf.Clamp(endExclusive, start + 1, _data.SegmentCount);
+            int selected = -1;
+            float selectedStrain = float.NegativeInfinity;
+
+            for (int c = start; c < end; c++)
+            {
+                float rest = Mathf.Max(_data.StretchRestLengths[c], 1e-6f);
+                float strain = Mathf.Max(
+                    0.0f,
+                    (math.distance(_data.Positions[c], _data.Positions[c + 1]) - rest) / rest);
+
+                if (strain > selectedStrain)
+                {
+                    selectedStrain = strain;
+                    selected = c;
+                }
+            }
+
+            return selected;
+        }
+
+        private static float ComputePathDemandStrain(
+            Vector3 start,
+            Vector3 end,
+            float restLength)
+        {
+            if (restLength <= 1e-6f)
+                return 0.0f;
+
+            return Mathf.Max(0.0f, Vector3.Distance(start, end) / restLength - 1.0f);
         }
 
         private float3 GetPivotPosition(SimulationContext context, float dt)

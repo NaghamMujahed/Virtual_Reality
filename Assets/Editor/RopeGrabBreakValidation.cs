@@ -13,11 +13,11 @@ using UnityEngine;
 
 namespace PaintBucketSim.Editor
 {
-    public static class RopeGrabValidation
+    public static class RopeGrabBreakValidation
     {
         private const string ScenePath = "Assets/Scenes/SampleScene.unity";
 
-        [MenuItem("Paint Bucket Sim/Run Rope Grab Validation")]
+        [MenuItem("Paint Bucket Sim/Run Rope Grab Break Validation")]
         public static void RunInteractive()
         {
             Run(false);
@@ -42,13 +42,13 @@ namespace PaintBucketSim.Editor
                     UnityEngine.Object.FindAnyObjectByType<BucketSystem>();
                 RopeBucketCouplingSystem coupling =
                     UnityEngine.Object.FindAnyObjectByType<RopeBucketCouplingSystem>();
-
                 EnvironmentConfig environmentConfig = ResolveEnvironmentConfig(manager);
+
                 if (manager == null || manager.Config == null ||
                     environmentConfig == null || rope == null ||
                     bucket == null || coupling == null)
                 {
-                    Finish(batchMode, false, "Grab validation prerequisites are missing.");
+                    Finish(batchMode, false, "Break validation prerequisites are missing.");
                     return;
                 }
 
@@ -63,54 +63,35 @@ namespace PaintBucketSim.Editor
                 rope.Initialize(context);
                 coupling.Initialize(context);
 
-                if (!rope.IsInitialized || !bucket.IsInitialized || !coupling.IsReady)
-                {
-                    Finish(batchMode, false, "Rope/bucket/coupling initialization failed.");
-                    return;
-                }
-
                 float dt = timeController.GetSubstepDeltaTime();
-                Vector3 initialBucketPosition = ToVector3(bucket.State.position);
-
                 for (int i = 0; i < 90; i++)
                     Step(context, environment, timeController, rope, bucket, coupling, dt);
+
+                if (rope.IsBroken)
+                {
+                    Finish(batchMode, false, "Rope broke before the overextension grab.");
+                    return;
+                }
 
                 int segment = Mathf.Clamp(rope.ParticleCount / 2, 1, rope.ParticleCount - 2);
                 Vector3 p0 = rope.GetParticlePosition(segment);
                 Vector3 p1 = rope.GetParticlePosition(segment + 1);
-                Vector3 pickPoint = Vector3.Lerp(p0, p1, 0.45f);
-                Ray pickRay = new Ray(pickPoint + Vector3.back * 1.25f, Vector3.forward);
+                Vector3 grabbedPoint = Vector3.Lerp(p0, p1, 0.45f);
 
-                bool picked = rope.TryFindClosestSegment(
-                    pickRay,
-                    0.12f,
-                    out int pickedSegment,
-                    out float pickedT,
-                    out Vector3 grabbedPoint,
-                    out float pickDistance);
-
-                if (!picked || pickedSegment < 1 || pickedSegment >= rope.ParticleCount - 1)
+                if (!rope.BeginGrab(segment, 0.45f, grabbedPoint))
                 {
-                    Finish(batchMode, false, $"Failed to pick middle rope segment. distance={pickDistance:F3}m");
+                    Finish(batchMode, false, "BeginGrab rejected the break-validation segment.");
                     return;
                 }
 
-                if (!rope.BeginGrab(pickedSegment, pickedT, grabbedPoint))
-                {
-                    Finish(batchMode, false, "BeginGrab rejected the picked segment.");
-                    return;
-                }
+                Vector3 target = grabbedPoint + new Vector3(1.45f, 0.05f, 0.20f);
+                int breakStep = -1;
+                float maxPreBreakBucketSpeed = 0.0f;
+                float maxPreBreakAttachmentError = 0.0f;
 
-                Vector3 target = grabbedPoint + new Vector3(0.22f, 0.04f, 0.09f);
-                float maxBucketSpeed = 0.0f;
-                float maxUpSpeed = 0.0f;
-                float maxHeightGain = 0.0f;
-                float maxGrabError = 0.0f;
-                float maxAttachmentError = 0.0f;
-
-                for (int step = 0; step < 180; step++)
+                for (int step = 0; step < 260; step++)
                 {
-                    float t = Mathf.Clamp01(step / 90.0f);
+                    float t = Mathf.Clamp01(step / 180.0f);
                     Vector3 smoothedTarget = Vector3.Lerp(
                         grabbedPoint,
                         target,
@@ -119,49 +100,37 @@ namespace PaintBucketSim.Editor
 
                     Step(context, environment, timeController, rope, bucket, coupling, dt);
 
-                    Vector3 grabbedNow = Vector3.Lerp(
-                        rope.GetParticlePosition(pickedSegment),
-                        rope.GetParticlePosition(pickedSegment + 1),
-                        pickedT);
-                    float grabError = Vector3.Distance(
-                        grabbedNow,
-                        rope.GetGrabTargetPosition());
-                    maxGrabError = Mathf.Max(maxGrabError, grabError);
+                    if (!rope.IsBroken)
+                    {
+                        maxPreBreakBucketSpeed = Mathf.Max(
+                            maxPreBreakBucketSpeed,
+                            ToVector3(bucket.State.velocity).magnitude);
+                        maxPreBreakAttachmentError = Mathf.Max(
+                            maxPreBreakAttachmentError,
+                            coupling.Diagnostics.attachmentError);
+                        continue;
+                    }
 
-                    Vector3 bucketVelocity = ToVector3(bucket.State.velocity);
-                    maxBucketSpeed = Mathf.Max(maxBucketSpeed, bucketVelocity.magnitude);
-                    maxUpSpeed = Mathf.Max(maxUpSpeed, bucketVelocity.y);
-                    maxHeightGain = Mathf.Max(
-                        maxHeightGain,
-                        ToVector3(bucket.State.position).y - initialBucketPosition.y);
-
-                    maxAttachmentError = Mathf.Max(
-                        maxAttachmentError,
-                        coupling.Diagnostics.attachmentError);
+                    breakStep = step;
+                    break;
                 }
 
                 rope.EndGrab();
 
-                for (int i = 0; i < 120; i++)
-                    Step(context, environment, timeController, rope, bucket, coupling, dt);
-
+                RopeDiagnostics diagnostics = rope.Diagnostics;
                 bool valid =
-                    maxBucketSpeed < 2.4f &&
-                    maxUpSpeed < 0.65f &&
-                    maxHeightGain < 0.45f &&
-                    maxGrabError < 0.18f &&
-                    maxAttachmentError < 0.02f &&
-                    !rope.IsGrabActive;
+                    breakStep >= 0 &&
+                    rope.IsBroken &&
+                    rope.BrokenSegmentIndex >= 0 &&
+                    diagnostics.breakStrain >= rope.Config.breakStrain &&
+                    maxPreBreakBucketSpeed < 2.4f &&
+                    maxPreBreakAttachmentError < 0.02f;
 
-                RopeDiagnostics ropeDiagnostics = rope.Diagnostics;
                 string report =
-                    $"pickedSegment={pickedSegment}, t={pickedT:F2}, pickDistance={pickDistance:F3}m, " +
-                    $"maxBucketSpeed={maxBucketSpeed:F2}m/s, maxUp={maxUpSpeed:F2}m/s, " +
-                    $"heightGain={maxHeightGain:F2}m, maxGrabError={maxGrabError:F3}m, " +
-                    $"maxAttachmentError={maxAttachmentError:E3}m, activeAfterRelease={rope.IsGrabActive}, " +
-                    $"ropeBroken={rope.IsBroken}, brokenSegment={rope.BrokenSegmentIndex}, " +
-                    $"maxStrain={ropeDiagnostics.maxStrain:F3}, breakStrain={ropeDiagnostics.breakStrain:F3}, " +
-                    $"breakTension={ropeDiagnostics.breakTension:F1}N";
+                    $"breakStep={breakStep}, brokenSegment={rope.BrokenSegmentIndex}, " +
+                    $"breakStrain={diagnostics.breakStrain:F3}, threshold={rope.Config.breakStrain:F3}, " +
+                    $"maxPreBreakBucketSpeed={maxPreBreakBucketSpeed:F2}m/s, " +
+                    $"maxPreBreakAttachmentError={maxPreBreakAttachmentError:E3}m";
 
                 Finish(batchMode, valid, report);
             }
@@ -224,9 +193,9 @@ namespace PaintBucketSim.Editor
         private static void Finish(bool batchMode, bool success, string report)
         {
             if (success)
-                Debug.Log($"ROPE_GRAB_VALIDATION_PASS: {report}");
+                Debug.Log($"ROPE_GRAB_BREAK_VALIDATION_PASS: {report}");
             else
-                Debug.LogError($"ROPE_GRAB_VALIDATION_FAIL: {report}");
+                Debug.LogError($"ROPE_GRAB_BREAK_VALIDATION_FAIL: {report}");
 
             if (batchMode)
                 EditorApplication.Exit(success ? 0 : 2);

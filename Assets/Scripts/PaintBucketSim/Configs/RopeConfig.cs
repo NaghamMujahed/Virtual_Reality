@@ -102,8 +102,8 @@ namespace PaintBucketSim.Configs
         [Tooltip("Apply a final unilateral strain limit. This keeps heavy endpoint payloads from defeating iterative XPBD convergence.")]
         public bool enforceMaximumSegmentStrain = true;
 
-        [Tooltip("Maximum per-segment extension after the XPBD solve.")]
-        [Range(0.0f, 0.2f)]
+        [Tooltip("Maximum per-segment extension after the XPBD solve. Keep above Break Strain when strain breaking is enabled.")]
+        [Range(0.0f, 0.6f)]
         public float maximumSegmentStrain = 0.02f;
 
         public RopeBendingModel bendingModel = RopeBendingModel.AngleArccos;

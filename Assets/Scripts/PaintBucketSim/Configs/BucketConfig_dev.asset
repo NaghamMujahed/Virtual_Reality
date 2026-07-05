@@ -48,7 +48,7 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: -0.055, y: -0.275, z: -0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.002
+    radiusMeters: 0.001
     sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
     edgeSoftnessMeters: 0.003
@@ -61,14 +61,14 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: 0.055, y: -0.275, z: 0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.006
+    radiusMeters: 0.001
     sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
     edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 0
+    active: 1
   - name: Inactive Bottom Edge Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
