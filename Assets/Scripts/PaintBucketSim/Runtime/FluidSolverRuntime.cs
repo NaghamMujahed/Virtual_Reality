@@ -87,6 +87,10 @@
         public float gpuGridOriginY;
         public float gpuGridOriginZ;
         public bool gpuGridContainsBucket;
+        public bool gpuBucketLocalSimulation;
+        public float gpuBucketFrameLinearAcceleration;
+        public float gpuBucketFrameAngularVelocity;
+        public float gpuBucketFrameAngularAcceleration;
         public float gpuRequiredGridExtent;
         public int gpuActiveParticleCount;
         public int gpuOutOfGridParticleCount;
@@ -110,7 +114,6 @@
         public bool gpuGridDensityEosUsed;
         public float gpuGridDensityEosPressureScale;
         public float gpuReferenceGridRestDensity;
-        public bool gpuReferenceProjectionFallbackUsed;
         public bool gpuAdaptiveMultiRateEnabled;
         public bool gpuAdaptiveActivityReady;
         public int gpuAdaptiveActivitySampleInterval;
@@ -202,11 +205,6 @@
         public float maxPressureVelocityCorrection;
         public bool invertPressureGradientSign;
 
-        public bool movingBucketProjectionCouplingEnabled;
-        public bool movingBucketDivergenceBoundaryEnabled;
-        public bool movingBucketGridBoundaryVelocityEnabled;
-        public float projectionMovingBoundaryVelocityStrength;
-        public float maxProjectionBoundaryVelocityCorrection;
 
         public bool gpuDiagnosticsEnabled;
         public bool gpuDiagnosticsReady;

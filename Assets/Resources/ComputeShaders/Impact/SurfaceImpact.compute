@@ -66,7 +66,7 @@ uint  _SurfaceTypeID;
 int _MlsParticleCount;
 int _DepositOnlyMlsAirDomainParticles;
 int _MarkMlsParticlesDeposited;
-int _AcceptFluidDomainSurfaceHits;
+int _MlsMpmUsesBucketLocalSpace;
 int _EnableSurfaceImpactDiagnostics;
 int _UseMlsParticleVolumeJ;
 int _UseCarreauYasuda;
@@ -236,14 +236,14 @@ bool IsMlsDepositableState(int state)
     if (state == 0 || state == 8 || state == 9 || state == 10)
         return false;
 
-    if (_DepositOnlyMlsAirDomainParticles != 0)
+    if (_MlsMpmUsesBucketLocalSpace != 0 &&
+        (IsMlsFluidDomainState(state) || state == 4))
     {
-        if (IsMlsAirDomainState(state))
-            return true;
-
-        return _AcceptFluidDomainSurfaceHits != 0 &&
-               IsMlsFluidDomainState(state);
+        return false;
     }
+
+    if (_DepositOnlyMlsAirDomainParticles != 0)
+        return IsMlsAirDomainState(state);
 
     return state > 0 && state < 8;
 }

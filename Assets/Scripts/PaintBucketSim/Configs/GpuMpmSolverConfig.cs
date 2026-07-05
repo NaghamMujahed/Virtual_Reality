@@ -33,23 +33,38 @@ namespace PaintBucketSim.Configs
         [Header("Compute")]
         public ComputeShader denseLocalMpmCompute;
 
-        [Header("Dense Local Grid")]
-        public Vector3 gridOriginWorld = new Vector3(-2.0f, -2.0f, -2.0f);
+        [Header("Bucket-Local Grid")]
+        public Vector3 gridOriginLocal =
+            new Vector3(-0.24f, -0.40f, -0.24f);
 
-        public Vector3Int gridResolution = new Vector3Int(32, 32, 32);
+        public Vector3Int gridResolution = new Vector3Int(48, 72, 48);
 
         [Min(0.005f)]
         public float cellSizeMeters = 0.08f;
 
-        [Tooltip("Center the dense grid on the bucket every simulation substep. Required for a moving bucket.")]
-        public bool followBucketWithGrid = true;
-
-        [Tooltip("Extra world-space margin required between the bucket and the dense grid boundary.")]
+        [Tooltip("Required local-space margin between the bucket and the transfer-grid boundary.")]
         [Min(0.0f)]
-        public float gridBucketMarginMeters = 0.08f;
+        public float gridBoundaryMarginMeters = 0.02f;
 
         [Tooltip("Stop the GPU step when the configured grid cannot contain the rotating bucket plus transfer stencil.")]
         public bool rejectUndersizedGrid = true;
+
+        [Header("Bucket-Local Non-Inertial Frame")]
+        [Tooltip("Half-life used to suppress XPBD acceleration noise without damping physical fluid velocity.")]
+        [Min(0.0f)]
+        public float bucketFrameAccelerationFilterHalfLife = 0.025f;
+
+        [Min(1.0f)]
+        public float maxBucketFrameLinearAcceleration = 80.0f;
+
+        [Min(1.0f)]
+        public float maxBucketFrameAngularAcceleration = 240.0f;
+
+        [Min(0.01f)]
+        public float bucketFrameTeleportDistanceMeters = 0.35f;
+
+        [Range(1.0f, 180.0f)]
+        public float bucketFrameTeleportAngleDegrees = 55.0f;
 
         [Header("Simulation")]
         public bool enableGpuDenseMpm = true;
@@ -146,15 +161,15 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Fraction of excess grid density corrected per projection step.")]
         [Range(0.0f, 1.0f)]
-        public float projectionDensityDriftStrength = 0.2f;
+        public float projectionDensityDriftStrength = 0.8f;
 
         [Tooltip("Density ratio below this threshold is left untouched. Values below one commonly belong to the free surface.")]
         [Min(1.0f)]
-        public float projectionDensityDriftMinRatio = 1.02f;
+        public float projectionDensityDriftMinRatio = 1.005f;
 
         [Tooltip("Maximum expansion divergence requested by density-drift correction.")]
         [Min(0.0f)]
-        public float projectionDensityDriftMaxDivergence = 12.0f;
+        public float projectionDensityDriftMaxDivergence = 40.0f;
 
         [Header("Adaptive Multi-Rate Simulation")]
         [Tooltip("Sample particle activity on the GPU and update calm interior deformation less often while keeping P2G mass transfer at full rate.")]
@@ -266,16 +281,13 @@ namespace PaintBucketSim.Configs
         [Tooltip("Do not allow tensile/negative EOS pressure in the fast reference mode.")]
         public bool referenceClampNegativePressure = true;
 
-        [Tooltip("Run the sparse active-tile projection after Grid EOS. This hybrid is the validated high-volume-preservation path; disable it only for the fastest weakly-compressible mode.")]
-        public bool referenceEnableProjectionFallback = true;
-
         [Header("Grid-Centric Density EOS")]
         [Tooltip("Evaluate the reference-density EOS pressure gradient once per active grid node instead of gathering density and scattering pressure from every particle. Keeps APIC and paint viscosity in P2G while removing the second 27-node particle pass.")]
         public bool enableGridDensityEos = true;
 
         [Tooltip("Pressure scale used only by the grid-centric EOS. The direct grid gradient has different units/discretization from particle stress scattering, so it must not reuse materialStressStrength.")]
         [Min(0.0f)]
-        public float gridDensityEosPressureScale = 4.0f;
+        public float gridDensityEosPressureScale = 1.8f;
 
         [Tooltip("Safety clamp for the velocity correction contributed by the grid EOS during one substep.")]
         [Min(0.0f)]
@@ -482,17 +494,6 @@ namespace PaintBucketSim.Configs
 
         public bool killAirborneBelowWorldY = false;
 
-        [Header("Moving Bucket Boundary Velocity")]
-        public bool enableMovingBucketBoundaryVelocity = true;
-
-        [Tooltip("How strongly the moving bucket wall velocity affects particles. 1 = full physical wall velocity.")]
-        [Range(0.0f, 1.0f)]
-        public float bucketBoundaryVelocityStrength = 1.0f;
-
-        [Tooltip("Clamp wall velocity contribution to avoid extreme impulses during early testing.")]
-        [Min(0.1f)]
-        public float maxBucketBoundaryVelocity = 8.0f;
-
         [Header("MLS-MPM Projection Divergence")]
         public bool enableProjectionDivergenceComputation = true;
 
@@ -519,7 +520,7 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Red-Black SOR iterations. Each iteration dispatches red and black cell passes.")]
         [Min(1)]
-        public int pressureRedBlackSorIterations = 4;
+        public int pressureRedBlackSorIterations = 8;
 
         [Tooltip("Scales the pressure equation right-hand side. Lower values are safer in early tests.")]
         [Min(0.0f)]
@@ -564,21 +565,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("Use a staggered face-velocity projection. This keeps divergence, Jacobi, and pressure gradients consistent.")]
         public bool useStaggeredFaceProjection = true;
 
-        [Header("MLS-MPM Projection / Moving Bucket Boundary Coupling")]
-        public bool enableMovingBucketProjectionCoupling = true;
-
-        [Tooltip("Use moving bucket wall velocity as a boundary velocity when computing projection divergence.")]
-        public bool useMovingBucketVelocityInDivergence = true;
-
-        [Tooltip("Apply a grid-level no-penetration correction near bucket solid cells before divergence.")]
-        public bool applyMovingBucketGridBoundaryVelocity = true;
-
-        [Range(0.0f, 1.0f)]
-        public float projectionMovingBoundaryVelocityStrength = 1.0f;
-
-        [Min(0.01f)]
-        public float maxProjectionBoundaryVelocityCorrection = 2.0f;
-
         public int GridNodeCount =>
             gridResolution.x * gridResolution.y * gridResolution.z;
 
@@ -589,7 +575,7 @@ namespace PaintBucketSim.Configs
                 gridResolution.z * cellSizeMeters
             );
 
-        public Vector3 GridMaxWorld => gridOriginWorld + GridSizeWorld;
+        public Vector3 GridMaxLocal => gridOriginLocal + GridSizeWorld;
 
         private void OnValidate()
         {
@@ -600,8 +586,31 @@ namespace PaintBucketSim.Configs
             if (cellSizeMeters < 0.005f)
                 cellSizeMeters = 0.005f;
 
-            if (gridBucketMarginMeters < 0.0f)
-                gridBucketMarginMeters = 0.0f;
+            gridBoundaryMarginMeters = Mathf.Max(
+                gridBoundaryMarginMeters,
+                0.0f
+            );
+            bucketFrameAccelerationFilterHalfLife = Mathf.Max(
+                bucketFrameAccelerationFilterHalfLife,
+                0.0f
+            );
+            maxBucketFrameLinearAcceleration = Mathf.Max(
+                maxBucketFrameLinearAcceleration,
+                1.0f
+            );
+            maxBucketFrameAngularAcceleration = Mathf.Max(
+                maxBucketFrameAngularAcceleration,
+                1.0f
+            );
+            bucketFrameTeleportDistanceMeters = Mathf.Max(
+                bucketFrameTeleportDistanceMeters,
+                0.01f
+            );
+            bucketFrameTeleportAngleDegrees = Mathf.Clamp(
+                bucketFrameTeleportAngleDegrees,
+                1.0f,
+                180.0f
+            );
 
             if (diagnosticsReadbackInterval < 1)
                 diagnosticsReadbackInterval = 1;
@@ -807,9 +816,6 @@ namespace PaintBucketSim.Configs
             if (airborneLifetimeSeconds < 0.1f)
                 airborneLifetimeSeconds = 0.1f;
 
-            if (maxBucketBoundaryVelocity < 0.1f)
-                maxBucketBoundaryVelocity = 0.1f;
-            
             if (projectionMassFixedScale < 1)
                 projectionMassFixedScale = 1;
 
@@ -873,10 +879,6 @@ namespace PaintBucketSim.Configs
             if (maxPressureVelocityCorrection < 0.01f)
                 maxPressureVelocityCorrection = 0.01f;
 
-            projectionMovingBoundaryVelocityStrength = Mathf.Clamp01(projectionMovingBoundaryVelocityStrength);
-
-            if (maxProjectionBoundaryVelocityCorrection < 0.01f)
-                maxProjectionBoundaryVelocityCorrection = 0.01f;
         }
 
         public void ApplyPaintMaterialPreset()
@@ -897,14 +899,18 @@ namespace PaintBucketSim.Configs
             enableJetCohesion = true;
             enableReferenceDensityEosMode = true;
             enableGridDensityEos = true;
-            referenceEnableProjectionFallback = true;
             referenceClampNegativePressure = true;
             referenceEosExponent = 5.0f;
             pressureSolveMode = ProjectionPressureSolveMode.RedBlackSor;
             pressureRedBlackSorIterations = Mathf.Max(
                 pressureRedBlackSorIterations,
-                4
+                8
             );
+            bulkModulus = 850.0f;
+            gridDensityEosPressureScale = 1.8f;
+            projectionDensityDriftStrength = 0.8f;
+            projectionDensityDriftMinRatio = 1.005f;
+            projectionDensityDriftMaxDivergence = 40.0f;
             materialStressStrength = 0.65f;
             minJ = 0.65f;
             maxJ = 1.35f;
@@ -912,13 +918,8 @@ namespace PaintBucketSim.Configs
             switch (preset)
             {
                 case GpuPaintMaterialPreset.WaterLike:
-                    bulkModulus = 800.0f;
                     maxStressMagnitude = 4500.0f;
-                    gridDensityEosPressureScale = 3.0f;
                     gridDensityEosMaxVelocityCorrection = 1.4f;
-                    projectionDensityDriftStrength = 0.16f;
-                    projectionDensityDriftMinRatio = 1.025f;
-                    projectionDensityDriftMaxDivergence = 10.0f;
                     maxPressureVelocityCorrection = 2.5f;
                     mpmViscosity = 0.02f;
                     lowShearViscosity = 0.02f;
@@ -938,13 +939,8 @@ namespace PaintBucketSim.Configs
                     break;
 
                 case GpuPaintMaterialPreset.ThinPaint:
-                    bulkModulus = 1000.0f;
                     maxStressMagnitude = 6500.0f;
-                    gridDensityEosPressureScale = 3.8f;
                     gridDensityEosMaxVelocityCorrection = 1.5f;
-                    projectionDensityDriftStrength = 0.2f;
-                    projectionDensityDriftMinRatio = 1.02f;
-                    projectionDensityDriftMaxDivergence = 12.0f;
                     maxPressureVelocityCorrection = 2.8f;
                     mpmViscosity = 0.10f;
                     lowShearViscosity = 1.0f;
@@ -964,13 +960,8 @@ namespace PaintBucketSim.Configs
                     break;
 
                 case GpuPaintMaterialPreset.LatexPaint:
-                    bulkModulus = 850.0f;
                     maxStressMagnitude = 5200.0f;
-                    gridDensityEosPressureScale = 2.8f;
                     gridDensityEosMaxVelocityCorrection = 1.1f;
-                    projectionDensityDriftStrength = 0.18f;
-                    projectionDensityDriftMinRatio = 1.02f;
-                    projectionDensityDriftMaxDivergence = 10.0f;
                     maxPressureVelocityCorrection = 2.2f;
                     mpmViscosity = 0.28f;
                     lowShearViscosity = 3.2f;
@@ -990,13 +981,8 @@ namespace PaintBucketSim.Configs
                     break;
 
                 case GpuPaintMaterialPreset.ThickPaint:
-                    bulkModulus = 1100.0f;
                     maxStressMagnitude = 8500.0f;
-                    gridDensityEosPressureScale = 4.0f;
                     gridDensityEosMaxVelocityCorrection = 1.5f;
-                    projectionDensityDriftStrength = 0.2f;
-                    projectionDensityDriftMinRatio = 1.02f;
-                    projectionDensityDriftMaxDivergence = 12.0f;
                     maxPressureVelocityCorrection = 3.0f;
                     mpmViscosity = 0.22f;
                     lowShearViscosity = 4.0f;
@@ -1016,13 +1002,8 @@ namespace PaintBucketSim.Configs
                     break;
 
                 case GpuPaintMaterialPreset.HeavyBodyPaint:
-                    bulkModulus = 1150.0f;
                     maxStressMagnitude = 9000.0f;
-                    gridDensityEosPressureScale = 4.0f;
                     gridDensityEosMaxVelocityCorrection = 1.5f;
-                    projectionDensityDriftStrength = 0.2f;
-                    projectionDensityDriftMinRatio = 1.02f;
-                    projectionDensityDriftMaxDivergence = 12.0f;
                     maxPressureVelocityCorrection = 3.0f;
                     mpmViscosity = 0.30f;
                     lowShearViscosity = 5.5f;

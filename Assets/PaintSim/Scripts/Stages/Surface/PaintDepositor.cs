@@ -59,8 +59,8 @@ namespace PaintSim.Scripts.Stages.Surface
             Shader.PropertyToID("_DepositOnlyMlsAirDomainParticles");
         private static readonly int ID_MarkMlsParticlesDeposited =
             Shader.PropertyToID("_MarkMlsParticlesDeposited");
-        private static readonly int ID_AcceptFluidDomainSurfaceHits =
-            Shader.PropertyToID("_AcceptFluidDomainSurfaceHits");
+        private static readonly int ID_MlsMpmUsesBucketLocalSpace =
+            Shader.PropertyToID("_MlsMpmUsesBucketLocalSpace");
         private static readonly int ID_EnableSurfaceImpactDiagnostics =
             Shader.PropertyToID("_EnableSurfaceImpactDiagnostics");
         private static readonly int ID_SurfaceImpactDiagnostics =
@@ -175,7 +175,7 @@ namespace PaintSim.Scripts.Stages.Surface
             SurfaceProperties surface,
             bool markParticlesOnImpact = true,
             bool depositOnlyAirDomainParticles = true,
-            bool acceptFluidDomainSurfaceHits = true,
+            bool mlsMpmUsesBucketLocalSpace = false,
             bool enableDiagnostics = false,
             float impactDeltaTime = 0.0f)
         {
@@ -213,8 +213,8 @@ namespace PaintSim.Scripts.Stages.Surface
                 depositOnlyAirDomainParticles ? 1 : 0
             );
             _shader.SetInt(
-                ID_AcceptFluidDomainSurfaceHits,
-                acceptFluidDomainSurfaceHits ? 1 : 0
+                ID_MlsMpmUsesBucketLocalSpace,
+                mlsMpmUsesBucketLocalSpace ? 1 : 0
             );
             _shader.SetInt(
                 ID_MarkMlsParticlesDeposited,

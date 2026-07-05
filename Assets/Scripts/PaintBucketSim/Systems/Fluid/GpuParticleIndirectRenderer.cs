@@ -2,6 +2,7 @@
 using PaintBucketSim.Configs;
 using PaintBucketSim.Runtime;
 using PaintBucketSim.Systems.Fluid.GPU;
+using PaintBucketSim.Systems.Bucket;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -13,6 +14,7 @@ namespace PaintBucketSim.Systems.Fluid
         [Header("References")]
         [SerializeField] private GpuFluidBufferSet gpuBufferSet;
         [SerializeField] private GpuParticleRenderConfig renderConfig;
+        [SerializeField] private BucketSystem bucketSystem;
 
         [Header("Rendering")]
         [SerializeField] private Mesh particleMesh;
@@ -43,6 +45,8 @@ namespace PaintBucketSim.Systems.Fluid
         {
             if (gpuBufferSet == null)
                 gpuBufferSet = FindAnyObjectByType<GpuFluidBufferSet>();
+            if (bucketSystem == null)
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
 
             EnsureParticleMesh();
 
@@ -286,6 +290,26 @@ namespace PaintBucketSim.Systems.Fluid
             _mpb.SetColor("_FallbackColor", renderConfig.fallbackColor);
             _mpb.SetInt("_ParticleIndexStride", _effectiveRenderStride);
             _mpb.SetInt("_ParticleCount", gpuBufferSet.UploadedParticleCount);
+            bool useBucketLocal =
+                gpuBufferSet.MpmParticlesUseBucketLocalSpace &&
+                bucketSystem != null &&
+                bucketSystem.IsInitialized;
+            _mpb.SetFloat(
+                "_UseBucketLocalParticles",
+                useBucketLocal ? 1.0f : 0.0f
+            );
+            if (useBucketLocal)
+            {
+                var state = bucketSystem.State;
+                _mpb.SetMatrix(
+                    "_BucketLocalToWorld",
+                    Matrix4x4.TRS(
+                        state.position,
+                        state.rotation,
+                        Vector3.one
+                    )
+                );
+            }
             _mpb.SetFloat("_RenderMode", useSplat ? 1.0f : 0.0f);
             _mpb.SetFloat("_SplatNormalStrength", renderConfig.splatNormalStrength);
             _mpb.SetFloat("_SplatEdgeSoftness", renderConfig.splatEdgeSoftness);

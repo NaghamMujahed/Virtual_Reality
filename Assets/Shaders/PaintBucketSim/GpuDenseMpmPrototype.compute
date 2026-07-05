@@ -1,4 +1,5 @@
 #pragma kernel KClearMpmDiagnostics
+#pragma kernel KInitializeBucketLocalParticles
 #pragma kernel KClearAdaptiveActivity
 #pragma kernel KClassifyAdaptiveActivity
 #pragma kernel KClearMpmTileData
@@ -23,12 +24,10 @@
 #pragma kernel KStepAirborneParticles
 
 #pragma kernel KClearProjectionGrid
-#pragma kernel KMarkBucketProjectionSolids
 #pragma kernel KMarkProjectionFluidCells
 #pragma kernel KFinalizeProjectionGrid
 #pragma kernel KClearProjectionFluidCellList
 #pragma kernel KBuildProjectionFluidCellDispatchArgs
-#pragma kernel KApplyMovingBucketProjectionBoundaryVelocity
 #pragma kernel KBuildProjectionFaceVelocities
 
 #pragma kernel KComputeProjectionDivergence
@@ -163,6 +162,12 @@ float _InvCellSize;
 
 float _Dt;
 float3 _Gravity;
+float3 _GravityWorld;
+float3 _BucketFrameLinearAccelerationLocal;
+float3 _BucketFrameAngularVelocityLocal;
+float3 _BucketFrameAngularAccelerationLocal;
+int _EnableBucketFrameRotationForces;
+float3 _BucketOriginVelocityWorld;
 float _VelocityDampingPerSecond;
 float _MaxParticleSpeed;
 //float _PicBlend;
@@ -268,16 +273,7 @@ float _AirborneLifetime;
 float _AirborneKillBelowY;
 int _KillAirborneBelowY;
 
-/// /// /// ///       Changes G8.B      /// /// /// /// /// /// 
-
-// Moving bucket wall velocity
-int _EnableMovingBucketBoundaryVelocity;
-float _BucketBoundaryVelocityStrength;
-float _MaxBucketBoundaryVelocity;
-
-float3 _BucketLinearVelocityWorld;
 float3 _BucketAngularVelocityWorld;
-/// /// /// ///      End Changes G8.B      /// /// /// /// /// /// 
 
 int _EnableProjectionGrid;
 int _UsePressureWarmStart;
@@ -323,13 +319,6 @@ int _UseStaggeredFaceProjection;
 int _ProjectionComputeAfterCorrection;
 int _EnableGpuDiagnostics;
 int _ProjectionDiagnosticsMode;
-
-int _EnableMovingBucketProjectionCoupling;
-int _UseMovingBucketVelocityInDivergence;
-int _ApplyMovingBucketGridBoundaryVelocity;
-
-float _ProjectionMovingBoundaryVelocityStrength;
-float _MaxProjectionBoundaryVelocityCorrection;
 
 static const int PROJECTION_AIR = 0;
 static const int PROJECTION_FLUID = 1;
@@ -782,6 +771,15 @@ bool IsMpmActiveState(int state)
 bool IsBucketCollisionState(int state)
 {
     return state == 1 || state == 2 || state == 3;
+}
+
+bool IsBucketLocalState(int state)
+{
+    return
+        state == 1 ||
+        state == 2 ||
+        state == 3 ||
+        (_EnableJetMpmCollar != 0 && state == 4);
 }
 
 void AccumulateJacobiNeighborPressure(
@@ -1845,8 +1843,7 @@ void AccumulateP2GParticleHybridTile(
 
     if (_EnableGpuDiagnostics != 0)
     {
-        float3 localPForDiagnostics =
-            mul(_BucketWorldToLocal, float4(p, 1.0)).xyz;
+        float3 localPForDiagnostics = p;
         float normalizedBucketY = saturate(
             (localPForDiagnostics.y + 0.5 * _BucketHeight) /
             max(_BucketHeight, 1e-6)
@@ -2749,7 +2746,27 @@ void KGridUpdateActiveTiles(
         }
     }
 
-    v += _Gravity * _Dt;
+    float3 positionLocal = GridToWorld((float3)cell);
+    float3 frameAcceleration =
+        _Gravity -
+        _BucketFrameLinearAccelerationLocal;
+
+    if (_EnableBucketFrameRotationForces != 0)
+    {
+        float3 omega = _BucketFrameAngularVelocityLocal;
+        frameAcceleration -=
+            2.0 * cross(omega, v) +
+            cross(omega, cross(omega, positionLocal)) +
+            cross(
+                _BucketFrameAngularAccelerationLocal,
+                positionLocal
+            );
+    }
+
+    if (IsFiniteFloat3(frameAcceleration))
+        v += frameAcceleration * _Dt;
+    else if (_EnableGpuDiagnostics != 0)
+        InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
 
     if (_VelocityDampingPerSecond > 0.0)
     {
@@ -3183,6 +3200,59 @@ float3 TransformVector(float4x4 m, float3 v)
     return mul(m, float4(v, 0.0)).xyz;
 }
 
+float3 BucketLocalPositionToWorld(float3 positionLocal)
+{
+    return TransformPoint(_BucketLocalToWorld, positionLocal);
+}
+
+float3 BucketLocalVelocityToWorld(
+    float3 positionLocal,
+    float3 velocityLocal)
+{
+    float3 offsetWorld =
+        TransformVector(_BucketLocalToWorld, positionLocal);
+    return
+        _BucketOriginVelocityWorld +
+        cross(_BucketAngularVelocityWorld, offsetWorld) +
+        TransformVector(_BucketLocalToWorld, velocityLocal);
+}
+
+[numthreads(256, 1, 1)]
+void KInitializeBucketLocalParticles(uint3 id : SV_DispatchThreadID)
+{
+    uint particleIndex = id.x;
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    int state = (int)round(
+        _ParticleStateAgeId[particleIndex].x
+    );
+    if (!IsBucketLocalState(state))
+        return;
+
+    float4 pr = _ParticlePositionRadius[particleIndex];
+    float4 vm = _ParticleVelocityMass[particleIndex];
+    float3 positionWorld = pr.xyz;
+    float3 bucketOriginWorld =
+        TransformPoint(_BucketLocalToWorld, float3(0, 0, 0));
+    float3 offsetWorld = positionWorld - bucketOriginWorld;
+    float3 frameVelocityWorld =
+        _BucketOriginVelocityWorld +
+        cross(_BucketAngularVelocityWorld, offsetWorld);
+
+    _ParticlePositionRadius[particleIndex] = float4(
+        TransformPoint(_BucketWorldToLocal, positionWorld),
+        pr.w
+    );
+    _ParticleVelocityMass[particleIndex] = float4(
+        TransformVector(
+            _BucketWorldToLocal,
+            vm.xyz - frameVelocityWorld
+        ),
+        vm.w
+    );
+}
+
 float BucketOuterRadiusAtY(float y)
 {
     float halfH = 0.5 * _BucketHeight;
@@ -3473,105 +3543,13 @@ bool IsInsideBucketInteriorLocal(float3 pLocal)
 /// /// /// /// /// /// /// ///     G8.B Changes  /// /// /// /// /// /// /// /// /// ///
 
 
-float3 ComputeBucketWallVelocityWorld(float3 pWorld)
-{
-    float3 wallVelocity = float3(0, 0, 0);
-
-    if (_EnableMovingBucketBoundaryVelocity != 0)
-    {
-        // Bucket center/origin in world.
-        float3 bucketCenterWorld =
-            TransformPoint(_BucketLocalToWorld, float3(0, 0, 0));
-
-        float3 r = pWorld - bucketCenterWorld;
-
-        wallVelocity =
-            _BucketLinearVelocityWorld +
-            cross(_BucketAngularVelocityWorld, r);
-
-        wallVelocity *= saturate(_BucketBoundaryVelocityStrength);
-
-        wallVelocity = ClampVectorLength(
-            wallVelocity,
-            _MaxBucketBoundaryVelocity
-        );
-    }
-
-    return wallVelocity;
-}
-
-float3 ComputeProjectionWallVelocityWorld(float3 pWorld)
-{
-    float3 wallVelocity = float3(0, 0, 0);
-
-    if (_EnableMovingBucketProjectionCoupling != 0)
-    {
-        wallVelocity = ComputeBucketWallVelocityWorld(pWorld);
-
-        wallVelocity *= saturate(
-            _ProjectionMovingBoundaryVelocityStrength
-        );
-
-        wallVelocity = ClampVectorLength(
-            wallVelocity,
-            _MaxBucketBoundaryVelocity
-        );
-    }
-
-    return wallVelocity;
-}
-
-float3 ApplyMovingWallNoPenetrationWorld(
-    float3 velocityWorld,
-    float3 wallVelocityWorld,
-    float3 normalTowardFluidWorld)
-{
-    normalTowardFluidWorld = normalize(normalTowardFluidWorld);
-
-    float3 relativeVelocity =
-        velocityWorld - wallVelocityWorld;
-
-    float vn = dot(relativeVelocity, normalTowardFluidWorld);
-
-    // إذا vn < 0 فهذا يعني أن السرعة النسبية تضغط باتجاه الجدار.
-    if (vn < 0.0)
-    {
-        float3 correction =
-            -vn * normalTowardFluidWorld;
-
-        correction = ClampVectorLength(
-            correction,
-            _MaxProjectionBoundaryVelocityCorrection
-        );
-
-        velocityWorld += correction;
-    }
-
-    return velocityWorld;
-}
-
-float3 ComputeBucketWallVelocityLocal(float3 pLocal)
-{
-    float3 pWorld = TransformPoint(_BucketLocalToWorld, pLocal);
-    float3 wallVelocityWorld = ComputeBucketWallVelocityWorld(pWorld);
-
-    return TransformVector(_BucketWorldToLocal, wallVelocityWorld);
-}
-
-float3 ApplyCollisionVelocityAgainstMovingWall(
+float3 ApplyCollisionVelocityAgainstStaticLocalWall(
     float3 particleVelocityLocal,
-    float3 normalLocal,
-    float3 wallVelocityLocal)
+    float3 normalLocal)
 {
-    float3 relativeVelocity =
-        particleVelocityLocal -
-        wallVelocityLocal;
-
-    relativeVelocity =
-        ApplyCollisionVelocity(relativeVelocity, normalLocal);
-
-    return relativeVelocity + wallVelocityLocal;
+    return ApplyCollisionVelocity(particleVelocityLocal, normalLocal);
 }
+
 
 bool TryResolveColorDividerCollision(
     inout float3 pLocal,
@@ -3662,529 +3640,15 @@ bool TryResolveColorDividerCollision(
     float penetration = halfThickness - bestAbsDistance;
     pLocal += bestNormal * penetration;
 
-    float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
-    vLocal = ApplyCollisionVelocityAgainstMovingWall(
+    vLocal = ApplyCollisionVelocityAgainstStaticLocalWall(
         vLocal,
-        bestNormal,
-        wallVelocityLocal
+        bestNormal
     );
 
     return true;
 }
 /// /// /// /// /// /// /// ///   End G8.B Changes  /// /// /// /// /// /// /// /// /// ///
 
-#if 0
-// Rejected G19 local/SOR density-projection prototype. Kept temporarily
-// outside compilation until its source block is removed mechanically.
-float SparseTileProjectionMass(int3 cell)
-{
-    if (!IsSparseLocalDensityCellReadable(cell))
-        return 0.0;
-
-    int massFixed =
-        _GridAccumInt[FlattenGridIndex(cell)].x;
-    return max(
-        (float)massFixed /
-        max((float)_MassFixedScale, 1.0),
-        0.0
-    );
-}
-
-bool IsSparseTileProjectionFluidCell(int3 cell)
-{
-    return SparseTileProjectionMass(cell) > 1e-8;
-}
-
-float SparseTileProjectionSmoothedDensity(int3 cell)
-{
-    float smoothedMass =
-        0.25 * SparseTileProjectionMass(cell);
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(-1, 0, 0)
-        );
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(1, 0, 0)
-        );
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(0, -1, 0)
-        );
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(0, 1, 0)
-        );
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(0, 0, -1)
-        );
-    smoothedMass +=
-        0.125 * SparseTileProjectionMass(
-            cell + int3(0, 0, 1)
-        );
-
-    float cellVolume =
-        max(_CellSize * _CellSize * _CellSize, 1e-12);
-    return smoothedMass / cellVolume;
-}
-
-bool IsSparseTileProjectionSolidCell(int3 cell)
-{
-    if (!IsValidCell(cell))
-        return true;
-
-    float3 worldPosition = GridToWorld((float3)cell);
-    float3 localPosition =
-        TransformPoint(_BucketWorldToLocal, worldPosition);
-
-    float halfHeight = 0.5 * _BucketHeight;
-    float bottomY = -halfHeight;
-    float topY = halfHeight;
-    float wallBand =
-        max(_BucketWallThickness, _CellSize) + _CellSize;
-    float clampedY =
-        clamp(localPosition.y, bottomY, topY);
-    float innerRadius = BucketInnerRadiusAtY(clampedY);
-    float radial = length(localPosition.xz);
-
-    if (localPosition.y >= bottomY &&
-        localPosition.y <= topY &&
-        radial > innerRadius)
-    {
-        return true;
-    }
-
-    if (localPosition.y < bottomY &&
-        localPosition.y >= bottomY - wallBand)
-    {
-        int holeIndex = -1;
-        bool openHoleChannel =
-            _EnableBottomHoleOpening != 0 &&
-            IsInsideAnyOpenHoleRegionLocal(
-                localPosition,
-                0.75 * _CellSize,
-                holeIndex
-            );
-
-        if (!openHoleChannel &&
-            radial <= innerRadius + wallBand)
-        {
-            return true;
-        }
-    }
-
-    if (_BucketTopMode == 1 &&
-        localPosition.y > topY &&
-        localPosition.y <= topY + wallBand &&
-        radial <= innerRadius + wallBand)
-    {
-        return true;
-    }
-
-    return false;
-}
-
-float3 ReadSparseTileProjectionVelocity(
-    int3 cell,
-    float3 centerVelocity)
-{
-    if (IsSparseTileProjectionFluidCell(cell))
-    {
-        return _GridVelocityMassRead[
-            FlattenGridIndex(cell)
-        ].xyz;
-    }
-
-    if (IsSparseTileProjectionSolidCell(cell))
-    {
-        return ComputeBucketWallVelocityWorld(
-            GridToWorld((float3)cell)
-        );
-    }
-
-    return centerVelocity;
-}
-
-void AccumulateSparseTilePressureNeighbor(
-    int3 neighborCell,
-    float centerPressure,
-    inout float pressureSum,
-    inout float denominator)
-{
-    if (IsSparseTileProjectionFluidCell(neighborCell))
-    {
-        pressureSum += _ProjectionPressure[
-            FlattenGridIndex(neighborCell)
-        ];
-        denominator += 1.0;
-        return;
-    }
-
-    if (IsSparseTileProjectionSolidCell(neighborCell))
-    {
-        // Neumann boundary: omit the solid neighbor.
-        return;
-    }
-
-    // Free-surface air pressure is zero.
-    denominator += 1.0;
-}
-
-float ReadSparseTilePressureNeighbor(
-    int3 neighborCell,
-    float centerPressure)
-{
-    if (IsSparseTileProjectionFluidCell(neighborCell))
-    {
-        return _ProjectionPressure[
-            FlattenGridIndex(neighborCell)
-        ];
-    }
-
-    if (IsSparseTileProjectionSolidCell(neighborCell))
-        return centerPressure;
-
-    return 0.0;
-}
-
-[numthreads(8, 8, 8)]
-void KClearSparseTileDensityProjection(
-    uint3 groupId : SV_GroupID,
-    uint3 localId : SV_GroupThreadID)
-{
-    int nodeIndex;
-    int3 cell;
-    if (!TryGetMpmActiveTileCell(
-            groupId.x,
-            localId,
-            nodeIndex,
-            cell))
-    {
-        return;
-    }
-
-    if (_EnableSparseTileDensityProjection == 0)
-    {
-        _ProjectionPressure[nodeIndex] = 0.0;
-        _ProjectionDivergence[nodeIndex] = 0.0;
-        return;
-    }
-
-    if (!IsSparseTileProjectionFluidCell(cell))
-    {
-        _ProjectionPressure[nodeIndex] = 0.0;
-        _ProjectionDivergence[nodeIndex] = 0.0;
-        return;
-    }
-
-    _ProjectionPressure[nodeIndex] *=
-        saturate(_SparseTileProjectionWarmStart);
-    _ProjectionDivergence[nodeIndex] = 0.0;
-}
-
-[numthreads(8, 8, 8)]
-void KComputeSparseTileDensityRhs(
-    uint3 groupId : SV_GroupID,
-    uint3 localId : SV_GroupThreadID)
-{
-    int nodeIndex;
-    int3 cell;
-    if (!TryGetMpmActiveTileCell(
-            groupId.x,
-            localId,
-            nodeIndex,
-            cell))
-    {
-        return;
-    }
-
-    if (_EnableSparseTileDensityProjection == 0 ||
-        !IsSparseTileProjectionFluidCell(cell))
-    {
-        _ProjectionDivergence[nodeIndex] = 0.0;
-        return;
-    }
-
-    float4 center = _GridVelocityMassRead[nodeIndex];
-    float3 velocity = center.xyz;
-    float3 velocityXm = ReadSparseTileProjectionVelocity(
-        cell + int3(-1, 0, 0),
-        velocity
-    );
-    float3 velocityXp = ReadSparseTileProjectionVelocity(
-        cell + int3(1, 0, 0),
-        velocity
-    );
-    float3 velocityYm = ReadSparseTileProjectionVelocity(
-        cell + int3(0, -1, 0),
-        velocity
-    );
-    float3 velocityYp = ReadSparseTileProjectionVelocity(
-        cell + int3(0, 1, 0),
-        velocity
-    );
-    float3 velocityZm = ReadSparseTileProjectionVelocity(
-        cell + int3(0, 0, -1),
-        velocity
-    );
-    float3 velocityZp = ReadSparseTileProjectionVelocity(
-        cell + int3(0, 0, 1),
-        velocity
-    );
-
-    float divergence =
-        0.5 * _InvCellSize *
-        (
-            velocityXp.x - velocityXm.x +
-            velocityYp.y - velocityYm.y +
-            velocityZp.z - velocityZm.z
-        );
-
-    int densityWeightFixed =
-        _ProjectionCellType[nodeIndex];
-    int densityErrorFixed =
-        _ProjectionCellMassInt[nodeIndex];
-    float compression =
-        densityWeightFixed > 0
-            ? max(
-                (float)densityErrorFixed /
-                (float)densityWeightFixed,
-                0.0
-            )
-            : 0.0;
-    float targetExpansion =
-        _SparseTileProjectionDensityBeta *
-        compression /
-        max(_Dt, 1e-6);
-    float divergenceError =
-        ClampDivergence(divergence - targetExpansion);
-
-    float rhs =
-        max(_ReferenceGridRestDensity, 1.0) /
-        max(_Dt, 1e-6) *
-        divergenceError;
-
-    _ProjectionDivergence[nodeIndex] =
-        IsFiniteFloat(rhs) ? rhs : 0.0;
-}
-
-[numthreads(8, 8, 8)]
-void KRedBlackSparseTileDensityPressure(
-    uint3 groupId : SV_GroupID,
-    uint3 localId : SV_GroupThreadID)
-{
-    int nodeIndex;
-    int3 cell;
-    if (!TryGetMpmActiveTileCell(
-            groupId.x,
-            localId,
-            nodeIndex,
-            cell))
-    {
-        return;
-    }
-
-    if (_EnableSparseTileDensityProjection == 0 ||
-        !IsSparseTileProjectionFluidCell(cell) ||
-        ((cell.x + cell.y + cell.z) & 1) !=
-            _SparseTileProjectionColor)
-    {
-        return;
-    }
-
-    float centerPressure =
-        _ProjectionPressure[nodeIndex];
-    float pressureSum = 0.0;
-    float denominator = 0.0;
-
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(-1, 0, 0),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(1, 0, 0),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(0, -1, 0),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(0, 1, 0),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(0, 0, -1),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-    AccumulateSparseTilePressureNeighbor(
-        cell + int3(0, 0, 1),
-        centerPressure,
-        pressureSum,
-        denominator
-    );
-
-    if (denominator <= 0.0)
-    {
-        _ProjectionPressure[nodeIndex] = 0.0;
-        return;
-    }
-
-    float rhs = _ProjectionDivergence[nodeIndex];
-    float candidate =
-        (
-            pressureSum -
-            rhs * _CellSize * _CellSize
-        ) /
-        denominator;
-    candidate = clamp(
-        candidate,
-        -max(_SparseTileProjectionMaxPressure, 0.0),
-        max(_SparseTileProjectionMaxPressure, 0.0)
-    );
-
-    float pressure = lerp(
-        centerPressure,
-        candidate,
-        saturate(_SparseTileProjectionOmega - 1.0) + 1.0
-    );
-    _ProjectionPressure[nodeIndex] = clamp(
-        pressure,
-        -max(_SparseTileProjectionMaxPressure, 0.0),
-        max(_SparseTileProjectionMaxPressure, 0.0)
-    );
-}
-
-[numthreads(8, 8, 8)]
-void KApplySparseTileDensityPressure(
-    uint3 groupId : SV_GroupID,
-    uint3 localId : SV_GroupThreadID)
-{
-    int nodeIndex;
-    int3 cell;
-    if (!TryGetMpmActiveTileCell(
-            groupId.x,
-            localId,
-            nodeIndex,
-            cell))
-    {
-        return;
-    }
-
-    if (_EnableSparseTileDensityProjection == 0 ||
-        !IsSparseTileProjectionFluidCell(cell))
-    {
-        return;
-    }
-
-    float4 velocityMass = _GridVelocityMass[nodeIndex];
-    float density =
-        SparseTileProjectionSmoothedDensity(cell);
-    float centerPressure =
-        _ProjectionPressure[nodeIndex];
-    float pressureXm = ReadSparseTilePressureNeighbor(
-        cell + int3(-1, 0, 0),
-        centerPressure
-    );
-    float pressureXp = ReadSparseTilePressureNeighbor(
-        cell + int3(1, 0, 0),
-        centerPressure
-    );
-    float pressureYm = ReadSparseTilePressureNeighbor(
-        cell + int3(0, -1, 0),
-        centerPressure
-    );
-    float pressureYp = ReadSparseTilePressureNeighbor(
-        cell + int3(0, 1, 0),
-        centerPressure
-    );
-    float pressureZm = ReadSparseTilePressureNeighbor(
-        cell + int3(0, 0, -1),
-        centerPressure
-    );
-    float pressureZp = ReadSparseTilePressureNeighbor(
-        cell + int3(0, 0, 1),
-        centerPressure
-    );
-
-    float3 pressureGradient =
-        0.5 * _InvCellSize *
-        float3(
-            pressureXp - pressureXm,
-            pressureYp - pressureYm,
-            pressureZp - pressureZm
-        );
-    float3 correction =
-        -_Dt *
-        pressureGradient /
-        max(density, 0.25 * _ReferenceGridRestDensity);
-    correction = ClampVectorLength(
-        correction,
-        max(
-            _SparseTileProjectionMaxVelocityCorrection,
-            0.0
-        )
-    );
-
-    if (!IsFiniteFloat3(correction))
-    {
-        if (_EnableGpuDiagnostics != 0)
-            InterlockedAdd(_MpmDiagnostics[DIAG_NAN_INF], 1);
-        return;
-    }
-
-    velocityMass.xyz =
-        ClampSpeed(velocityMass.xyz + correction);
-    _GridVelocityMass[nodeIndex] = velocityMass;
-
-    if (_EnableGpuDiagnostics != 0)
-    {
-        uint pressureFixed = (uint)round(
-            abs(centerPressure)
-        );
-        uint correctionFixed = (uint)round(
-            length(correction) * 1000.0
-        );
-        InterlockedAdd(
-            _MpmDiagnostics[
-                DIAG_SPARSE_TILE_PRESSURE_CELLS
-            ],
-            1u
-        );
-        InterlockedAdd(
-            _MpmDiagnostics[
-                DIAG_SPARSE_TILE_PRESSURE_SUM
-            ],
-            pressureFixed
-        );
-        InterlockedMax(
-            _MpmDiagnostics[
-                DIAG_SPARSE_TILE_PRESSURE_MAX
-            ],
-            pressureFixed
-        );
-        InterlockedAdd(
-            _MpmDiagnostics[
-                DIAG_SPARSE_TILE_CORRECTION_SUM
-            ],
-            correctionFixed
-        );
-    }
-}
-
-
-#endif
 
 [numthreads(8, 8, 8)]
 void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
@@ -4194,7 +3658,28 @@ void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
     if (!TryGetProjectionDispatchCell(id, index, cell))
         return;
 
-    _ProjectionCellType[index] = PROJECTION_AIR;
+    int cellType = PROJECTION_AIR;
+    if (_EnableProjectionGrid != 0 &&
+        _EnableBucketProjectionSolidCells != 0 &&
+        _UseRealBucketCollision != 0)
+    {
+        float3 localPosition = GridToWorld((float3)cell);
+        if (!IsInsideBucketInteriorLocal(localPosition))
+        {
+            int openHoleIndex = -1;
+            bool insideOpenHoleChannel =
+                _EnableBottomHoleOpening != 0 &&
+                IsInsideAnyOpenHoleRegionLocal(
+                    localPosition,
+                    _CellSize * 0.75,
+                    openHoleIndex
+                );
+            if (!insideOpenHoleChannel)
+                cellType = PROJECTION_SOLID;
+        }
+    }
+
+    _ProjectionCellType[index] = cellType;
     _ProjectionCellMassInt[index] = 0;
 
     _ProjectionCellData[index] = float4(0, 0, 0, 0);
@@ -4210,45 +3695,6 @@ void KClearProjectionGrid(uint3 id : SV_DispatchThreadID)
     _ProjectionFaceVelocity[index] = float4(0, 0, 0, 0);
 }
 
-[numthreads(8, 8, 8)]
-void KMarkBucketProjectionSolids(uint3 id : SV_DispatchThreadID)
-{
-    int index;
-    int3 cell;
-    if (!TryGetProjectionDispatchCell(id, index, cell))
-        return;
-
-    if (_EnableProjectionGrid == 0 ||
-        _EnableBucketProjectionSolidCells == 0 ||
-        _UseRealBucketCollision == 0)
-    {
-        return;
-    }
-
-    // Projection shares the node-centered MPM grid.
-    float3 worldP = GridToWorld((float3)cell);
-
-    float3 localP = TransformPoint(_BucketWorldToLocal, worldP);
-
-    bool insideInterior = IsInsideBucketInteriorLocal(localP);
-
-    if (!insideInterior)
-    {
-        int openHoleIndex = -1;
-        bool insideOpenHoleChannel =
-            _EnableBottomHoleOpening != 0 &&
-            IsInsideAnyOpenHoleRegionLocal(
-                localP,
-                _CellSize * 0.75,
-                openHoleIndex
-            );
-
-        if (insideOpenHoleChannel)
-            return;
-
-        _ProjectionCellType[index] = PROJECTION_SOLID;
-    }
-}
 
 void RunMarkProjectionFluidCellsParticle(uint particleIndex)
 {
@@ -4412,113 +3858,6 @@ void KBuildProjectionFluidCellDispatchArgs(uint3 id : SV_DispatchThreadID)
     _ProjectionFluidCellDispatchArgs[2] = 1u;
 }
 
-[numthreads(8, 8, 8)]
-void KApplyMovingBucketProjectionBoundaryVelocity(
-    uint3 id : SV_DispatchThreadID)
-{
-    int index;
-    int3 cell;
-    if (!TryGetProjectionDispatchCell(id, index, cell))
-        return;
-
-    if (_EnableProjectionGrid == 0 ||
-        _EnableMovingBucketProjectionCoupling == 0 ||
-        _ApplyMovingBucketGridBoundaryVelocity == 0)
-    {
-        return;
-    }
-
-    float4 velocityMass = _GridVelocityMass[index];
-
-    if (velocityMass.w <= 1e-8)
-        return;
-
-    int cellType = _ProjectionCellTypeRead[index];
-
-    if (cellType == PROJECTION_SOLID)
-    {
-        float3 nodeWorld = GridToWorld((float3)cell);
-        float3 wallVelocity = ComputeProjectionWallVelocityWorld(nodeWorld);
-        _GridVelocityMass[index] = float4(ClampSpeed(wallVelocity), velocityMass.w);
-        return;
-    }
-
-    if (cellType != PROJECTION_FLUID)
-        return;
-
-    float3 centerWorld =
-        GridToWorld((float3)cell);
-
-    float3 v = velocityMass.xyz;
-
-    // Directions from fluid cell toward neighbor.
-    int3 dirs[6] =
-    {
-        int3(-1, 0, 0),
-        int3( 1, 0, 0),
-        int3(0, -1, 0),
-        int3(0,  1, 0),
-        int3(0, 0, -1),
-        int3(0, 0,  1)
-    };
-
-    float3 dirsWorld[6] =
-    {
-        float3(-1, 0, 0),
-        float3( 1, 0, 0),
-        float3(0, -1, 0),
-        float3(0,  1, 0),
-        float3(0, 0, -1),
-        float3(0, 0,  1)
-    };
-
-    for (int i = 0; i < 6; i++)
-    {
-        int3 neighbor = cell + dirs[i];
-
-        bool solidNeighbor = false;
-
-        if (!IsValidCell(neighbor))
-        {
-            solidNeighbor = true;
-        }
-        else if (!IsProjectionReadableCell(neighbor))
-        {
-            solidNeighbor = false;
-        }
-        else
-        {
-            int nIndex = FlattenGridIndex(neighbor);
-            solidNeighbor =
-                _ProjectionCellTypeRead[nIndex] == PROJECTION_SOLID;
-        }
-
-        if (!solidNeighbor)
-            continue;
-
-        // Direction from current fluid cell toward solid neighbor.
-        float3 dirToSolid = dirsWorld[i];
-
-        // Normal from wall toward fluid is opposite.
-        float3 normalTowardFluid = -dirToSolid;
-
-        float3 faceWorld =
-            centerWorld + dirToSolid * (0.5 * _CellSize);
-
-        float3 wallVelocity =
-            ComputeProjectionWallVelocityWorld(faceWorld);
-
-        v = ApplyMovingWallNoPenetrationWorld(
-            v,
-            wallVelocity,
-            normalTowardFluid
-        );
-    }
-
-    v = ClampSpeed(v);
-
-    _GridVelocityMass[index] = float4(v, velocityMass.w);
-}
 
 float3 GetProjectionFaceVelocity(
     int3 centerCell,
@@ -4535,8 +3874,7 @@ float3 GetProjectionFaceVelocity(
 
     if (!IsValidCell(neighborCell))
     {
-        if (_UseMovingBucketVelocityInDivergence != 0)
-            result = ComputeProjectionWallVelocityWorld(faceWorld);
+        result = float3(0, 0, 0);
     }
     else if (!IsProjectionReadableCell(neighborCell))
     {
@@ -4549,8 +3887,7 @@ float3 GetProjectionFaceVelocity(
 
         if (neighborType == PROJECTION_SOLID)
         {
-            if (_UseMovingBucketVelocityInDivergence != 0)
-                result = ComputeProjectionWallVelocityWorld(faceWorld);
+            result = float3(0, 0, 0);
         }
         else
         {
@@ -4630,21 +3967,10 @@ float GetStaggeredFaceVelocityComponent(
         );
     }
 
-    float3 axisDirection = GetProjectionAxis(axis);
-    float3 faceWorld =
-        GridToWorld((float3)lowerCell) +
-        axisDirection * (0.5 * _CellSize);
-
     if (lowerType == PROJECTION_SOLID ||
         upperType == PROJECTION_SOLID)
     {
-        if (_UseMovingBucketVelocityInDivergence != 0)
-        {
-            result = GetFloat3Component(
-                ComputeProjectionWallVelocityWorld(faceWorld),
-                axis
-            );
-        }
+        result = 0.0;
     }
     else
     {
@@ -5377,10 +4703,7 @@ void KApplyProjectionFaceVelocitiesToGrid(uint3 id : SV_DispatchThreadID)
 
     if (cellType == PROJECTION_SOLID)
     {
-        float3 nodeWorld = GridToWorld((float3)cell);
-        float3 wallVelocity = ComputeProjectionWallVelocityWorld(nodeWorld);
-        _GridVelocityMass[index] =
-            float4(ClampSpeed(wallVelocity), velocityMass.w);
+        _GridVelocityMass[index] = float4(0, 0, 0, velocityMass.w);
         return;
     }
 
@@ -5542,7 +4865,7 @@ void KClassifyAdaptiveActivity(
                     ? min(length(v), max(_MaxParticleSpeed, 0.0))
                     : max(_MaxParticleSpeed, 0.0);
 
-            float3 localP = TransformPoint(_BucketWorldToLocal, p);
+            float3 localP = p;
             float halfHeight = 0.5 * _BucketHeight;
             float bottomY = -halfHeight;
             float normalizedY = saturate(
@@ -5672,16 +4995,14 @@ void RunBucketCollisionParticle(uint particleIndex)
 
     int state = (int)round(stateAgeId.x);
 
-    // Only collide fluid-domain particles for now.
-    if (!IsMpmActiveState(state))
+    // Jet-collar particles remain on the local MPM grid but have already
+    // crossed the outlet and must not be projected back into the bucket.
+    if (!IsBucketCollisionState(state))
         return;
 
-    float3 pWorld = pr.xyz;
+    float3 pLocal = pr.xyz;
     float radius = pr.w;
-    float3 vWorld = vm.xyz;
-
-    float3 pLocal = TransformPoint(_BucketWorldToLocal, pWorld);
-    float3 vLocal = TransformVector(_BucketWorldToLocal, vWorld);
+    float3 vLocal = vm.xyz;
 
     float halfH = 0.5 * _BucketHeight;
     float bottomY = -halfH;
@@ -5718,22 +5039,17 @@ void RunBucketCollisionParticle(uint particleIndex)
         IsPastOpenHoleExitLocal(pLocal, radius, exitHoleIndex))
     {
         float3 holeNormalLocal = GetHoleNormalLocal(exitHoleIndex);
-        float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
-
         float perHoleFlow = max(_BucketHoleData4[exitHoleIndex].z, 0.0);
         float exitBoost =
             max(_BucketHoleData4[exitHoleIndex].w, 0.0) *
             perHoleFlow;
 
-        float3 relativeVelocity = vLocal - wallVelocityLocal;
-        float normalSpeed = dot(relativeVelocity, holeNormalLocal);
+        float normalSpeed = dot(vLocal, holeNormalLocal);
         float targetNormalSpeed = max(normalSpeed, exitBoost);
 
-        relativeVelocity +=
+        vLocal +=
             (targetNormalSpeed - normalSpeed) *
             holeNormalLocal;
-
-        vLocal = wallVelocityLocal + relativeVelocity;
         vLocal = ClampSpeed(vLocal);
 
         // FluidParticleState.Jet = 4
@@ -5743,11 +5059,25 @@ void RunBucketCollisionParticle(uint particleIndex)
         if (_EnableGpuDiagnostics != 0)
             InterlockedAdd(_MpmDiagnostics[DIAG_OUTFLOW_TRANSITIONS], 1);
 
-        float3 outWorld = TransformPoint(_BucketLocalToWorld, pLocal);
-        float3 outVelocityWorld = TransformVector(_BucketLocalToWorld, vLocal);
-
-        _ParticlePositionRadius[particleIndex] = float4(outWorld, radius);
-        _ParticleVelocityMass[particleIndex] = float4(outVelocityWorld, vm.w);
+        if (_EnableJetMpmCollar != 0)
+        {
+            _ParticlePositionRadius[particleIndex] =
+                float4(pLocal, radius);
+            _ParticleVelocityMass[particleIndex] =
+                float4(vLocal, vm.w);
+        }
+        else
+        {
+            stateAgeId.x = 6.0;
+            _ParticlePositionRadius[particleIndex] = float4(
+                BucketLocalPositionToWorld(pLocal),
+                radius
+            );
+            _ParticleVelocityMass[particleIndex] = float4(
+                BucketLocalVelocityToWorld(pLocal, vLocal),
+                vm.w
+            );
+        }
         _ParticleStateAgeId[particleIndex] = stateAgeId;
         return;
     }
@@ -5772,13 +5102,9 @@ void RunBucketCollisionParticle(uint particleIndex)
         // Normal points from wall toward inside.
         float3 normalLocal = float3(-n2.x, 0.0, -n2.y);
 
-        float3 wallVelocityLocal =
-            ComputeBucketWallVelocityLocal(pLocal);
-
-        vLocal = ApplyCollisionVelocityAgainstMovingWall(
+        vLocal = ApplyCollisionVelocityAgainstStaticLocalWall(
             vLocal,
-            normalLocal,
-            wallVelocityLocal
+            normalLocal
         );
 
         collided = true;
@@ -5807,13 +5133,9 @@ void RunBucketCollisionParticle(uint particleIndex)
 
         float3 normalLocal = float3(0, 1, 0);
 
-        float3 wallVelocityLocal =
-            ComputeBucketWallVelocityLocal(pLocal);
-
-        vLocal = ApplyCollisionVelocityAgainstMovingWall(
+        vLocal = ApplyCollisionVelocityAgainstStaticLocalWall(
             vLocal,
-            normalLocal,
-            wallVelocityLocal
+            normalLocal
         );
 
         collided = true;
@@ -5834,9 +5156,10 @@ void RunBucketCollisionParticle(uint particleIndex)
 
             float3 normalLocal = float3(0, -1, 0);
 
-            float3 wallVelocityLocal = ComputeBucketWallVelocityLocal(pLocal);
-
-            vLocal = ApplyCollisionVelocityAgainstMovingWall(vLocal, normalLocal, wallVelocityLocal);
+            vLocal = ApplyCollisionVelocityAgainstStaticLocalWall(
+                vLocal,
+                normalLocal
+            );
 
             collided = true;
 
@@ -5851,6 +5174,16 @@ void RunBucketCollisionParticle(uint particleIndex)
         {
             // FluidParticleState.Spilled = 7
             stateAgeId.x = 7.0;
+            float3 positionWorld =
+                BucketLocalPositionToWorld(pLocal);
+            float3 velocityWorld =
+                BucketLocalVelocityToWorld(pLocal, vLocal);
+            _ParticlePositionRadius[particleIndex] =
+                float4(positionWorld, radius);
+            _ParticleVelocityMass[particleIndex] =
+                float4(velocityWorld, vm.w);
+            _ParticleStateAgeId[particleIndex] = stateAgeId;
+            return;
         }
     }
 
@@ -5864,11 +5197,8 @@ void RunBucketCollisionParticle(uint particleIndex)
     if (collided && _EnableGpuDiagnostics != 0)
         InterlockedAdd(_MpmDiagnostics[DIAG_BUCKET_COLLISIONS], 1);
 
-    float3 correctedWorld = TransformPoint(_BucketLocalToWorld, pLocal);
-    float3 correctedVelocityWorld = TransformVector(_BucketLocalToWorld, vLocal);
-
-    _ParticlePositionRadius[particleIndex] = float4(correctedWorld, radius);
-    _ParticleVelocityMass[particleIndex] = float4(correctedVelocityWorld, vm.w);
+    _ParticlePositionRadius[particleIndex] = float4(pLocal, radius);
+    _ParticleVelocityMass[particleIndex] = float4(vLocal, vm.w);
     _ParticleStateAgeId[particleIndex] = stateAgeId;
 }
 
@@ -6004,14 +5334,12 @@ bool IsAirDomainState(int state)
 }
 
 bool IsInsideMpmJetCollar(
-    float3 worldPosition,
+    float3 localPosition,
     float particleRadius)
 {
     if (_EnableJetMpmCollar == 0 || _BucketHoleCount <= 0)
         return false;
 
-    float3 localPosition =
-        TransformPoint(_BucketWorldToLocal, worldPosition);
     int maxHoleCount = min(_BucketHoleCount, 64);
 
     [loop]
@@ -6043,9 +5371,9 @@ bool IsInsideMpmJetCollar(
     return false;
 }
 
-bool HasMpmGridSupportAtPosition(float3 worldPosition)
+bool HasMpmGridSupportAtPosition(float3 localPosition)
 {
-    float3 gridPosition = WorldToGrid(worldPosition);
+    float3 gridPosition = WorldToGrid(localPosition);
     int3 baseCell = (int3)floor(gridPosition - 0.5);
     uint3 minTile;
     uint3 maxTile;
@@ -6126,9 +5454,16 @@ void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
             return;
         }
 
+        float3 localPosition = p;
+        float3 localVelocity = v;
         state = 6; // Airborne
         stateAgeId.x = 6.0;
         stateAgeId.z = 0.0;
+        p = BucketLocalPositionToWorld(localPosition);
+        v = BucketLocalVelocityToWorld(
+            localPosition,
+            localVelocity
+        );
 
         if (_EnableGpuDiagnostics != 0)
         {
@@ -6138,6 +5473,8 @@ void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
             );
         }
 
+        _ParticlePositionRadius[particleIndex] = float4(p, radius);
+        _ParticleVelocityMass[particleIndex] = float4(v, vm.w);
         _ParticleStateAgeId[particleIndex] = stateAgeId;
         return;
     }
@@ -6150,7 +5487,7 @@ void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
         stateAgeId.z = 0.0;
     }
 
-    v += _Gravity * _Dt;
+    v += _GravityWorld * _Dt;
 
     float drag = exp(-max(_AirborneDragPerSecond, 0.0) * _Dt);
     v *= drag;

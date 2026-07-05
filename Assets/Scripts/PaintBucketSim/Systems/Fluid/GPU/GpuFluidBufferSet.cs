@@ -77,6 +77,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
 
         public int UploadedParticleCount => _uploadedCount;
         public int Capacity => _capacity;
+        public bool MpmParticlesUseBucketLocalSpace { get; private set; }
 
         public bool IsInitialized =>
             _positionRadiusBuffer != null &&
@@ -296,6 +297,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 return;
 
             _uploadWatch.Restart();
+            MpmParticlesUseBucketLocalSpace = false;
 
             int stride = Mathf.Max(1, bufferConfig.uploadStride);
 
@@ -520,6 +522,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _capacity = 0;
             _uploadedCount = 0;
             _lastUploadFrame = -1;
+            MpmParticlesUseBucketLocalSpace = false;
 
             _stats = default;
         }
@@ -550,6 +553,11 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _uploadedCount = Mathf.Clamp(count, 0, _capacity);
             _lastUploadFrame = Time.frameCount;
             UpdateStats();
+        }
+
+        public void SetMpmParticlesUseBucketLocalSpace(bool enabled)
+        {
+            MpmParticlesUseBucketLocalSpace = enabled;
         }
     }
 }

@@ -30,7 +30,6 @@ namespace PaintSim.Scripts.UnityBridge
         [SerializeField, Min(1)] private int _depositEveryNFrames = 1;
         [SerializeField] private bool _skipWhenNoAirDomainParticles = true;
         [SerializeField] private bool _depositOnlyAirDomainParticles = true;
-        [SerializeField] private bool _acceptFluidDomainSurfaceHits = true;
         [SerializeField] private bool _markMlsMpmParticlesOnImpact = true;
 
         [Header("Surface Impact Diagnostics")]
@@ -253,7 +252,6 @@ namespace PaintSim.Scripts.UnityBridge
             ApplyColorMixingConfiguration();
 
             if (_skipWhenNoAirDomainParticles &&
-                !_acceptFluidDomainSurfaceHits &&
                 _paintFluidSystem != null &&
                 _paintFluidSystem.IsGpuSolverActive)
             {
@@ -277,7 +275,7 @@ namespace PaintSim.Scripts.UnityBridge
                 _paintSurface.SurfaceProperties,
                 _markMlsMpmParticlesOnImpact,
                 _depositOnlyAirDomainParticles,
-                _acceptFluidDomainSurfaceHits,
+                _gpuFluidBufferSet.MpmParticlesUseBucketLocalSpace,
                 _enableSurfaceImpactDiagnostics,
                 (_depositInLateUpdate ? Time.deltaTime : Time.fixedDeltaTime) *
                     Mathf.Max(1, _depositEveryNFrames)

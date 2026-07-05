@@ -51,6 +51,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _uploadedBucketHoleCount;
 
         private int _kernelClearMpmDiagnostics = -1;
+        private int _kernelInitializeBucketLocalParticles = -1;
         private int _kernelClearAdaptiveActivity = -1;
         private int _kernelClassifyAdaptiveActivity = -1;
         private int _kernelClearMpmTileData = -1;
@@ -67,10 +68,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _kernelG2PVelocityApic   = -1;
         private int _kernelG2PVelocityApicBucketCollision = -1;
         private int _kernelUpdateDeformation = -1;
-        private int _kernelApplyMovingBucketProjectionBoundaryVelocity = -1;
-
         private int _kernelClearProjectionGrid = -1;
-        private int _kernelMarkBucketProjectionSolids = -1;
         private int _kernelMarkProjectionFluidCells = -1;
         private int _kernelFinalizeProjectionGrid = -1;
         private int _kernelClearProjectionFluidCellList = -1;
@@ -93,7 +91,19 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         private readonly Stopwatch _cpuDispatchWatch = new Stopwatch();
         private readonly Stopwatch _gpuStageProfileWatch = new Stopwatch();
-        private Vector3 _runtimeGridOriginWorld;
+        private Vector3 _runtimeGridOriginLocal;
+        private bool _bucketLocalParticlesInitialized;
+        private bool _hasBucketFrameHistory;
+        private Vector3 _previousBucketOriginWorld;
+        private Quaternion _previousBucketRotationWorld;
+        private Vector3 _previousBucketOriginVelocityWorld;
+        private Vector3 _previousBucketAngularVelocityWorld;
+        private Vector3 _filteredBucketLinearAccelerationWorld;
+        private Vector3 _filteredBucketAngularAccelerationWorld;
+        private Vector3 _bucketOriginVelocityWorld;
+        private Vector3 _bucketFrameLinearAccelerationLocal;
+        private Vector3 _bucketFrameAngularVelocityLocal;
+        private Vector3 _bucketFrameAngularAccelerationLocal;
         private Vector3Int _mpmTileResolution;
         private int _mpmTileCount;
         private int _mpmTileSizeCells = 8;
@@ -146,7 +156,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
 
-        private const int DiagnosticsValueCount = 31;
+        private const int DiagnosticsValueCount = 33;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 1000.0f;
@@ -199,6 +209,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             gpuBuffers.EnsureBuffersPublic();
             gpuBuffers.UploadFromCpuParticlesNow();
             gpuBuffers.SetExternalGpuSimulationMode(true);
+            gpuBuffers.SetMpmParticlesUseBucketLocalSpace(false);
 
             AllocateGridBuffers(context);
 
@@ -414,6 +425,18 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _bucketHoleData3 = null;
             _bucketHoleData4 = null;
             _uploadedBucketHoleCount = 0;
+            _bucketLocalParticlesInitialized = false;
+            _hasBucketFrameHistory = false;
+            _previousBucketOriginWorld = Vector3.zero;
+            _previousBucketRotationWorld = Quaternion.identity;
+            _previousBucketOriginVelocityWorld = Vector3.zero;
+            _previousBucketAngularVelocityWorld = Vector3.zero;
+            _filteredBucketLinearAccelerationWorld = Vector3.zero;
+            _filteredBucketAngularAccelerationWorld = Vector3.zero;
+            _bucketOriginVelocityWorld = Vector3.zero;
+            _bucketFrameLinearAccelerationLocal = Vector3.zero;
+            _bucketFrameAngularVelocityLocal = Vector3.zero;
+            _bucketFrameAngularAccelerationLocal = Vector3.zero;
 
             _diagnosticsReadbackPending = false;
             _hasPressureHistory = false;
@@ -494,6 +517,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ComputeShader compute = solverContext.GpuMpmConfig.denseLocalMpmCompute;
 
             UpdateRuntimeGridPlacement(solverContext);
+            UpdateBucketFrameKinematics(solverContext, stepInput.dt);
             UpdateMpmTileDispatchMode(solverContext);
             if (!_useMpmTileOccupancyThisStep ||
                 !_useMpmParticleTileListsThisStep ||
@@ -513,15 +537,14 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 return;
             }
             bool projectionPathEnabled =
-                solverContext.GpuMpmConfig.enableProjectionGridInfrastructure &&
-                (
-                    !_useReferenceDensityEosThisStep ||
-                    solverContext.GpuMpmConfig
-                        .referenceEnableProjectionFallback
-                );
+                solverContext.GpuMpmConfig.enableProjectionGridInfrastructure;
             if (projectionPathEnabled)
             {
-                UpdateActiveProjectionBounds(solverContext);
+                _activeProjectionMin = Vector3Int.zero;
+                _activeProjectionSize =
+                    solverContext.GpuMpmConfig.gridResolution;
+                _activeProjectionNodeCount = gridNodeCount;
+                _useActiveProjectionBoundsThisStep = false;
                 UpdateSparseProjectionPressureDispatchMode(solverContext);
                 UpdateMpmTileProjectionDispatchMode(solverContext);
             }
@@ -558,7 +581,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     UnityEngine.Debug.LogError(
                         "GpuMpmDenseLocalSolver: Dense grid does not contain the rotated bucket " +
                         "and quadratic transfer support. Increase gridResolution/cellSizeMeters " +
-                        "or reduce gridBucketMarginMeters."
+                        "or enlarge the configured bucket-local grid."
                     );
                 }
 
@@ -566,6 +589,22 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             }
 
             SetCommonParameters(solverContext, simulationContext, stepInput);
+
+            int bucketLocalInitializationDispatches = 0;
+            if (!_bucketLocalParticlesInitialized)
+            {
+                BindInitializeBucketLocalParticles(compute, solverContext);
+                compute.Dispatch(
+                    _kernelInitializeBucketLocalParticles,
+                    Groups(particleCount),
+                    1,
+                    1
+                );
+                _bucketLocalParticlesInitialized = true;
+                solverContext.GpuBufferSet
+                    .SetMpmParticlesUseBucketLocalSpace(true);
+                bucketLocalInitializationDispatches = 1;
+            }
 
             bool profileGpuStages =
                 solverContext.GpuMpmConfig.enableGpuStageProfiling;
@@ -797,6 +836,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _stats.gpuDispatchCount =
                 baseDispatches +
+                bucketLocalInitializationDispatches +
                 adaptiveDispatches +
                 tileDispatches +
                 referenceDensityDispatches +
@@ -842,9 +882,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     solverContext.ReferenceDensityScale,
                     1.0f
                 );
-            _stats.gpuReferenceProjectionFallbackUsed =
-                _useReferenceDensityEosThisStep &&
-                runProjection;
             _stats.gpuMpmTileOccupancyEnabled = true;
             _stats.gpuMpmTileOccupancyUsed =
                 _useMpmTileOccupancyThisStep;
@@ -1062,29 +1099,18 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _stats.invertPressureGradientSign = solverContext.GpuMpmConfig.invertPressureGradientSign;
 
-            _stats.movingBucketProjectionCouplingEnabled =
-                projectionPathEnabled &&
-                solverContext.GpuMpmConfig
-                    .enableMovingBucketProjectionCoupling;
-
-            _stats.movingBucketDivergenceBoundaryEnabled =
-                projectionPathEnabled &&
-                solverContext.GpuMpmConfig.useMovingBucketVelocityInDivergence;
-
-            _stats.movingBucketGridBoundaryVelocityEnabled =
-                projectionPathEnabled &&
-                solverContext.GpuMpmConfig.applyMovingBucketGridBoundaryVelocity;
-
-            _stats.projectionMovingBoundaryVelocityStrength =
-                solverContext.GpuMpmConfig.projectionMovingBoundaryVelocityStrength;
-
-            _stats.maxProjectionBoundaryVelocityCorrection =
-                solverContext.GpuMpmConfig.maxProjectionBoundaryVelocityCorrection;
-
             _stats.gpuGridContainsBucket = _gridContainsBucket;
-            _stats.gpuGridOriginX = _runtimeGridOriginWorld.x;
-            _stats.gpuGridOriginY = _runtimeGridOriginWorld.y;
-            _stats.gpuGridOriginZ = _runtimeGridOriginWorld.z;
+            _stats.gpuBucketLocalSimulation =
+                _bucketLocalParticlesInitialized;
+            _stats.gpuBucketFrameLinearAcceleration =
+                _bucketFrameLinearAccelerationLocal.magnitude;
+            _stats.gpuBucketFrameAngularVelocity =
+                _bucketFrameAngularVelocityLocal.magnitude;
+            _stats.gpuBucketFrameAngularAcceleration =
+                _bucketFrameAngularAccelerationLocal.magnitude;
+            _stats.gpuGridOriginX = _runtimeGridOriginLocal.x;
+            _stats.gpuGridOriginY = _runtimeGridOriginLocal.y;
+            _stats.gpuGridOriginZ = _runtimeGridOriginLocal.z;
             _stats.gpuDiagnosticsEnabled = solverContext.GpuMpmConfig.enableGpuDiagnostics;
             _stats.gpuConfiguredHoleCount = _uploadedBucketHoleCount;
             _stats.gpuHoleOpeningEnabled =
@@ -1130,6 +1156,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ComputeShader compute = context.GpuMpmConfig.denseLocalMpmCompute;
 
             _kernelClearMpmDiagnostics = compute.FindKernel("KClearMpmDiagnostics");
+            _kernelInitializeBucketLocalParticles =
+                compute.FindKernel("KInitializeBucketLocalParticles");
             _kernelClearAdaptiveActivity = compute.FindKernel("KClearAdaptiveActivity");
             _kernelClassifyAdaptiveActivity = compute.FindKernel("KClassifyAdaptiveActivity");
             _kernelClearMpmTileData = compute.FindKernel("KClearMpmTileData");
@@ -1156,7 +1184,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _kernelUpdateDeformation = compute.FindKernel("KUpdateDeformation");
 
             _kernelClearProjectionGrid = compute.FindKernel("KClearProjectionGrid");
-            _kernelMarkBucketProjectionSolids = compute.FindKernel("KMarkBucketProjectionSolids");
             _kernelMarkProjectionFluidCells = compute.FindKernel("KMarkProjectionFluidCells");
             _kernelFinalizeProjectionGrid = compute.FindKernel("KFinalizeProjectionGrid");
             _kernelClearProjectionFluidCellList = compute.FindKernel("KClearProjectionFluidCellList");
@@ -1170,13 +1197,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _kernelSubtractProjectionPressureGradient = compute.FindKernel("KSubtractProjectionPressureGradient");
             _kernelApplyProjectionFaceVelocitiesToGrid = compute.FindKernel("KApplyProjectionFaceVelocitiesToGrid");
             _kernelCollectProjectionDiagnostics = compute.FindKernel("KCollectProjectionDiagnostics");
-            _kernelApplyMovingBucketProjectionBoundaryVelocity = compute.FindKernel("KApplyMovingBucketProjectionBoundaryVelocity");
         }
 
         private bool HasValidKernels(FluidSolverContext context)
         {
             bool baseKernelsValid =
                 _kernelClearMpmDiagnostics >= 0 &&
+                _kernelInitializeBucketLocalParticles >= 0 &&
                 _kernelClearAdaptiveActivity >= 0 &&
                 _kernelClassifyAdaptiveActivity >= 0 &&
                 _kernelClearMpmTileData >= 0 &&
@@ -1204,13 +1231,11 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             {
                 bool projectionKernelsValid =
                     _kernelClearProjectionGrid >= 0 &&
-                    _kernelMarkBucketProjectionSolids >= 0 &&
                     _kernelMarkProjectionFluidCells >= 0 &&
                     _kernelFinalizeProjectionGrid >= 0 &&
                     _kernelClearProjectionFluidCellList >= 0 &&
                     _kernelBuildProjectionFluidCellDispatchArgs >= 0 &&
                     _kernelBuildProjectionFaceVelocities >= 0 &&
-                    _kernelApplyMovingBucketProjectionBoundaryVelocity >= 0 &&
                     _kernelComputeProjectionDivergence >= 0 &&
                     _kernelJacobiProjectionPressure >= 0 &&
                     _kernelJacobiProjectionPressureSparse >= 0 &&
@@ -1483,7 +1508,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetInt("_GridNodeCount", context.GpuMpmConfig.GridNodeCount);
 
             compute.SetInts("_GridResolution", res.x, res.y, res.z);
-            compute.SetVector("_GridOrigin", _runtimeGridOriginWorld);
+            compute.SetVector("_GridOrigin", _runtimeGridOriginLocal);
 
             compute.SetInt(
                 "_EnableMpmTileOccupancy",
@@ -1622,12 +1647,42 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetFloat("_Dt", stepInput.dt);
 
-            Vector3 gravity =
+            Vector3 gravityWorld =
                 simulationContext.EnvironmentState.gravity *
                 stepInput.gravityScale *
                 context.GpuMpmConfig.gravityScale;
 
-            compute.SetVector("_Gravity", gravity);
+            Quaternion bucketRotation = GetBucketRotation(context);
+            Vector3 gravityLocal =
+                Quaternion.Inverse(bucketRotation) * gravityWorld;
+
+            compute.SetVector("_Gravity", gravityLocal);
+            compute.SetVector("_GravityWorld", gravityWorld);
+            compute.SetVector(
+                "_BucketFrameLinearAccelerationLocal",
+                _bucketFrameLinearAccelerationLocal
+            );
+            compute.SetVector(
+                "_BucketFrameAngularVelocityLocal",
+                _bucketFrameAngularVelocityLocal
+            );
+            compute.SetVector(
+                "_BucketFrameAngularAccelerationLocal",
+                _bucketFrameAngularAccelerationLocal
+            );
+            bool enableFrameRotationForces =
+                _bucketFrameAngularVelocityLocal.sqrMagnitude >
+                    0.0001f ||
+                _bucketFrameAngularAccelerationLocal.sqrMagnitude >
+                    0.0625f;
+            compute.SetInt(
+                "_EnableBucketFrameRotationForces",
+                enableFrameRotationForces ? 1 : 0
+            );
+            compute.SetVector(
+                "_BucketOriginVelocityWorld",
+                _bucketOriginVelocityWorld
+            );
 
             compute.SetFloat(
                 "_VelocityDampingPerSecond",
@@ -1760,11 +1815,50 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             SetBucketCollisionParameters(context);
 
             SetOutflowAirborneParameters(context);
-            if (!_useReferenceDensityEosThisStep ||
-                context.GpuMpmConfig.referenceEnableProjectionFallback)
+            if (context.GpuMpmConfig.enableProjectionGridInfrastructure)
             {
                 SetProjectionParameters(context);
             }
+        }
+
+        private void BindInitializeBucketLocalParticles(
+            ComputeShader compute,
+            FluidSolverContext context)
+        {
+            GpuFluidBufferSet buffers = context.GpuBufferSet;
+            compute.SetBuffer(
+                _kernelInitializeBucketLocalParticles,
+                "_ParticlePositionRadius",
+                buffers.PositionRadiusBuffer
+            );
+            compute.SetBuffer(
+                _kernelInitializeBucketLocalParticles,
+                "_ParticleVelocityMass",
+                buffers.VelocityMassBuffer
+            );
+            compute.SetBuffer(
+                _kernelInitializeBucketLocalParticles,
+                "_ParticleStateAgeId",
+                buffers.StateAgeIdBuffer
+            );
+        }
+
+        private static Quaternion GetBucketRotation(
+            FluidSolverContext context)
+        {
+            if (context?.BucketSystem == null ||
+                !context.BucketSystem.IsInitialized)
+            {
+                return Quaternion.identity;
+            }
+
+            quaternion rotation = context.BucketSystem.State.rotation;
+            return new Quaternion(
+                rotation.value.x,
+                rotation.value.y,
+                rotation.value.z,
+                rotation.value.w
+            );
         }
 
         private void SetOutflowAirborneParameters(FluidSolverContext context)
@@ -2909,56 +3003,199 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
         }
 
+        private void UpdateBucketFrameKinematics(
+            FluidSolverContext context,
+            float dt)
+        {
+            if (context.BucketSystem == null ||
+                !context.BucketSystem.IsInitialized)
+            {
+                _bucketOriginVelocityWorld = Vector3.zero;
+                _bucketFrameLinearAccelerationLocal = Vector3.zero;
+                _bucketFrameAngularVelocityLocal = Vector3.zero;
+                _bucketFrameAngularAccelerationLocal = Vector3.zero;
+                _hasBucketFrameHistory = false;
+                return;
+            }
+
+            var state = context.BucketSystem.State;
+            Quaternion rotation = GetBucketRotation(context);
+            Vector3 originWorld = new Vector3(
+                state.position.x,
+                state.position.y,
+                state.position.z
+            );
+            Vector3 centerOfMassLocal = new Vector3(
+                state.centerOfMassLocal.x,
+                state.centerOfMassLocal.y,
+                state.centerOfMassLocal.z
+            );
+            Vector3 angularVelocityWorld = new Vector3(
+                state.angularVelocity.x,
+                state.angularVelocity.y,
+                state.angularVelocity.z
+            );
+            Vector3 centerOfMassVelocityWorld = new Vector3(
+                state.velocity.x,
+                state.velocity.y,
+                state.velocity.z
+            );
+            Vector3 centerOfMassOffsetWorld =
+                rotation * centerOfMassLocal;
+            Vector3 originVelocityWorld =
+                centerOfMassVelocityWorld -
+                Vector3.Cross(
+                    angularVelocityWorld,
+                    centerOfMassOffsetWorld
+                );
+
+            float safeDt = Mathf.Max(dt, 1e-6f);
+            bool discontinuity = false;
+            if (_hasBucketFrameHistory)
+            {
+                float positionDelta =
+                    Vector3.Distance(
+                        originWorld,
+                        _previousBucketOriginWorld
+                    );
+                float rotationDelta = Quaternion.Angle(
+                    _previousBucketRotationWorld,
+                    rotation
+                );
+                discontinuity =
+                    positionDelta >
+                        context.GpuMpmConfig
+                            .bucketFrameTeleportDistanceMeters ||
+                    rotationDelta >
+                        context.GpuMpmConfig
+                            .bucketFrameTeleportAngleDegrees;
+            }
+
+            if (!_hasBucketFrameHistory || discontinuity)
+            {
+                _filteredBucketLinearAccelerationWorld = Vector3.zero;
+                _filteredBucketAngularAccelerationWorld = Vector3.zero;
+            }
+            else
+            {
+                Vector3 rawLinearAcceleration =
+                    (originVelocityWorld -
+                     _previousBucketOriginVelocityWorld) /
+                    safeDt;
+                Vector3 rawAngularAcceleration =
+                    (angularVelocityWorld -
+                     _previousBucketAngularVelocityWorld) /
+                    safeDt;
+
+                rawLinearAcceleration = Vector3.ClampMagnitude(
+                    rawLinearAcceleration,
+                    context.GpuMpmConfig
+                        .maxBucketFrameLinearAcceleration
+                );
+                rawAngularAcceleration = Vector3.ClampMagnitude(
+                    rawAngularAcceleration,
+                    context.GpuMpmConfig
+                        .maxBucketFrameAngularAcceleration
+                );
+
+                float halfLife = Mathf.Max(
+                    context.GpuMpmConfig
+                        .bucketFrameAccelerationFilterHalfLife,
+                    0.0f
+                );
+                float blend = halfLife <= 1e-6f
+                    ? 1.0f
+                    : 1.0f -
+                      Mathf.Exp(
+                          -0.69314718056f * safeDt / halfLife
+                      );
+
+                _filteredBucketLinearAccelerationWorld = Vector3.Lerp(
+                    _filteredBucketLinearAccelerationWorld,
+                    rawLinearAcceleration,
+                    blend
+                );
+                _filteredBucketAngularAccelerationWorld = Vector3.Lerp(
+                    _filteredBucketAngularAccelerationWorld,
+                    rawAngularAcceleration,
+                    blend
+                );
+            }
+
+            Quaternion inverseRotation = Quaternion.Inverse(rotation);
+            _bucketOriginVelocityWorld = originVelocityWorld;
+            _bucketFrameLinearAccelerationLocal =
+                inverseRotation *
+                _filteredBucketLinearAccelerationWorld;
+            _bucketFrameAngularVelocityLocal =
+                inverseRotation * angularVelocityWorld;
+            _bucketFrameAngularAccelerationLocal =
+                inverseRotation *
+                _filteredBucketAngularAccelerationWorld;
+
+            _previousBucketOriginWorld = originWorld;
+            _previousBucketRotationWorld = rotation;
+            _previousBucketOriginVelocityWorld = originVelocityWorld;
+            _previousBucketAngularVelocityWorld =
+                angularVelocityWorld;
+            _hasBucketFrameHistory = true;
+        }
+
         private void UpdateRuntimeGridPlacement(FluidSolverContext context)
         {
             GpuMpmSolverConfig config = context.GpuMpmConfig;
             Vector3 gridSize = config.GridSizeWorld;
-
-            Vector3 bucketCenter = Vector3.zero;
-            float bucketBoundingRadius = 0.0f;
+            _runtimeGridOriginLocal = config.gridOriginLocal;
+            _gridContainsBucket = false;
+            _stats.gpuRequiredGridExtent = 0.0f;
 
             if (context.BucketSystem != null &&
                 context.BucketSystem.IsInitialized &&
                 context.BucketSystem.Config != null)
             {
                 var bucketConfig = context.BucketSystem.Config;
-                var bucketState = context.BucketSystem.State;
-
-                bucketCenter = new Vector3(
-                    bucketState.position.x,
-                    bucketState.position.y,
-                    bucketState.position.z
-                );
-
                 float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
                 float maxRadius = Mathf.Max(
                     bucketConfig.topRadiusMeters,
                     bucketConfig.bottomRadiusMeters
                 );
-
-                bucketBoundingRadius =
-                    Mathf.Sqrt(halfHeight * halfHeight + maxRadius * maxRadius) +
-                    Mathf.Max(config.gridBucketMarginMeters, 0.0f) +
+                float support =
+                    Mathf.Max(config.gridBoundaryMarginMeters, 0.0f) +
                     2.0f * config.cellSizeMeters;
+                float jetSupport =
+                    config.enableJetMpmCollar
+                        ? Mathf.Max(
+                            config.jetMpmCollarMaxDistanceMeters,
+                            0.0f
+                          )
+                        : 0.0f;
+                Vector3 requiredMin = new Vector3(
+                    -maxRadius - support,
+                    -halfHeight - support - jetSupport,
+                    -maxRadius - support
+                );
+                Vector3 requiredMax = new Vector3(
+                    maxRadius + support,
+                    halfHeight + support,
+                    maxRadius + support
+                );
+                Vector3 gridMax =
+                    _runtimeGridOriginLocal + gridSize;
+
+                _gridContainsBucket =
+                    requiredMin.x >= _runtimeGridOriginLocal.x &&
+                    requiredMin.y >= _runtimeGridOriginLocal.y &&
+                    requiredMin.z >= _runtimeGridOriginLocal.z &&
+                    requiredMax.x <= gridMax.x &&
+                    requiredMax.y <= gridMax.y &&
+                    requiredMax.z <= gridMax.z;
+
+                Vector3 requiredSize = requiredMax - requiredMin;
+                _stats.gpuRequiredGridExtent = Mathf.Max(
+                    requiredSize.x,
+                    Mathf.Max(requiredSize.y, requiredSize.z)
+                );
             }
-
-            _runtimeGridOriginWorld = config.followBucketWithGrid
-                ? bucketCenter - 0.5f * gridSize
-                : config.gridOriginWorld;
-
-            Vector3 gridMax = _runtimeGridOriginWorld + gridSize;
-            Vector3 requiredMin = bucketCenter - Vector3.one * bucketBoundingRadius;
-            Vector3 requiredMax = bucketCenter + Vector3.one * bucketBoundingRadius;
-
-            _gridContainsBucket =
-                requiredMin.x >= _runtimeGridOriginWorld.x &&
-                requiredMin.y >= _runtimeGridOriginWorld.y &&
-                requiredMin.z >= _runtimeGridOriginWorld.z &&
-                requiredMax.x <= gridMax.x &&
-                requiredMax.y <= gridMax.y &&
-                requiredMax.z <= gridMax.z;
-
-            _stats.gpuRequiredGridExtent = 2.0f * bucketBoundingRadius;
         }
 
         private void UpdateActiveProjectionBounds(FluidSolverContext context)
@@ -3049,8 +3286,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             worldMax += Vector3.one * padding;
 
             float invCellSize = 1.0f / Mathf.Max(config.cellSizeMeters, 1e-6f);
-            Vector3 minGrid = (worldMin - _runtimeGridOriginWorld) * invCellSize;
-            Vector3 maxGrid = (worldMax - _runtimeGridOriginWorld) * invCellSize;
+            Vector3 minGrid = (worldMin - _runtimeGridOriginLocal) * invCellSize;
+            Vector3 maxGrid = (worldMax - _runtimeGridOriginLocal) * invCellSize;
 
             Vector3Int minCell = new Vector3Int(
                 Mathf.Clamp(Mathf.FloorToInt(minGrid.x), 0, resolution.x),
@@ -3164,33 +3401,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetMatrix("_BucketLocalToWorld", localToWorld);
             compute.SetMatrix("_BucketWorldToLocal", worldToLocal);
 
-            compute.SetInt(
-                "_EnableMovingBucketBoundaryVelocity",
-                context.GpuMpmConfig.enableMovingBucketBoundaryVelocity ? 1 : 0
-            );
-
-            compute.SetFloat(
-                "_BucketBoundaryVelocityStrength",
-                context.GpuMpmConfig.bucketBoundaryVelocityStrength
-            );
-
-            compute.SetFloat(
-                "_MaxBucketBoundaryVelocity",
-                context.GpuMpmConfig.maxBucketBoundaryVelocity
-            );
-
-            float3 bucketLinearVelocity = state.velocity;
             float3 bucketAngularVelocity = state.angularVelocity;
-
-            compute.SetVector(
-                "_BucketLinearVelocityWorld",
-                new Vector4(
-                    bucketLinearVelocity.x,
-                    bucketLinearVelocity.y,
-                    bucketLinearVelocity.z,
-                    0.0f
-                )
-            );
 
             compute.SetVector(
                 "_BucketAngularVelocityWorld",
@@ -3634,30 +3845,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.useStaggeredFaceProjection ? 1 : 0
             );
 
-            compute.SetInt(
-                "_EnableMovingBucketProjectionCoupling",
-                context.GpuMpmConfig.enableMovingBucketProjectionCoupling ? 1 : 0
-            );
-
-            compute.SetInt(
-                "_UseMovingBucketVelocityInDivergence",
-                context.GpuMpmConfig.useMovingBucketVelocityInDivergence ? 1 : 0
-            );
-
-            compute.SetInt(
-                "_ApplyMovingBucketGridBoundaryVelocity",
-                context.GpuMpmConfig.applyMovingBucketGridBoundaryVelocity ? 1 : 0
-            );
-
-            compute.SetFloat(
-                "_ProjectionMovingBoundaryVelocityStrength",
-                context.GpuMpmConfig.projectionMovingBoundaryVelocityStrength
-            );
-
-            compute.SetFloat(
-                "_MaxProjectionBoundaryVelocityCorrection",
-                context.GpuMpmConfig.maxProjectionBoundaryVelocityCorrection
-            );
         }
 
         private void BindClearProjectionGrid(ComputeShader compute)
@@ -3679,17 +3866,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_ProjectionFaceVelocity",
                 _projectionFaceVelocityBuffer
             );
-        }
-
-        private void BindMarkBucketProjectionSolids(ComputeShader compute)
-        {
-            compute.SetBuffer(
-                _kernelMarkBucketProjectionSolids,
-                "_ProjectionCellType",
-                _projectionCellTypeBuffer
-            );
-
-            BindBucketHoleBuffers(compute, _kernelMarkBucketProjectionSolids);
+            BindBucketHoleBuffers(compute, _kernelClearProjectionGrid);
         }
 
         private void BindMarkProjectionFluidCells(
@@ -3804,12 +3981,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             BindClearProjectionGrid(compute);
             DispatchProjectionKernel(compute, _kernelClearProjectionGrid, context);
 
-            if (context.GpuMpmConfig.enableBucketProjectionSolidCells)
-            {
-                BindMarkBucketProjectionSolids(compute);
-                DispatchProjectionKernel(compute, _kernelMarkBucketProjectionSolids, context);
-            }
-
             bool useMpmGridMass =
                 context.GpuMpmConfig.useMpmGridForProjection;
             if (!useMpmGridMass)
@@ -3855,23 +4026,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             }
 
             int dispatches =
-                (context.GpuMpmConfig.enableBucketProjectionSolidCells ? 3 : 2) +
+                2 +
                 (useMpmGridMass ? 0 : 1) +
                 sparseListDispatches;
-
-            if (context.GpuMpmConfig.enableMovingBucketProjectionCoupling &&
-                context.GpuMpmConfig.applyMovingBucketGridBoundaryVelocity)
-            {
-                BindApplyMovingBucketProjectionBoundaryVelocity(compute);
-
-                DispatchProjectionKernel(
-                    compute,
-                    _kernelApplyMovingBucketProjectionBoundaryVelocity,
-                    context
-                );
-
-                dispatches++;
-            }
 
             if (context.GpuMpmConfig.enableProjectionDivergenceComputation &&
                 context.GpuMpmConfig.useStaggeredFaceProjection)
@@ -4369,22 +4526,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             );
 
             return 2;
-        }
-
-        private void BindApplyMovingBucketProjectionBoundaryVelocity(
-            ComputeShader compute)
-        {
-            compute.SetBuffer(
-                _kernelApplyMovingBucketProjectionBoundaryVelocity,
-                "_GridVelocityMass",
-                _gridVelocityMassBuffer
-            );
-
-            compute.SetBuffer(
-                _kernelApplyMovingBucketProjectionBoundaryVelocity,
-                "_ProjectionCellTypeRead",
-                _projectionCellTypeBuffer
-            );
         }
 
         private void RequestDiagnosticsReadbackIfDue(

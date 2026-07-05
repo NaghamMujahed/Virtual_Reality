@@ -19,7 +19,7 @@ MonoBehaviour:
   particleRadiusToSpacing: 0.4
   wallClearanceMeters: 0.005
   holeClearanceMeters: 0.01
-  enableColorCompartments: 1
+  enableColorCompartments: 0
   colorCompartmentCount: 2
   colorCompartmentAxis: 0
   colorDividerGapFraction: 0

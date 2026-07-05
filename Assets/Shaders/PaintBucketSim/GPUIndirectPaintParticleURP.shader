@@ -66,6 +66,8 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
             float _PaintFresnelStrength;
             float _HideCanvasAndLostParticles;
             float _UseRenderableParticleList;
+            float _UseBucketLocalParticles;
+            float4x4 _BucketLocalToWorld;
             int _ParticleIndexStride;
             int _ParticleCount;
 
@@ -81,8 +83,23 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
                     );
 
                 float4 pr = _ParticlePositionRadius[particleIndex];
+                int state =
+                    (int)round(_ParticleStateAgeId[particleIndex].x);
 
                 float3 centerWS = pr.xyz;
+                bool bucketLocalState =
+                    state == 1 ||
+                    state == 2 ||
+                    state == 3 ||
+                    state == 4;
+                if (_UseBucketLocalParticles > 0.5 &&
+                    bucketLocalState)
+                {
+                    centerWS = mul(
+                        _BucketLocalToWorld,
+                        float4(centerWS, 1.0)
+                    ).xyz;
+                }
                 float radius = max(pr.w * _VisualRadiusScale, 0.0001);
 
                 float3 local;
@@ -125,7 +142,6 @@ Shader "PaintBucketSim/GPU Indirect Paint Particle URP"
 
                 if (_HideCanvasAndLostParticles > 0.5)
                 {
-                    int state = (int)round(_ParticleStateAgeId[particleIndex].x);
                     if (state == 0 || state == 8 || state == 9 || state == 10)
                         output.color.a = 0.0;
                 }

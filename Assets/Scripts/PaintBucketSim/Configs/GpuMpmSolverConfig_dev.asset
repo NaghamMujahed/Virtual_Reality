@@ -13,12 +13,16 @@ MonoBehaviour:
   m_Name: GpuMpmSolverConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuMpmSolverConfig
   denseLocalMpmCompute: {fileID: 7200000, guid: 6baff0c33dcf5fd4da0d039aed50f8c6, type: 3}
-  gridOriginWorld: {x: -3, y: -3, z: -3}
-  gridResolution: {x: 80, y: 80, z: 80}
+  gridOriginLocal: {x: -0.24, y: -0.4, z: -0.24}
+  gridResolution: {x: 48, y: 72, z: 48}
   cellSizeMeters: 0.01
-  followBucketWithGrid: 1
-  gridBucketMarginMeters: 0.02
+  gridBoundaryMarginMeters: 0.02
   rejectUndersizedGrid: 1
+  bucketFrameAccelerationFilterHalfLife: 0.025
+  maxBucketFrameLinearAcceleration: 80
+  maxBucketFrameAngularAcceleration: 240
+  bucketFrameTeleportDistanceMeters: 0.35
+  bucketFrameTeleportAngleDegrees: 55
   enableGpuDenseMpm: 1
   gravityScale: 1
   velocityDampingPerSecond: 1.1
@@ -45,9 +49,9 @@ MonoBehaviour:
   enableSparseProjectionPressureDispatch: 1
   enableMpmTileProjectionDispatch: 1
   enableProjectionDensityDriftCorrection: 1
-  projectionDensityDriftStrength: 0.18
-  projectionDensityDriftMinRatio: 1.02
-  projectionDensityDriftMaxDivergence: 10
+  projectionDensityDriftStrength: 0.8
+  projectionDensityDriftMinRatio: 1.005
+  projectionDensityDriftMaxDivergence: 40
   enableAdaptiveMultiRate: 1
   adaptiveActivitySampleInterval: 8
   calmInteriorDeformationInterval: 1
@@ -77,9 +81,8 @@ MonoBehaviour:
   enableReferenceDensityEosMode: 1
   referenceEosExponent: 5
   referenceClampNegativePressure: 1
-  referenceEnableProjectionFallback: 1
   enableGridDensityEos: 1
-  gridDensityEosPressureScale: 2.8
+  gridDensityEosPressureScale: 1.8
   gridDensityEosMaxVelocityCorrection: 1.1
   bulkModulus: 850
   mpmViscosity: 0.28
@@ -120,7 +123,7 @@ MonoBehaviour:
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 1
+  enableBottomHoleOpening: 0
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
@@ -137,9 +140,6 @@ MonoBehaviour:
   airborneLifetimeSeconds: 8
   airborneKillBelowWorldY: -2
   killAirborneBelowWorldY: 0
-  enableMovingBucketBoundaryVelocity: 1
-  bucketBoundaryVelocityStrength: 0.5
-  maxBucketBoundaryVelocity: 4
   enableProjectionDivergenceComputation: 1
   projectionDivergenceScale: 1
   maxAbsProjectionDivergence: 50
@@ -147,10 +147,10 @@ MonoBehaviour:
   enableJacobiPressureSolve: 1
   pressureSolveMode: 1
   pressureJacobiIterations: 12
-  pressureRedBlackSorIterations: 6
+  pressureRedBlackSorIterations: 8
   pressureRhsScale: 1
   pressureJacobiRelaxation: 0.8
-  pressureRedBlackSorOmega: 1.12
+  pressureRedBlackSorOmega: 1.35
   maxProjectionPressure: 1000
   projectionAirPressureZero: 1
   projectionSolidPressureNeumann: 1
@@ -160,8 +160,3 @@ MonoBehaviour:
   invertPressureGradientSign: 0
   pressureCorrectionFluidCellsOnly: 1
   useStaggeredFaceProjection: 1
-  enableMovingBucketProjectionCoupling: 1
-  useMovingBucketVelocityInDivergence: 1
-  applyMovingBucketGridBoundaryVelocity: 1
-  projectionMovingBoundaryVelocityStrength: 1
-  maxProjectionBoundaryVelocityCorrection: 2
