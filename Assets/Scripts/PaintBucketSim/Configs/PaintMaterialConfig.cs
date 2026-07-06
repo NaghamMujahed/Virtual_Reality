@@ -316,7 +316,7 @@ namespace PaintBucketSim.Configs
             {
                 case PaintMaterialPreset.WaterLike:
                     densityKgPerM3 = 1000.0f;
-                    baseColor = new Color(0.62f, 0.86f, 1.0f, 0.55f);
+                    // baseColor = new Color(0.62f, 0.86f, 1.0f, 0.55f);
                     viscosityModel = PaintViscosityModel.Constant;
                     constantViscosityPaS = 0.0012f;
                     zeroShearViscosityPaS = 0.0012f;
