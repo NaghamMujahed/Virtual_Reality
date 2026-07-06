@@ -109,10 +109,9 @@
         public float gpuAverageLocalZ01;
         public float gpuAverageParticleSpeed;
         public float gpuMaximumParticleSpeed;
-        public bool gpuReferenceDensityEosRequested;
-        public bool gpuReferenceDensityEosUsed;
-        public bool gpuGridDensityEosUsed;
+        public bool gpuGridDensityPredictorUsed;
         public float gpuGridDensityEosPressureScale;
+        public float gpuGridDensityEosActivationRatio;
         public float gpuReferenceGridRestDensity;
         public bool gpuAdaptiveMultiRateEnabled;
         public bool gpuAdaptiveActivityReady;
@@ -125,9 +124,6 @@
         public float gpuAdaptiveAverageParticleSpeed;
         public float gpuAdaptiveMaximumParticleSpeed;
         public float gpuAdaptiveAverageJDeviation;
-        public int gpuCalmInteriorDeformationInterval;
-        public bool gpuCalmInteriorDeformationUpdatedThisStep;
-
         public int gpuConfiguredHoleCount;
         public bool gpuHoleOpeningEnabled;
         public bool gpuAirborneAdvectionEnabled;

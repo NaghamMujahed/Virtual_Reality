@@ -728,7 +728,7 @@ Transform:
   m_GameObject: {fileID: 58773390}
   serializedVersion: 2
   m_LocalRotation: {x: 0.40305823, y: -0.27253202, z: 0.12708378, w: 0.8643611}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 20, z: -10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2988,6 +2988,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Systems.Fluid.GpuParticleIndirectRenderer
   gpuBufferSet: {fileID: 303841555}
   renderConfig: {fileID: 11400000, guid: 81255d109c025f74986d6c5ca990e399, type: 2}
+  bucketSystem: {fileID: 0}
   particleMesh: {fileID: 0}
   particleMaterial: {fileID: 2100000, guid: 2ba226fc00a7bdd45aae4169d0680c5f, type: 2}
   shadowCastingMode: 0
@@ -9655,7 +9656,6 @@ MonoBehaviour:
   _depositEveryNFrames: 1
   _skipWhenNoAirDomainParticles: 1
   _depositOnlyAirDomainParticles: 1
-  _acceptFluidDomainSurfaceHits: 1
   _markMlsMpmParticlesOnImpact: 1
   _enableSurfaceImpactDiagnostics: 0
   _diagnosticLogEveryNFrames: 120

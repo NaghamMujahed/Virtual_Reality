@@ -1079,9 +1079,6 @@ namespace PaintBucketSim.Systems.Fluid
             Vector4[] colorOutput,
             Vector4[] stateAgeIdOutput,
             Vector4[] volumeJOutput,
-            Vector4[] deformationF0Output,
-            Vector4[] deformationF1Output,
-            Vector4[] deformationF2Output,
             int maxCount,
             int stride)
         {
@@ -1091,9 +1088,6 @@ namespace PaintBucketSim.Systems.Fluid
                 colorOutput == null ||
                 stateAgeIdOutput == null ||
                 volumeJOutput == null ||
-                deformationF0Output == null ||
-                deformationF1Output == null ||
-                deformationF2Output == null ||
                 maxCount <= 0)
             {
                 return 0;
@@ -1109,13 +1103,7 @@ namespace PaintBucketSim.Systems.Fluid
                 )
             );
 
-            writableCount = Mathf.Min(
-                writableCount,
-                Mathf.Min(
-                    Mathf.Min(volumeJOutput.Length, deformationF0Output.Length),
-                    Mathf.Min(deformationF1Output.Length, deformationF2Output.Length)
-                )
-            );
+            writableCount = Mathf.Min(writableCount, volumeJOutput.Length);
 
             int written = 0;
 
@@ -1197,10 +1185,6 @@ namespace PaintBucketSim.Systems.Fluid
                     restDensity,
                     referenceDensityScale
                 );
-                // Initial deformation gradient F = Identity.
-                                deformationF0Output[written] = new Vector4(1, 0, 0, 0);
-                deformationF1Output[written] = new Vector4(0, 1, 0, 0);
-                deformationF2Output[written] = new Vector4(0, 0, 1, 0);
 
                 written++;
             }

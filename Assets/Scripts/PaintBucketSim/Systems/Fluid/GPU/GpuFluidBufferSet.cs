@@ -59,19 +59,10 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         ////////////////    G6.A Changes   //////////////////
 
         private GraphicsBuffer _volumeJBuffer;
-        private GraphicsBuffer _deformationF0Buffer;
-        private GraphicsBuffer _deformationF1Buffer;
-        private GraphicsBuffer _deformationF2Buffer;
 
         private Vector4[] _cpuVolumeJ;
-        private Vector4[] _cpuDeformationF0;
-        private Vector4[] _cpuDeformationF1;
-        private Vector4[] _cpuDeformationF2;
 
         public GraphicsBuffer VolumeJBuffer => _volumeJBuffer;
-        public GraphicsBuffer DeformationF0Buffer => _deformationF0Buffer;
-        public GraphicsBuffer DeformationF1Buffer => _deformationF1Buffer;
-        public GraphicsBuffer DeformationF2Buffer => _deformationF2Buffer;
 
         ////////////////    End G6.A Changes   //////////////////
 
@@ -91,10 +82,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             // End G5 Changes //
 
             // G6.A Changes //
-            _volumeJBuffer != null &&
-            _deformationF0Buffer != null &&
-            _deformationF1Buffer != null &&
-            _deformationF2Buffer != null
+            _volumeJBuffer != null
             // End G6.A Changes //
             ;
 
@@ -202,9 +190,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
 
             // G6.A Changes //
             _cpuVolumeJ = new Vector4[_capacity];
-            _cpuDeformationF0 = new Vector4[_capacity];
-            _cpuDeformationF1 = new Vector4[_capacity];
-            _cpuDeformationF2 = new Vector4[_capacity];
             // End G6.A Changes //
 
             // All buffers use Vector4/float4 => stride 16 bytes.
@@ -259,23 +244,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 sizeof(float) * 4
             );
 
-            _deformationF0Buffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _capacity,
-                sizeof(float) * 4
-            );
-
-            _deformationF1Buffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _capacity,
-                sizeof(float) * 4
-            );
-
-            _deformationF2Buffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                _capacity,
-                sizeof(float) * 4
-            );
             // End G6.A Changes //
 
             _uploadedCount = 0;
@@ -307,9 +275,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _cpuColor,
                 _cpuStateAgeId,
                 _cpuVolumeJ,
-                _cpuDeformationF0,
-                _cpuDeformationF1,
-                _cpuDeformationF2,
                 _capacity,
                 stride
             );
@@ -327,12 +292,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 ////////// G6.A Changes //////////
 
                 _volumeJBuffer.SetData(_cpuVolumeJ, 0, 0, _uploadedCount);
-
-                _deformationF0Buffer.SetData(_cpuDeformationF0, 0, 0, _uploadedCount);
-
-                _deformationF1Buffer.SetData(_cpuDeformationF1, 0, 0, _uploadedCount);
-
-                _deformationF2Buffer.SetData(_cpuDeformationF2, 0, 0, _uploadedCount);
 
                 ////////// End G6.A Changes //////////
             }
@@ -423,9 +382,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
 
             //////////// G6.A Changes //////////
             _stats.volumeJBufferReady = _volumeJBuffer != null;
-            _stats.deformationF0BufferReady = _deformationF0Buffer != null;
-            _stats.deformationF1BufferReady = _deformationF1Buffer != null;
-            _stats.deformationF2BufferReady = _deformationF2Buffer != null;
             //////////// End G6.A Changes //////////
 
         }
@@ -489,28 +445,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _volumeJBuffer = null;
             }
 
-            if (_deformationF0Buffer != null)
-            {
-                _deformationF0Buffer.Release();
-                _deformationF0Buffer = null;
-            }
-
-            if (_deformationF1Buffer != null)
-            {
-                _deformationF1Buffer.Release();
-                _deformationF1Buffer = null;
-            }
-
-            if (_deformationF2Buffer != null)
-            {
-                _deformationF2Buffer.Release();
-                _deformationF2Buffer = null;
-            }
-
             _cpuVolumeJ = null;
-            _cpuDeformationF0 = null;
-            _cpuDeformationF1 = null;
-            _cpuDeformationF2 = null;
 
             ////////////// End G6.A Changes ////////////
 

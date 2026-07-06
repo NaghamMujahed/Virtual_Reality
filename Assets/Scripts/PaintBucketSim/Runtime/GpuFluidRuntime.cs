@@ -30,6 +30,7 @@
         ////////////////    G6.A Changes   //////////////////
 
         public bool volumeJBufferReady;
+        // Kept only for the legacy debug overlay; deformation buffers were removed.
         public bool deformationF0BufferReady;
         public bool deformationF1BufferReady;
         public bool deformationF2BufferReady;

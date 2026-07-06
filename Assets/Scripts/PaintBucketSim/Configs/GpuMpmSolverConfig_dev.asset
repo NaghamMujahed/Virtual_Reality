@@ -25,7 +25,7 @@ MonoBehaviour:
   bucketFrameTeleportAngleDegrees: 55
   enableGpuDenseMpm: 1
   gravityScale: 1
-  velocityDampingPerSecond: 1.1
+  velocityDampingPerSecond: 0.15
   maxParticleSpeed: 3
   enableAdaptiveTransferStencil: 1
   enableAdaptiveG2PTransferStencil: 0
@@ -39,12 +39,10 @@ MonoBehaviour:
   enableGpuDiagnostics: 0
   enableGpuStageProfiling: 0
   diagnosticsReadbackInterval: 15
-  affineDamping: 0.18
+  affineDamping: 0.04
   maxAffineMagnitude: 8
   useAutomaticApicDInverse: 1
   manualApicDInverse: 625
-  enableProjectionGridInfrastructure: 1
-  useMpmGridForProjection: 1
   projectionSubstepInterval: 1
   enableSparseProjectionPressureDispatch: 1
   enableMpmTileProjectionDispatch: 1
@@ -54,7 +52,6 @@ MonoBehaviour:
   projectionDensityDriftMaxDivergence: 40
   enableAdaptiveMultiRate: 1
   adaptiveActivitySampleInterval: 8
-  calmInteriorDeformationInterval: 1
   adaptivePriorityParticleSpeed: 3
   adaptivePriorityJDeviation: 1
   adaptivePriorityBoundaryBandMeters: 0.025
@@ -69,28 +66,21 @@ MonoBehaviour:
   adaptiveProjectionBucketAngularSpeed: 0.25
   enablePressureWarmStart: 1
   pressureWarmStartFactor: 0.35
-  projectionMassFixedScale: 1000000
   minFluidCellMass: 0.0000001
   enableBucketProjectionSolidCells: 1
   projectionTopOpen: 0
-  enableActiveProjectionBounds: 1
-  activeProjectionBoundsPaddingMeters: 0.04
-  activeProjectionBoundsPaddingCells: 2
-  activeProjectionMaxFullGridFraction: 0.95
   enableMaterialStress: 1
-  enableReferenceDensityEosMode: 1
   referenceEosExponent: 5
   referenceClampNegativePressure: 1
-  enableGridDensityEos: 1
-  gridDensityEosPressureScale: 1.8
-  gridDensityEosMaxVelocityCorrection: 1.1
+  gridDensityEosPressureScale: 2.8
+  gridDensityEosActivationRatio: 1.01
+  gridDensityEosMaxVelocityCorrection: 0.2
   bulkModulus: 850
   mpmViscosity: 0.28
   materialStressStrength: 0.65
   maxStressMagnitude: 5200
   minJ: 0.65
   maxJ: 1.35
-  maxDeformationGradientValue: 5
   paintMaterialPreset: 3
   autoApplyPaintMaterialPreset: 1
   usePaintMaterialConfigRheology: 1
@@ -144,13 +134,9 @@ MonoBehaviour:
   projectionDivergenceScale: 1
   maxAbsProjectionDivergence: 50
   projectionSolidNoFlux: 1
-  enableJacobiPressureSolve: 1
-  pressureSolveMode: 1
-  pressureJacobiIterations: 12
-  pressureRedBlackSorIterations: 8
+  pressureRedBlackSorIterations: 10
   pressureRhsScale: 1
-  pressureJacobiRelaxation: 0.8
-  pressureRedBlackSorOmega: 1.35
+  pressureRedBlackSorOmega: 1.75
   maxProjectionPressure: 1000
   projectionAirPressureZero: 1
   projectionSolidPressureNeumann: 1

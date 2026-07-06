@@ -9,12 +9,6 @@ namespace PaintBucketSim.Configs
         MarkSpilled = 2
     }
 
-    public enum ProjectionPressureSolveMode
-    {
-        Jacobi = 0,
-        RedBlackSor = 1
-    }
-
     public enum GpuPaintMaterialPreset
     {
         Custom = 0,
@@ -141,11 +135,6 @@ namespace PaintBucketSim.Configs
         public float manualApicDInverse = 625.0f;
 
         [Header("MLS-MPM Projection Grid Infrastructure")]
-        public bool enableProjectionGridInfrastructure = true;
-
-        [Tooltip("Use the same dense grid as the MPM solver for the pressure projection prototype.")]
-        public bool useMpmGridForProjection = true;
-
         [Tooltip("Run the pressure projection every N MPM substeps. 1 = every substep, 2 = every second substep.")]
         [Min(1)]
         public int projectionSubstepInterval = 1;
@@ -178,10 +167,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("GPU activity classification cadence in MPM substeps.")]
         [Range(1, 32)]
         public int adaptiveActivitySampleInterval = 8;
-
-        [Tooltip("Deformation update interval for particles classified as calm interior. Priority particles still update every substep.")]
-        [Range(1, 4)]
-        public int calmInteriorDeformationInterval = 1;
 
         [Tooltip("Particles at or above this speed remain high priority.")]
         [Min(0.0f)]
@@ -237,10 +222,6 @@ namespace PaintBucketSim.Configs
         [Range(0.0f, 1.0f)]
         public float pressureWarmStartFactor = 0.75f;
 
-        [Tooltip("Fixed point scale for atomically accumulating cell mass on GPU.")]
-        [Min(1)]
-        public int projectionMassFixedScale = 1000000;
-
         [Tooltip("A grid cell is considered fluid if its accumulated mass is above this value.")]
         [Min(0.0f)]
         public float minFluidCellMass = 1e-7f;
@@ -251,47 +232,28 @@ namespace PaintBucketSim.Configs
         [Tooltip("If true, cells above the bucket top are treated as air. If false, top can behave like a temporary lid.")]
         public bool projectionTopOpen = true;
 
-        [Header("MLS-MPM Projection Active Bounds")]
-        [Tooltip("Restrict projection-grid kernels to an active world-space bucket AABB instead of dispatching over the full dense grid.")]
-        public bool enableActiveProjectionBounds = true;
-
-        [Tooltip("Extra padding around the rotated bucket AABB for projection, holes, and nearby spray.")]
-        [Min(0.0f)]
-        public float activeProjectionBoundsPaddingMeters = 0.04f;
-
-        [Tooltip("Extra integer-cell padding around active projection bounds. Helps keep neighbor stencils safe.")]
-        [Min(0)]
-        public int activeProjectionBoundsPaddingCells = 2;
-
-        [Tooltip("If active bounds cover more than this fraction of the full grid, fall back to full-grid projection dispatch.")]
-        [Range(0.1f, 1.0f)]
-        public float activeProjectionMaxFullGridFraction = 0.95f;
-
         [Header("MLS/MPM Material Prototype")]
         public bool enableMaterialStress = true;
 
-        [Header("Fast Density WC-MLS-MPM")]
-        [Tooltip("Use lattice-calibrated grid density/volume for the fast WC-MLS-MPM predictor. It can run alone or feed the sparse projection corrector.")]
-        public bool enableReferenceDensityEosMode = true;
-
-        [Tooltip("EOS exponent applied to density/restDensity. WebGPU-Ocean uses 5.")]
+        [Header("Bucket-Local Grid Density Predictor")]
+        [Tooltip("EOS exponent used by the grid-density compression predictor.")]
         [Range(1.0f, 8.0f)]
         public float referenceEosExponent = 5.0f;
 
-        [Tooltip("Do not allow tensile/negative EOS pressure in the fast reference mode.")]
+        [Tooltip("Do not allow tensile/negative predictor pressure.")]
         public bool referenceClampNegativePressure = true;
 
-        [Header("Grid-Centric Density EOS")]
-        [Tooltip("Evaluate the reference-density EOS pressure gradient once per active grid node instead of gathering density and scattering pressure from every particle. Keeps APIC and paint viscosity in P2G while removing the second 27-node particle pass.")]
-        public bool enableGridDensityEos = true;
-
-        [Tooltip("Pressure scale used only by the grid-centric EOS. The direct grid gradient has different units/discretization from particle stress scattering, so it must not reuse materialStressStrength.")]
+        [Tooltip("Pressure scale for the grid-density predictor. Sparse SOR remains the authoritative incompressibility solve.")]
         [Min(0.0f)]
-        public float gridDensityEosPressureScale = 1.8f;
+        public float gridDensityEosPressureScale = 2.8f;
+
+        [Tooltip("Ignore tiny grid-density fluctuations below this compression ratio. This prevents rest-state pressure chatter while bounding the allowed density drift.")]
+        [Range(1.0f, 1.1f)]
+        public float gridDensityEosActivationRatio = 1.01f;
 
         [Tooltip("Safety clamp for the velocity correction contributed by the grid EOS during one substep.")]
         [Min(0.0f)]
-        public float gridDensityEosMaxVelocityCorrection = 1.5f;
+        public float gridDensityEosMaxVelocityCorrection = 0.2f;
 
         [Tooltip("Simple bulk modulus used for weakly-compressible paint prototype. Start low for stability.")]
         [Min(0.0f)]
@@ -315,10 +277,6 @@ namespace PaintBucketSim.Configs
 
         [Range(1.0f, 3.0f)]
         public float maxJ = 1.8f;
-
-        [Tooltip("Clamp deformation gradient entries.")]
-        [Min(1.0f)]
-        public float maxDeformationGradientValue = 5.0f;
 
         [Header("Professional Paint Material Presets")]
         [Tooltip("High-level material preset. Custom leaves the numeric solver values editable; the named presets apply a consistent rheology, cohesion, and pressure-stability package.")]
@@ -509,30 +467,18 @@ namespace PaintBucketSim.Configs
         public bool projectionSolidNoFlux = true;
 
 
-        [Header("MLS-MPM Projection Pressure Solver")]
-        public bool enableJacobiPressureSolve = true;
-
-        [Tooltip("Jacobi is the stable reference path. Red-Black SOR converges faster and is the preferred performance path.")]
-        public ProjectionPressureSolveMode pressureSolveMode = ProjectionPressureSolveMode.RedBlackSor;
-
-        [Min(1)]
-        public int pressureJacobiIterations = 40;
-
+        [Header("MLS-MPM Sparse Red-Black SOR Pressure Solver")]
         [Tooltip("Red-Black SOR iterations. Each iteration dispatches red and black cell passes.")]
         [Min(1)]
-        public int pressureRedBlackSorIterations = 8;
+        public int pressureRedBlackSorIterations = 10;
 
         [Tooltip("Scales the pressure equation right-hand side. Lower values are safer in early tests.")]
         [Min(0.0f)]
         public float pressureRhsScale = 1.0f;
 
-        [Tooltip("Relaxation factor for Jacobi. 1 = standard Jacobi, lower = more stable/damped.")]
-        [Range(0.05f, 1.0f)]
-        public float pressureJacobiRelaxation = 0.8f;
-
         [Tooltip("Successive over-relaxation factor for Red-Black SOR. 1 = Gauss-Seidel, >1 usually converges faster.")]
         [Range(0.05f, 1.95f)]
-        public float pressureRedBlackSorOmega = 1.35f;
+        public float pressureRedBlackSorOmega = 1.75f;
 
         [Tooltip("Clamps pressure values to avoid early solver explosions.")]
         [Min(1.0f)]
@@ -623,11 +569,6 @@ namespace PaintBucketSim.Configs
                 1,
                 32
             );
-            calmInteriorDeformationInterval = Mathf.Clamp(
-                calmInteriorDeformationInterval,
-                1,
-                4
-            );
             calmProjectionSubstepInterval = Mathf.Clamp(
                 calmProjectionSubstepInterval,
                 projectionSubstepInterval,
@@ -709,15 +650,17 @@ namespace PaintBucketSim.Configs
                 gridDensityEosPressureScale,
                 0.0f
             );
+            gridDensityEosActivationRatio = Mathf.Clamp(
+                gridDensityEosActivationRatio,
+                1.0f,
+                1.1f
+            );
 
             if (mpmViscosity < 0.0f)
                 mpmViscosity = 0.0f;
 
             if (maxStressMagnitude < 1.0f)
                 maxStressMagnitude = 1.0f;
-
-            if (maxDeformationGradientValue < 1.0f)
-                maxDeformationGradientValue = 1.0f;
 
             if (autoApplyPaintMaterialPreset &&
                 paintMaterialPreset != GpuPaintMaterialPreset.Custom)
@@ -816,9 +759,6 @@ namespace PaintBucketSim.Configs
             if (airborneLifetimeSeconds < 0.1f)
                 airborneLifetimeSeconds = 0.1f;
 
-            if (projectionMassFixedScale < 1)
-                projectionMassFixedScale = 1;
-
             if (minFluidCellMass < 0.0f)
                 minFluidCellMass = 0.0f;
 
@@ -832,37 +772,16 @@ namespace PaintBucketSim.Configs
                 0,
                 ownerTileListReuseMinParticles
             );
-            if (activeProjectionBoundsPaddingMeters < 0.0f)
-                activeProjectionBoundsPaddingMeters = 0.0f;
-
-            if (activeProjectionBoundsPaddingCells < 0)
-                activeProjectionBoundsPaddingCells = 0;
-
-            activeProjectionMaxFullGridFraction = Mathf.Clamp(
-                activeProjectionMaxFullGridFraction,
-                0.1f,
-                1.0f
-            );
-
             projectionDivergenceScale = Mathf.Clamp(projectionDivergenceScale, 0.0f, 2.0f);
 
             if (maxAbsProjectionDivergence < 0.01f)
                 maxAbsProjectionDivergence = 0.01f;
-
-            if (pressureJacobiIterations < 1)
-                pressureJacobiIterations = 1;
 
             if (pressureRedBlackSorIterations < 1)
                 pressureRedBlackSorIterations = 1;
 
             if (pressureRhsScale < 0.0f)
                 pressureRhsScale = 0.0f;
-
-            pressureJacobiRelaxation = Mathf.Clamp(
-                pressureJacobiRelaxation,
-                0.05f,
-                1.0f
-            );
 
             pressureRedBlackSorOmega = Mathf.Clamp(
                 pressureRedBlackSorOmega,
@@ -897,17 +816,15 @@ namespace PaintBucketSim.Configs
             enablePaintRheology = true;
             enableFreeSurfacePolish = true;
             enableJetCohesion = true;
-            enableReferenceDensityEosMode = true;
-            enableGridDensityEos = true;
             referenceClampNegativePressure = true;
             referenceEosExponent = 5.0f;
-            pressureSolveMode = ProjectionPressureSolveMode.RedBlackSor;
             pressureRedBlackSorIterations = Mathf.Max(
                 pressureRedBlackSorIterations,
-                8
+                10
             );
             bulkModulus = 850.0f;
-            gridDensityEosPressureScale = 1.8f;
+            // gridDensityEosPressureScale = 2.8f;
+            gridDensityEosActivationRatio = 1.01f;
             projectionDensityDriftStrength = 0.8f;
             projectionDensityDriftMinRatio = 1.005f;
             projectionDensityDriftMaxDivergence = 40.0f;
@@ -919,7 +836,7 @@ namespace PaintBucketSim.Configs
             {
                 case GpuPaintMaterialPreset.WaterLike:
                     maxStressMagnitude = 4500.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.4f;
+                    gridDensityEosMaxVelocityCorrection = 0.2f;
                     maxPressureVelocityCorrection = 2.5f;
                     mpmViscosity = 0.02f;
                     lowShearViscosity = 0.02f;
@@ -940,7 +857,7 @@ namespace PaintBucketSim.Configs
 
                 case GpuPaintMaterialPreset.ThinPaint:
                     maxStressMagnitude = 6500.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.5f;
+                    gridDensityEosMaxVelocityCorrection = 0.2f;
                     maxPressureVelocityCorrection = 2.8f;
                     mpmViscosity = 0.10f;
                     lowShearViscosity = 1.0f;
@@ -961,7 +878,7 @@ namespace PaintBucketSim.Configs
 
                 case GpuPaintMaterialPreset.LatexPaint:
                     maxStressMagnitude = 5200.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.1f;
+                    gridDensityEosMaxVelocityCorrection = 0.2f;
                     maxPressureVelocityCorrection = 2.2f;
                     mpmViscosity = 0.28f;
                     lowShearViscosity = 3.2f;
@@ -982,7 +899,7 @@ namespace PaintBucketSim.Configs
 
                 case GpuPaintMaterialPreset.ThickPaint:
                     maxStressMagnitude = 8500.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.5f;
+                    gridDensityEosMaxVelocityCorrection = 0.2f;
                     maxPressureVelocityCorrection = 3.0f;
                     mpmViscosity = 0.22f;
                     lowShearViscosity = 4.0f;
@@ -1003,7 +920,7 @@ namespace PaintBucketSim.Configs
 
                 case GpuPaintMaterialPreset.HeavyBodyPaint:
                     maxStressMagnitude = 9000.0f;
-                    gridDensityEosMaxVelocityCorrection = 1.5f;
+                    gridDensityEosMaxVelocityCorrection = 0.2f;
                     maxPressureVelocityCorrection = 3.0f;
                     mpmViscosity = 0.30f;
                     lowShearViscosity = 5.5f;
