@@ -72,37 +72,37 @@ MonoBehaviour:
   enableMaterialStress: 1
   referenceEosExponent: 5
   referenceClampNegativePressure: 1
-  gridDensityEosPressureScale: 2.8
+  gridDensityEosPressureScale: 5
   gridDensityEosActivationRatio: 1.01
   gridDensityEosMaxVelocityCorrection: 0.2
   bulkModulus: 850
-  mpmViscosity: 0.28
+  mpmViscosity: 0.02
   materialStressStrength: 0.65
-  maxStressMagnitude: 5200
+  maxStressMagnitude: 4500
   minJ: 0.65
   maxJ: 1.35
-  paintMaterialPreset: 3
+  paintMaterialPreset: 1
   autoApplyPaintMaterialPreset: 1
   usePaintMaterialConfigRheology: 1
   enablePaintRheology: 1
-  lowShearViscosity: 3.2
-  highShearViscosity: 0.16
-  shearThinningRelaxationTime: 0.8
-  shearThinningPowerN: 0.55
-  carreauYasudaExponent: 2.2
-  yieldStress: 0.08
-  yieldRegularizationRate: 25
-  maxYieldViscosityContribution: 3
-  maxEffectiveViscosity: 9
+  lowShearViscosity: 0.02
+  highShearViscosity: 0.01
+  shearThinningRelaxationTime: 0.05
+  shearThinningPowerN: 1
+  carreauYasudaExponent: 2
+  yieldStress: 0
+  yieldRegularizationRate: 15
+  maxYieldViscosityContribution: 0.25
+  maxEffectiveViscosity: 0.5
   rheologyStrength: 1
   enableFreeSurfacePolish: 1
   freeSurfaceGradientScale: 0.08
-  freeSurfaceNormalDampingPerSecond: 4.5
+  freeSurfaceNormalDampingPerSecond: 1.5
   freeSurfaceCohesionAcceleration: 0.25
-  maxFreeSurfaceVelocityCorrection: 0.18
+  maxFreeSurfaceVelocityCorrection: 0.25
   enableJetCohesion: 1
   jetCohesionAcceleration: 0.15
-  maxJetCohesionVelocityCorrection: 0.08
+  maxJetCohesionVelocityCorrection: 0.12
   enableGpuBucketCollision: 1
   useRealBucketCollision: 1
   bucketCollisionPadding: 0.004
@@ -142,7 +142,7 @@ MonoBehaviour:
   projectionSolidPressureNeumann: 1
   enablePressureGradientSubtraction: 1
   pressureGradientScale: 1
-  maxPressureVelocityCorrection: 2.2
+  maxPressureVelocityCorrection: 2.5
   invertPressureGradientSign: 0
   pressureCorrectionFluidCellsOnly: 1
   useStaggeredFaceProjection: 1

@@ -15,15 +15,15 @@ MonoBehaviour:
   enableCoupling: 1
   snapBucketToRopeOnInitialize: 1
   attachmentCompliance: 0.000001
-  solverIterations: 6
-  correctRopeEnd: 0
+  solverIterations: 8
+  correctRopeEnd: 1
   correctBucket: 1
-  maxLinearCorrectionPerSubstep: 0.035
+  maxLinearCorrectionPerSubstep: 0.05
   maxAngularCorrectionPerSubstep: 0.06
   updateVelocitiesFromCorrection: 1
-  reconstructBucketVelocityFromFinalPose: 0
+  reconstructBucketVelocityFromFinalPose: 1
   enableVelocityStabilization: 1
-  attachmentVelocityDamping: 0.9
+  attachmentVelocityDamping: 0.4
   maxAttachmentImpulse: 3
   enableTwistCoupling: 1
   twistTorqueStiffness: 0.18

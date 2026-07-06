@@ -47,8 +47,8 @@ MonoBehaviour:
   maxPivotSpeedMetersPerSecond: 0.6
   enableInteractiveGrab: 1
   grabCompliance: 0.000001
-  maxGrabCorrectionPerIteration: 0.045
-  maxGrabSpeedMetersPerSecond: 0.9
+  maxGrabCorrectionPerIteration: 0.065
+  maxGrabSpeedMetersPerSecond: 1.5
   airDragMode: 1
   linearAirDragKgPerSecond: 0.015
   quadraticDragCoefficient: 1.1

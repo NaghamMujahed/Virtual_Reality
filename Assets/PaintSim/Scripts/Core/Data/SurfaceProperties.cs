@@ -31,11 +31,11 @@ namespace PaintSim.Scripts.Core.Data
 
         public static SurfaceProperties Wood => new SurfaceProperties
         {
-            DepositionFraction = 0.90f,
-            SplashMultiplier   = 0.80f,
-            AbsorptionRate     = 0.60f,
-            SpreadSpeed        = 0.40f,
-            Roughness          = 0.70f,
+            DepositionFraction = 0.80f,
+            SplashMultiplier   = 0.90f,
+            AbsorptionRate     = 0.35f,
+            SpreadSpeed        = 0.55f,
+            Roughness          = 0.60f,
             SurfaceTypeID      = 0u
         };
 
@@ -44,7 +44,7 @@ namespace PaintSim.Scripts.Core.Data
             DepositionFraction = 0.40f,
             SplashMultiplier   = 2.00f,
             AbsorptionRate     = 0.00f,
-            SpreadSpeed        = 0.10f,
+            SpreadSpeed        = 0.15f,
             Roughness          = 0.05f,
             SurfaceTypeID      = 1u
         };

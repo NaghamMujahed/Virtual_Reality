@@ -15,7 +15,7 @@ MonoBehaviour:
   initializationMode: 0
   targetParticleCount: 100000
   manualParticleSpacingMeters: 0.035
-  fillFraction01: 0.5
+  fillFraction01: 0.75
   particleRadiusToSpacing: 0.4
   wallClearanceMeters: 0.005
   holeClearanceMeters: 0.01
