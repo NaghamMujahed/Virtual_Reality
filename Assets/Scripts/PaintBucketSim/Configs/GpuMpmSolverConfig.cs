@@ -452,6 +452,45 @@ namespace PaintBucketSim.Configs
 
         public bool killAirborneBelowWorldY = false;
 
+        [Header("MLS-MPM Coherent Ballistic Jet Column (G31)")]
+        [Tooltip("Keep the emitted stream collimated for a material-dependent distance after the MLS-MPM collar instead of letting it fan out into a spray immediately. Off restores the pure ballistic G19A behavior.")]
+        public bool enableJetColumnCoherence = true;
+
+        [Tooltip("Derive the coherence length and collimation strength from the authoritative PaintMaterialConfig rheology (viscosity, surface tension, yield) so the jet reads as the selected paint. Off uses the raw base values below.")]
+        public bool jetCoherenceMaterialScaling = true;
+
+        [Tooltip("Base coherent column length in meters past each hole. Material scaling multiplies this by a viscosity/surface-tension factor. Thin materials break up sooner; heavy body paint stays a rope much longer.")]
+        [Min(0.0f)]
+        public float jetCoherenceLengthMeters = 0.35f;
+
+        [Tooltip("Lower clamp for the material-scaled coherence length (meters).")]
+        [Min(0.0f)]
+        public float jetCoherenceLengthMinMeters = 0.06f;
+
+        [Tooltip("Upper clamp for the material-scaled coherence length (meters).")]
+        [Min(0.0f)]
+        public float jetCoherenceLengthMaxMeters = 1.2f;
+
+        [Tooltip("Rate at which cross-stream (fan-out) velocity is removed inside the column. Higher = tighter, less spray.")]
+        [Min(0.0f)]
+        public float jetTransverseDampingPerSecond = 14.0f;
+
+        [Tooltip("Rate at which stray particles are pulled back toward the jet centerline. Re-collimates an already spread stream.")]
+        [Min(0.0f)]
+        public float jetCenterlineAttractionPerSecond = 28.0f;
+
+        [Tooltip("Clamp on the total collimation velocity correction applied per substep. Prevents the column model from injecting a visible burst.")]
+        [Min(0.0f)]
+        public float maxJetColumnVelocityCorrectionPerSubstep = 0.5f;
+
+        [Tooltip("Air-drag multiplier applied inside a fully coherent column. Below 1 lets the tight column keep momentum and land with realistic force, while dispersed spray decelerates at the full airborne drag rate.")]
+        [Range(0.0f, 1.0f)]
+        public float jetColumnDragScale = 0.35f;
+
+        [Tooltip("Floor for the axial speed used in the column time-of-flight estimate. Avoids divide-by-zero for nearly stalled particles.")]
+        [Min(0.01f)]
+        public float jetColumnMinAxialSpeed = 0.5f;
+
         [Header("MLS-MPM Projection Divergence")]
         public bool enableProjectionDivergenceComputation = true;
 
@@ -759,6 +798,30 @@ namespace PaintBucketSim.Configs
             if (airborneLifetimeSeconds < 0.1f)
                 airborneLifetimeSeconds = 0.1f;
 
+            jetCoherenceLengthMeters = Mathf.Max(jetCoherenceLengthMeters, 0.0f);
+            jetCoherenceLengthMinMeters = Mathf.Max(
+                jetCoherenceLengthMinMeters,
+                0.0f
+            );
+            jetCoherenceLengthMaxMeters = Mathf.Max(
+                jetCoherenceLengthMaxMeters,
+                jetCoherenceLengthMinMeters
+            );
+            jetTransverseDampingPerSecond = Mathf.Max(
+                jetTransverseDampingPerSecond,
+                0.0f
+            );
+            jetCenterlineAttractionPerSecond = Mathf.Max(
+                jetCenterlineAttractionPerSecond,
+                0.0f
+            );
+            maxJetColumnVelocityCorrectionPerSubstep = Mathf.Max(
+                maxJetColumnVelocityCorrectionPerSubstep,
+                0.0f
+            );
+            jetColumnDragScale = Mathf.Clamp01(jetColumnDragScale);
+            jetColumnMinAxialSpeed = Mathf.Max(jetColumnMinAxialSpeed, 0.01f);
+
             if (minFluidCellMass < 0.0f)
                 minFluidCellMass = 0.0f;
 
@@ -816,6 +879,9 @@ namespace PaintBucketSim.Configs
             enablePaintRheology = true;
             enableFreeSurfacePolish = true;
             enableJetCohesion = true;
+            enableJetColumnCoherence = true;
+            jetColumnMinAxialSpeed = 0.5f;
+            maxJetColumnVelocityCorrectionPerSubstep = 0.5f;
             referenceClampNegativePressure = true;
             referenceEosExponent = 5.0f;
             pressureRedBlackSorIterations = Mathf.Max(
@@ -853,6 +919,10 @@ namespace PaintBucketSim.Configs
                     maxFreeSurfaceVelocityCorrection = 0.25f;
                     jetCohesionAcceleration = 0.15f;
                     maxJetCohesionVelocityCorrection = 0.12f;
+                    jetCoherenceLengthMeters = 0.10f;
+                    jetTransverseDampingPerSecond = 6.0f;
+                    jetCenterlineAttractionPerSecond = 12.0f;
+                    jetColumnDragScale = 0.7f;
                     break;
 
                 case GpuPaintMaterialPreset.ThinPaint:
@@ -874,6 +944,10 @@ namespace PaintBucketSim.Configs
                     maxFreeSurfaceVelocityCorrection = 0.32f;
                     jetCohesionAcceleration = 0.40f;
                     maxJetCohesionVelocityCorrection = 0.18f;
+                    jetCoherenceLengthMeters = 0.22f;
+                    jetTransverseDampingPerSecond = 10.0f;
+                    jetCenterlineAttractionPerSecond = 20.0f;
+                    jetColumnDragScale = 0.5f;
                     break;
 
                 case GpuPaintMaterialPreset.LatexPaint:
@@ -895,6 +969,10 @@ namespace PaintBucketSim.Configs
                     maxFreeSurfaceVelocityCorrection = 0.18f;
                     jetCohesionAcceleration = 0.15f;
                     maxJetCohesionVelocityCorrection = 0.08f;
+                    jetCoherenceLengthMeters = 0.38f;
+                    jetTransverseDampingPerSecond = 16.0f;
+                    jetCenterlineAttractionPerSecond = 30.0f;
+                    jetColumnDragScale = 0.35f;
                     break;
 
                 case GpuPaintMaterialPreset.ThickPaint:
@@ -916,6 +994,10 @@ namespace PaintBucketSim.Configs
                     maxFreeSurfaceVelocityCorrection = 0.4f;
                     jetCohesionAcceleration = 0.65f;
                     maxJetCohesionVelocityCorrection = 0.24f;
+                    jetCoherenceLengthMeters = 0.60f;
+                    jetTransverseDampingPerSecond = 20.0f;
+                    jetCenterlineAttractionPerSecond = 34.0f;
+                    jetColumnDragScale = 0.28f;
                     break;
 
                 case GpuPaintMaterialPreset.HeavyBodyPaint:
@@ -937,6 +1019,10 @@ namespace PaintBucketSim.Configs
                     maxFreeSurfaceVelocityCorrection = 0.42f;
                     jetCohesionAcceleration = 0.8f;
                     maxJetCohesionVelocityCorrection = 0.28f;
+                    jetCoherenceLengthMeters = 0.85f;
+                    jetTransverseDampingPerSecond = 24.0f;
+                    jetCenterlineAttractionPerSecond = 38.0f;
+                    jetColumnDragScale = 0.22f;
                     break;
             }
         }

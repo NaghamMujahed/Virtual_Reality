@@ -39,6 +39,7 @@ namespace PaintBucketSim.Editor
         private static int _maxOutflowTransitionsObserved;
         private static int _maxJetParticlesObserved;
         private static int _maxJetMpmCollarParticlesObserved;
+        private static int _maxJetColumnParticlesObserved;
         private static int _maxAirborneParticlesObserved;
         private static bool _projectionTest;
         private static bool _shakeBucket;
@@ -118,6 +119,7 @@ namespace PaintBucketSim.Editor
             _maxOutflowTransitionsObserved = 0;
             _maxJetParticlesObserved = 0;
             _maxJetMpmCollarParticlesObserved = 0;
+            _maxJetColumnParticlesObserved = 0;
             _maxAirborneParticlesObserved = 0;
 
             EditorApplication.update -= UpdateValidation;
@@ -247,6 +249,14 @@ namespace PaintBucketSim.Editor
                     valid &=
                         _maxJetMpmCollarParticlesObserved > 0;
                 }
+
+                if (_fluid != null &&
+                    _fluid.GpuMpmConfig != null &&
+                    _fluid.GpuMpmConfig.enableJetColumnCoherence)
+                {
+                    valid &=
+                        _maxJetColumnParticlesObserved > 0;
+                }
             }
 
             if (stats.pressureSolveEnabled &&
@@ -348,6 +358,11 @@ namespace PaintBucketSim.Editor
                 $"maxObservedJet={_maxJetParticlesObserved}, " +
                 $"jetMpmCollar={stats.gpuJetMpmCollarParticleCount}, " +
                 $"maxObservedJetMpmCollar={_maxJetMpmCollarParticlesObserved}, " +
+                $"jetColumnCoherence={stats.gpuJetColumnCoherenceEnabled}, " +
+                $"jetCoherenceLengthM={stats.gpuJetCoherenceLengthMeters:F3}, " +
+                $"jetColumn={stats.gpuJetColumnParticleCount}, " +
+                $"maxObservedJetColumn={_maxJetColumnParticlesObserved}, " +
+                $"jetColumnAvgRadiusM={stats.gpuJetColumnAverageRadiusMeters:F4}, " +
                 $"airborne={stats.gpuAirborneParticleCount}, " +
                 $"maxObservedAirborne={_maxAirborneParticlesObserved}, " +
                 $"lost={stats.gpuLostParticleCount}, " +
@@ -426,6 +441,10 @@ namespace PaintBucketSim.Editor
             _maxJetMpmCollarParticlesObserved = Mathf.Max(
                 _maxJetMpmCollarParticlesObserved,
                 stats.gpuJetMpmCollarParticleCount
+            );
+            _maxJetColumnParticlesObserved = Mathf.Max(
+                _maxJetColumnParticlesObserved,
+                stats.gpuJetColumnParticleCount
             );
             _maxAirborneParticlesObserved = Mathf.Max(
                 _maxAirborneParticlesObserved,
@@ -905,6 +924,49 @@ namespace PaintBucketSim.Editor
                         args,
                         "-paintValidationJetMpmCollarRadialPadding",
                         baseConfig.jetMpmCollarRadialPaddingMeters
+                    );
+
+                if (HasFlag(args, "-paintValidationEnableJetColumnCoherence"))
+                    baseConfig.enableJetColumnCoherence = true;
+                else if (HasFlag(args, "-paintValidationDisableJetColumnCoherence"))
+                    baseConfig.enableJetColumnCoherence = false;
+                if (HasFlag(
+                    args,
+                    "-paintValidationDisableJetCoherenceMaterialScaling"))
+                {
+                    baseConfig.jetCoherenceMaterialScaling = false;
+                }
+                else if (HasFlag(
+                    args,
+                    "-paintValidationEnableJetCoherenceMaterialScaling"))
+                {
+                    baseConfig.jetCoherenceMaterialScaling = true;
+                }
+                baseConfig.jetCoherenceLengthMeters = GetFloatArgument(
+                    args,
+                    "-paintValidationJetCoherenceLength",
+                    baseConfig.jetCoherenceLengthMeters
+                );
+                baseConfig.jetTransverseDampingPerSecond = GetFloatArgument(
+                    args,
+                    "-paintValidationJetTransverseDamping",
+                    baseConfig.jetTransverseDampingPerSecond
+                );
+                baseConfig.jetCenterlineAttractionPerSecond = GetFloatArgument(
+                    args,
+                    "-paintValidationJetCenterlineAttraction",
+                    baseConfig.jetCenterlineAttractionPerSecond
+                );
+                baseConfig.jetColumnDragScale = GetFloatArgument(
+                    args,
+                    "-paintValidationJetColumnDragScale",
+                    baseConfig.jetColumnDragScale
+                );
+                baseConfig.maxJetColumnVelocityCorrectionPerSubstep =
+                    GetFloatArgument(
+                        args,
+                        "-paintValidationMaxJetColumnCorrection",
+                        baseConfig.maxJetColumnVelocityCorrectionPerSubstep
                     );
 
                 baseConfig.referenceEosExponent = GetFloatArgument(

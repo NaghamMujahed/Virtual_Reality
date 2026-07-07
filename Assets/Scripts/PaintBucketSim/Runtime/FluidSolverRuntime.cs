@@ -134,6 +134,10 @@
         public int gpuJetMpmCollarParticleCount;
         public int gpuAirborneParticleCount;
         public int gpuLostParticleCount;
+        public bool gpuJetColumnCoherenceEnabled;
+        public float gpuJetCoherenceLengthMeters;
+        public int gpuJetColumnParticleCount;
+        public float gpuJetColumnAverageRadiusMeters;
 
         public bool projectionGridEnabled;
         public bool projectionBuffersReady;

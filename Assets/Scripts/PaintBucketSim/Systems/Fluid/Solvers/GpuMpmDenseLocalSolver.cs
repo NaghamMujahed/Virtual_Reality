@@ -147,7 +147,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
 
-        private const int DiagnosticsValueCount = 33;
+        private const int DiagnosticsValueCount = 35;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 1000.0f;
@@ -167,6 +167,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private const int DiagnosticJetMpmCollarParticles = 30;
         private const int DiagnosticLocalXSum = 31;
         private const int DiagnosticLocalZSum = 32;
+        private const int DiagnosticJetColumnParticles = 33;
+        private const int DiagnosticJetColumnSpreadSum = 34;
 
         public FluidSolverType SolverType => FluidSolverType.GpuSparseMpmPrototype;
         public bool IsInitialized { get; private set; }
@@ -1767,6 +1769,108 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_KillAirborneBelowY",
                 context.GpuMpmConfig.killAirborneBelowWorldY ? 1 : 0
             );
+
+            SetJetColumnCoherenceParameters(context, compute);
+        }
+
+        // G31: bind the coherent ballistic jet-column parameters. When material
+        // scaling is on, the coherence length and collimation strength are
+        // derived from the authoritative PaintMaterialConfig rheology so the jet
+        // reads as the selected paint (thin -> short, breaks into droplets;
+        // heavy body -> a long coherent rope). The inspector base values on
+        // GpuMpmSolverConfig are the scaling-off fallback / GPU-preset path.
+        private void SetJetColumnCoherenceParameters(
+            FluidSolverContext context,
+            ComputeShader compute)
+        {
+            GpuMpmSolverConfig cfg = context.GpuMpmConfig;
+
+            compute.SetInt(
+                "_EnableJetColumnCoherence",
+                cfg.enableJetColumnCoherence ? 1 : 0
+            );
+
+            float coherenceLength = cfg.jetCoherenceLengthMeters;
+            float transverseDamping = cfg.jetTransverseDampingPerSecond;
+            float centerlineAttraction = cfg.jetCenterlineAttractionPerSecond;
+            float columnDragScale = cfg.jetColumnDragScale;
+
+            if (cfg.jetCoherenceMaterialScaling &&
+                cfg.usePaintMaterialConfigRheology &&
+                context.MaterialConfig != null)
+            {
+                // Neutral latex-reference anchors; a matching latex material
+                // reproduces the reference values, thinner shrinks, thicker grows.
+                const float refViscosity = 2.5f;       // Pa.s, latex low-shear
+                const float refSurfaceTension = 0.035f; // N/m
+                const float refLength = 0.35f;          // meters
+                const float refDamping = 16.0f;
+                const float refAttraction = 30.0f;
+                const float refColumnDrag = 0.4f;
+
+                PaintMaterialConfig material = context.MaterialConfig;
+
+                // Low-shear viscosity separates paints far better than the
+                // high-shear regime (where non-Newtonian curves converge).
+                float viscosity = Mathf.Max(
+                    material.EvaluateViscosity(0.5f, 20.0f),
+                    1e-4f
+                );
+                float surfaceTension = Mathf.Max(
+                    material.surfaceTensionNPerM,
+                    1e-4f
+                );
+                float yield = Mathf.Max(material.yieldStressPa, 0.0f);
+
+                // Coherence resists Rayleigh breakup, so it grows with viscosity
+                // and surface tension; yield adds a mild coherence bonus.
+                float lengthFactor =
+                    Mathf.Sqrt(viscosity / refViscosity) *
+                    Mathf.Sqrt(surfaceTension / refSurfaceTension) *
+                    (1.0f + Mathf.Clamp01(yield / 0.35f) * 0.5f);
+
+                coherenceLength = Mathf.Clamp(
+                    refLength * lengthFactor,
+                    cfg.jetCoherenceLengthMinMeters,
+                    cfg.jetCoherenceLengthMaxMeters
+                );
+
+                float strength = Mathf.Clamp(
+                    Mathf.Sqrt(viscosity / refViscosity),
+                    0.2f,
+                    2.5f
+                );
+                transverseDamping = refDamping * strength;
+                centerlineAttraction = refAttraction * strength;
+
+                // A more viscous/coherent column keeps more momentum, so it
+                // sheds less to air drag; watery spray decelerates at full drag.
+                columnDragScale = Mathf.Clamp01(
+                    refColumnDrag / Mathf.Max(strength, 0.4f)
+                );
+            }
+
+            compute.SetFloat("_JetCoherenceLength", coherenceLength);
+            compute.SetFloat(
+                "_JetTransverseDampingPerSecond",
+                transverseDamping
+            );
+            compute.SetFloat(
+                "_JetCenterlineAttractionPerSecond",
+                centerlineAttraction
+            );
+            compute.SetFloat(
+                "_JetMaxColumnVelocityCorrection",
+                cfg.maxJetColumnVelocityCorrectionPerSubstep
+            );
+            compute.SetFloat("_JetColumnDragScale", columnDragScale);
+            compute.SetFloat(
+                "_JetColumnMinAxialSpeed",
+                cfg.jetColumnMinAxialSpeed
+            );
+
+            _stats.gpuJetCoherenceLengthMeters = coherenceLength;
+            _stats.gpuJetColumnCoherenceEnabled = cfg.enableJetColumnCoherence;
         }
 
         private void BindClearGridActiveTiles(ComputeShader compute)
@@ -4128,6 +4232,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 (int)values[DiagnosticAirborneParticles];
             _stats.gpuLostParticleCount =
                 (int)values[DiagnosticLostParticles];
+
+            _stats.gpuJetColumnParticleCount =
+                (int)values[DiagnosticJetColumnParticles];
+            float safeColumnParticles = Mathf.Max(
+                _stats.gpuJetColumnParticleCount,
+                1
+            );
+            _stats.gpuJetColumnAverageRadiusMeters =
+                values[DiagnosticJetColumnSpreadSum] /
+                DiagnosticsHeightScale /
+                safeColumnParticles;
         }
     }
 }

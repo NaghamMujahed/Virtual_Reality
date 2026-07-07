@@ -256,6 +256,15 @@ float _AirborneLifetime;
 float _AirborneKillBelowY;
 int _KillAirborneBelowY;
 
+// G31 coherent ballistic jet column
+int _EnableJetColumnCoherence;
+float _JetCoherenceLength;              // meters of coherent column past each hole
+float _JetTransverseDampingPerSecond;   // anti-spray damping of cross-stream velocity
+float _JetCenterlineAttractionPerSecond;// spring pulling stray particles back to the jet axis
+float _JetMaxColumnVelocityCorrection;  // clamp on per-substep collimation correction
+float _JetColumnDragScale;              // drag multiplier inside the coherent column (<1 keeps momentum)
+float _JetColumnMinAxialSpeed;          // floor for time-of-flight estimate to avoid divide-by-zero
+
 float3 _BucketAngularVelocityWorld;
 
 int _EnableProjectionGrid;
@@ -336,7 +345,9 @@ static const uint DIAG_MPM_TILE_MARKS = 29;
 static const uint DIAG_JET_MPM_COLLAR_PARTICLES = 30;
 static const uint DIAG_LOCAL_X_SUM = 31;
 static const uint DIAG_LOCAL_Z_SUM = 32;
-static const uint MPM_DIAGNOSTIC_COUNT = 33;
+static const uint DIAG_JET_COLUMN_PARTICLES = 33;
+static const uint DIAG_JET_COLUMN_SPREAD_SUM = 34;
+static const uint MPM_DIAGNOSTIC_COUNT = 35;
 static const uint MPM_TILE_THREAD_DIM = 8u;
 static const uint MPM_TILE_CELL_COUNT = 512u;
 static const uint MPM_TILE_P2G_THREAD_COUNT = 256u;
@@ -4505,6 +4516,139 @@ bool HasMpmGridSupportAtPosition(float3 localPosition)
     );
 }
 
+// G31 — Coherent ballistic jet column.
+// A free-ballistic particle carries the transverse velocity spread it had at
+// the outlet, so an emitted stream fans out into a sparse spray. This keeps the
+// falling stream collimated for a material-dependent coherence length by (1)
+// damping the cross-stream velocity component and (2) gently attracting stray
+// particles back toward the jet centerline. The centerline is the ballistic
+// curve launched from the hole along its outward normal, so the model respects
+// the swinging bucket's exit direction and lets gravity bend/stretch the column
+// naturally. It needs no neighbour search and no per-particle emission anchor:
+// each airborne particle re-derives its owning hole from the (moving) bucket
+// transform every substep. Runs only on the small air-domain particle set.
+bool ApplyJetColumnCoherence(
+    float3 worldPosition,
+    inout float3 worldVelocity,
+    out float transverseRadius,
+    out float coherenceWeight)
+{
+    transverseRadius = 0.0;
+    coherenceWeight = 0.0;
+
+    if (_EnableJetColumnCoherence == 0 ||
+        _BucketHoleCount <= 0 ||
+        _JetCoherenceLength <= 1e-4)
+    {
+        return false;
+    }
+
+    int maxHoleCount = min(_BucketHoleCount, 64);
+
+    // Pick the emitter whose column this particle is closest to: minimum
+    // cross-stream distance among holes it is ahead of and still within the
+    // coherent band of.
+    int bestHole = -1;
+    float bestTransverse = 1e30;
+    float bestAxial = 0.0;
+    float3 bestOrigin = float3(0.0, 0.0, 0.0);
+    float3 bestDir = float3(0.0, 1.0, 0.0);
+
+    [loop]
+    for (int i = 0; i < maxHoleCount; i++)
+    {
+        float3 origin = BucketLocalPositionToWorld(GetHoleCenterLocal(i));
+        float3 dir = TransformVector(
+            _BucketLocalToWorld,
+            GetHoleNormalLocal(i)
+        );
+        float dirLen = length(dir);
+        if (dirLen < 1e-5)
+            continue;
+        dir /= dirLen;
+
+        float3 rel = worldPosition - origin;
+        float axial = dot(rel, dir);
+
+        // Allow a small negative band so particles right at the lip still bind.
+        if (axial < -_CellSize || axial > _JetCoherenceLength)
+            continue;
+
+        float3 transverseVec = rel - axial * dir;
+        float transverse = length(transverseVec);
+
+        if (transverse < bestTransverse)
+        {
+            bestTransverse = transverse;
+            bestAxial = max(axial, 0.0);
+            bestHole = i;
+            bestOrigin = origin;
+            bestDir = dir;
+        }
+    }
+
+    if (bestHole < 0)
+        return false;
+
+    // Coherence weight: full at the hole, fading to zero at the coherence
+    // length. Past the band particles are left to disperse into droplets/spray.
+    float w = saturate(1.0 - bestAxial / _JetCoherenceLength);
+    if (w <= 1e-4)
+        return false;
+    coherenceWeight = w;
+
+    // Gravity-bent ballistic centerline, parameterized by estimated
+    // time-of-flight from the outlet. Using the axial component of the current
+    // velocity keeps the tangent self-consistent with the actual throw.
+    float axialSpeed = max(
+        dot(worldVelocity, bestDir),
+        max(_JetColumnMinAxialSpeed, 1e-3)
+    );
+    float tof = bestAxial / axialSpeed;
+
+    float3 gravity = _GravityWorld;
+    float3 gravityAxial = dot(gravity, bestDir) * bestDir;
+    float3 gravityPerp = gravity - gravityAxial;
+
+    // Centerline point: axial travel along the outlet normal plus the
+    // transverse gravity drop (axial gravity is already folded into travel).
+    float3 centerline =
+        bestOrigin +
+        bestDir * bestAxial +
+        0.5 * gravityPerp * tof * tof;
+
+    // Local tangent is the true ballistic velocity direction at this point.
+    float3 tangent = bestDir * axialSpeed + gravity * tof;
+    float tangentLen = length(tangent);
+    tangent = tangentLen > 1e-5 ? tangent / tangentLen : bestDir;
+
+    float3 offset = worldPosition - centerline;
+    float3 transverseOffset = offset - dot(offset, tangent) * tangent;
+    float3 transverseVelocity =
+        worldVelocity - dot(worldVelocity, tangent) * tangent;
+
+    transverseRadius = length(transverseOffset);
+
+    // (1) Anti-spray: damp the cross-stream velocity that fans the jet out.
+    float dampFactor =
+        1.0 - exp(-max(_JetTransverseDampingPerSecond, 0.0) * w * _Dt);
+    float3 correction = -transverseVelocity * dampFactor;
+
+    // (2) Re-collimation: pull stray particles back toward the centerline.
+    correction +=
+        -transverseOffset *
+        (max(_JetCenterlineAttractionPerSecond, 0.0) * w * _Dt);
+
+    // Clamp the per-substep collimation so it can never inject a burst.
+    float maxCorrection = max(_JetMaxColumnVelocityCorrection, 0.0);
+    float correctionLen = length(correction);
+    if (correctionLen > maxCorrection)
+        correction *= maxCorrection / max(correctionLen, 1e-6);
+
+    worldVelocity += correction;
+    return true;
+}
+
 [numthreads(256, 1, 1)]
 void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
 {
@@ -4608,9 +4752,30 @@ void KStepAirborneParticles(uint3 id : SV_DispatchThreadID)
         stateAgeId.z = 0.0;
     }
 
+    // Keep the emitted stream coherent for a material-dependent distance before
+    // it is allowed to break up into droplets/spray.
+    float columnRadius = 0.0;
+    float columnWeight = 0.0;
+    bool collimated = ApplyJetColumnCoherence(p, v, columnRadius, columnWeight);
+
+    if (collimated && _EnableGpuDiagnostics != 0)
+    {
+        InterlockedAdd(_MpmDiagnostics[DIAG_JET_COLUMN_PARTICLES], 1);
+        InterlockedAdd(
+            _MpmDiagnostics[DIAG_JET_COLUMN_SPREAD_SUM],
+            (uint)round(min(columnRadius, 10.0) * DIAG_HEIGHT_FIXED_SCALE)
+        );
+    }
+
     v += _GravityWorld * _Dt;
 
-    float drag = exp(-max(_AirborneDragPerSecond, 0.0) * _Dt);
+    // Coherence-aware drag: a tight column has far less air exposure than a
+    // dispersed spray, so it keeps momentum and lands with realistic force,
+    // while off-axis droplets decelerate faster.
+    float dragScale = collimated
+        ? lerp(1.0, max(_JetColumnDragScale, 0.0), columnWeight)
+        : 1.0;
+    float drag = exp(-max(_AirborneDragPerSecond, 0.0) * dragScale * _Dt);
     v *= drag;
     v = ClampSpeed(v);
 

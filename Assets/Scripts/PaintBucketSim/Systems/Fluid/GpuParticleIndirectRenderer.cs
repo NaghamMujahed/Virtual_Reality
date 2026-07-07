@@ -54,6 +54,21 @@ namespace PaintBucketSim.Systems.Fluid
                 particleMaterial = CreateDefaultMaterial();
 
             _mpb = new MaterialPropertyBlock();
+
+            EnsureScreenSpaceFluidRenderer();
+        }
+
+        // The screen-space fluid surface is controlled entirely from the render
+        // config (fluidRenderMode). Auto-attach its renderer here and inject the
+        // shared references so the user only has to flip the config toggle — the
+        // config ScriptableObject is not discoverable via FindAnyObjectByType.
+        private void EnsureScreenSpaceFluidRenderer()
+        {
+            var fluidRenderer = GetComponent<ScreenSpaceFluidRenderer>();
+            if (fluidRenderer == null)
+                fluidRenderer = gameObject.AddComponent<ScreenSpaceFluidRenderer>();
+
+            fluidRenderer.Configure(gpuBufferSet, renderConfig, bucketSystem);
         }
 
         private void OnEnable()
@@ -78,6 +93,9 @@ namespace PaintBucketSim.Systems.Fluid
         {
             if (renderConfig == null ||
                 !renderConfig.enableGpuIndirectRendering ||
+                // Screen-space fluid mode renders the liquid surface instead of
+                // discrete particles; skip the particle draw to avoid doubling.
+                renderConfig.fluidRenderMode == FluidRenderMode.ScreenSpaceFluid ||
                 gpuBufferSet == null ||
                 !gpuBufferSet.IsInitialized ||
                 gpuBufferSet.UploadedParticleCount <= 0 ||

@@ -37,6 +37,11 @@
 # Visual Studio cache directory
 .vs/
 
+Docs/
+CLAUDE.md
+PaintBucketSim_Codex_Context_README (1).md
+Assets/Editor
+
 # Gradle cache directory
 .gradle/
 

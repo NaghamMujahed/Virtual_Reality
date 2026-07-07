@@ -113,7 +113,7 @@ MonoBehaviour:
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 0
+  enableBottomHoleOpening: 1
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
@@ -130,6 +130,16 @@ MonoBehaviour:
   airborneLifetimeSeconds: 8
   airborneKillBelowWorldY: -2
   killAirborneBelowWorldY: 0
+  enableJetColumnCoherence: 1
+  jetCoherenceMaterialScaling: 1
+  jetCoherenceLengthMeters: 0.1
+  jetCoherenceLengthMinMeters: 0.06
+  jetCoherenceLengthMaxMeters: 1.2
+  jetTransverseDampingPerSecond: 6
+  jetCenterlineAttractionPerSecond: 12
+  maxJetColumnVelocityCorrectionPerSubstep: 0.5
+  jetColumnDragScale: 0.7
+  jetColumnMinAxialSpeed: 0.5
   enableProjectionDivergenceComputation: 1
   projectionDivergenceScale: 1
   maxAbsProjectionDivergence: 50
