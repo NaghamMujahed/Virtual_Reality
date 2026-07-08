@@ -110,7 +110,7 @@ MonoBehaviour:
   bucketFriction: 0.55
   enablePostG2PBucketCollision: 1
   enableAdaptivePostG2PBucketCollision: 1
-  topBoundaryMode: 1
+  topBoundaryMode: 2
   topBoundaryPadding: 0.01
   classifyBottomHoleRegion: 1
   enableBottomHoleOpening: 1

@@ -55,7 +55,7 @@ MonoBehaviour:
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 1
+    active: 0
   - name: Blue Compartment Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
@@ -68,21 +68,21 @@ MonoBehaviour:
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 1
+    active: 0
   - name: Inactive Bottom Edge Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
-    localCenter: {x: 0.095, y: -0.275, z: 0}
-    localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.006
+    localCenter: {x: 0.18, y: -0.2, z: 0}
+    localNormal: {x: 1, y: 0, z: 0}
+    radiusMeters: 0.002
     sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
     edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 0
+    active: 1
   visualRadialSegments: 96
   bucketColor: {r: 0.58, g: 0.62, b: 0.65, a: 1}
-  holeColor: {r: 0.055, g: 0.065, b: 0.075, a: 1}
+  holeColor: {r: 0.4757201, g: 0.49056602, b: 0.11801351, a: 1}
   jointColor: {r: 0.32, g: 0.36, b: 0.39, a: 1}

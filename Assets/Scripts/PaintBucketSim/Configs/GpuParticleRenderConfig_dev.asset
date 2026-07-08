@@ -33,7 +33,7 @@ MonoBehaviour:
   fluidThicknessPerParticle: 0.55
   fluidDeepColor: {r: 0.06, g: 0.22, b: 0.46, a: 1}
   fluidAbsorption: 2.4
-  fluidOpacity: 0
+  fluidOpacity: 0.7
   fluidFlipVertical: 0
   fluidUseParticleColor: 1
   fluidRefractionStrength: 0.035
