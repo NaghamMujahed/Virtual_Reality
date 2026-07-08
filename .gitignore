@@ -36,6 +36,7 @@
 
 # Visual Studio cache directory
 .vs/
+.vscode/
 
 Docs/
 CLAUDE.md
