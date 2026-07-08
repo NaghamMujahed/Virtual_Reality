@@ -13,10 +13,10 @@ MonoBehaviour:
   m_Name: BucketConfig_Tank
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.BucketConfig
   shapeType: 0
-  heightMeters: 0.55
-  topRadiusMeters: 0.18
-  bottomRadiusMeters: 0.18
-  wallThicknessMeters: 0.01
+  heightMeters: 2.75
+  topRadiusMeters: 3
+  bottomRadiusMeters: 3
+  wallThicknessMeters: 0.08
   massKg: 1.2
   automaticInertiaTensor: 1
   manualInertiaTensor: {x: 0.025, y: 0.02, z: 0.025}

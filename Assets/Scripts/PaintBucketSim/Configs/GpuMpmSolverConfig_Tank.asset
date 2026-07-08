@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: GpuMpmSolverConfig_Tank
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuMpmSolverConfig
   denseLocalMpmCompute: {fileID: 7200000, guid: 6baff0c33dcf5fd4da0d039aed50f8c6, type: 3}
-  gridOriginLocal: {x: -0.24, y: -0.4, z: -0.24}
-  gridResolution: {x: 48, y: 72, z: 48}
-  cellSizeMeters: 0.01
+  gridOriginLocal: {x: -3.8, y: -3, z: -3.8}
+  gridResolution: {x: 96, y: 64, z: 96}
+  cellSizeMeters: 0.08
   gridBoundaryMarginMeters: 0.02
   rejectUndersizedGrid: 1
   bucketFrameAccelerationFilterHalfLife: 0.025
@@ -112,18 +112,18 @@ MonoBehaviour:
   enableAdaptivePostG2PBucketCollision: 1
   topBoundaryMode: 1
   topBoundaryPadding: 0.01
-  classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 1
+  classifyBottomHoleRegion: 0
+  enableBottomHoleOpening: 0
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08
   holeRadialPaddingMeters: 0.012
   holeOutflowExitDistanceMeters: 0.0025
-  enableAirborneParticleAdvection: 1
+  enableAirborneParticleAdvection: 0
   enableSmartAirborneDispatch: 1
   airborneDragPerSecond: 0.15
   jetStateDurationSeconds: 0.08
-  enableJetMpmCollar: 1
+  enableJetMpmCollar: 0
   jetMpmCollarDurationSeconds: 0.05
   jetMpmCollarMaxDistanceMeters: 0.06
   jetMpmCollarRadialPaddingMeters: 0.05
