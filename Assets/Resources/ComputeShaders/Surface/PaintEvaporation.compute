@@ -1,0 +1,701 @@
+#pragma kernel Spread
+#pragma kernel Advect
+#pragma kernel Evaporate
+
+struct PaintCellData
+{
+    int    ThicknessInt;
+    float  Wetness;
+    float  Age;
+    uint   IsActive;
+    float4 Color;
+    float2 FlowVelocity;
+    float  PaintDensity;
+    float  _pad0;
+};
+
+StructuredBuffer<PaintCellData> _PaintCellReadBuffer;
+RWStructuredBuffer<PaintCellData> _PaintCellWriteBuffer;
+RWStructuredBuffer<PaintCellData> _PaintCellBuffer;
+
+int   _GridWidth;
+int   _GridHeight;
+int   _ThicknessScale;
+float _CellSizeU;
+float _CellSizeV;
+float _DeltaTime;
+float _EvaporationRate;
+float _DiffusionRate;
+float _RunoffRate;
+float _MinimumWetThickness;
+float2 _SurfaceGravity;
+float _PaintDensity;
+float _DynamicViscosity;
+float _SurfaceTension;
+float _YieldStress;
+float _ContactLineThickness;
+float _ContactAngleResistance;
+float _SubstrateFlowVariation;
+float _SurfaceRoughness;
+float _DripFingerInstability;
+float _ThinFilmCohesion;
+float _SurfaceAbsorptionRate;
+int _ColorMixingMode;
+float _PigmentMixStrength;
+float _PigmentMinReflectance;
+float _PigmentMaxKs;
+
+int GetIdx(int x, int y)
+{
+    return clamp(y, 0, _GridHeight - 1) * _GridWidth +
+           clamp(x, 0, _GridWidth - 1);
+}
+
+float ThicknessMeters(PaintCellData cell)
+{
+    return max((float)cell.ThicknessInt, 0.0f) /
+           max((float)_ThicknessScale, 1.0f);
+}
+
+float4 SafeColor(float4 color, float4 fallback)
+{
+    if (color.a <= 1e-5f)
+        color = fallback;
+
+    color.a = 1.0f;
+    return saturate(color);
+}
+
+float3 PaintReflectanceToKs(float3 reflectance)
+{
+    float minReflectance = max(_PigmentMinReflectance, 0.001f);
+    float3 r = clamp(
+        saturate(reflectance),
+        float3(minReflectance, minReflectance, minReflectance),
+        float3(0.999f, 0.999f, 0.999f)
+    );
+    float3 one = float3(1.0f, 1.0f, 1.0f);
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    float3 ks = ((one - r) * (one - r)) / (2.0f * r);
+    return min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+}
+
+float3 PaintKsToReflectance(float3 ks)
+{
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    ks = min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+    return saturate(float3(1.0f, 1.0f, 1.0f) + ks - sqrt(ks * ks + 2.0f * ks));
+}
+
+float3 EncodePaintColorForMix(float3 color)
+{
+    if (_ColorMixingMode == 1)
+        return PaintReflectanceToKs(color);
+
+    return saturate(color);
+}
+
+float3 DecodePaintColorFromMix(float3 encodedColor)
+{
+    if (_ColorMixingMode == 1)
+        return PaintKsToReflectance(encodedColor);
+
+    return saturate(encodedColor);
+}
+
+float3 WeightedPaintMix(
+    float3 rgbSum,
+    float3 encodedSum,
+    float colorWeight)
+{
+    float3 rgbMix = saturate(rgbSum / max(colorWeight, 1e-9f));
+    if (_ColorMixingMode != 1)
+        return rgbMix;
+
+    float3 pigmentMix =
+        DecodePaintColorFromMix(encodedSum / max(colorWeight, 1e-9f));
+    return saturate(lerp(rgbMix, pigmentMix, saturate(_PigmentMixStrength)));
+}
+
+float HashCell(int2 cell)
+{
+    float2 value = frac((float2)cell * float2(0.1031f, 0.11369f));
+    value += dot(value, value.yx + 19.19f);
+    return frac((value.x + value.y) * value.x);
+}
+
+float ValueNoise(float2 coordinate)
+{
+    int2 baseCell = (int2)floor(coordinate);
+    float2 fraction = frac(coordinate);
+    float2 smoothFraction =
+        fraction * fraction * (3.0f - 2.0f * fraction);
+
+    float n00 = HashCell(baseCell);
+    float n10 = HashCell(baseCell + int2(1, 0));
+    float n01 = HashCell(baseCell + int2(0, 1));
+    float n11 = HashCell(baseCell + int2(1, 1));
+
+    return lerp(
+        lerp(n00, n10, smoothFraction.x),
+        lerp(n01, n11, smoothFraction.x),
+        smoothFraction.y
+    );
+}
+
+PaintCellData EmptyCell()
+{
+    PaintCellData cell;
+    cell.ThicknessInt = 0;
+    cell.Wetness = 0.0f;
+    cell.Age = 0.0f;
+    cell.IsActive = 0u;
+    cell.Color = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    cell.FlowVelocity = float2(0.0f, 0.0f);
+    cell.PaintDensity = 0.0f;
+    cell._pad0 = 0.0f;
+    return cell;
+}
+
+float RheologyMobility(
+    PaintCellData cell,
+    float gravityMagnitude,
+    int2 cellCoordinate)
+{
+    float thickness = ThicknessMeters(cell);
+    float wetness = saturate(cell.Wetness);
+    float dryingViscosityMultiplier =
+        lerp(9.0f, 1.0f, wetness * wetness);
+    float viscosityMobility =
+        rcp(
+            1.0f +
+            max(_DynamicViscosity, 0.0f) *
+            dryingViscosityMultiplier *
+            1.5f
+        );
+
+    float drivingStress =
+        max(_PaintDensity, 1.0f) *
+        gravityMagnitude *
+        thickness;
+
+    float yieldMobility = 1.0f;
+    if (_YieldStress > 1e-5f)
+    {
+        yieldMobility = saturate(
+            (drivingStress - _YieldStress) /
+            max(_YieldStress * 0.35f, 0.05f)
+        );
+    }
+
+    float contactProgress = smoothstep(
+        max(_ContactLineThickness, 1e-7f) * 0.35f,
+        max(_ContactLineThickness, 1e-7f) * 1.6f,
+        thickness
+    );
+    float contactMobility = lerp(
+        1.0f - saturate(_ContactAngleResistance),
+        1.0f,
+        contactProgress
+    );
+    float cohesiveFilmMobility = lerp(
+        1.0f,
+        smoothstep(
+            max(_MinimumWetThickness, 1e-7f) * 0.55f,
+            max(_MinimumWetThickness, 1e-7f) * 2.8f,
+            thickness
+        ),
+        saturate(_ThinFilmCohesion)
+    );
+    float absorptionPinning = lerp(
+        1.0f,
+        0.48f + 0.45f * smoothstep(
+            max(_MinimumWetThickness, 1e-7f) * 0.75f,
+            max(_MinimumWetThickness, 1e-7f) * 4.5f,
+            thickness
+        ),
+        saturate(_SurfaceAbsorptionRate)
+    );
+    float substrateVariation =
+        1.0f +
+        (ValueNoise((float2)cellCoordinate / 7.0f) * 2.0f - 1.0f) *
+        saturate(_SubstrateFlowVariation) *
+        saturate(_SurfaceRoughness);
+
+    return saturate(wetness) *
+        viscosityMobility *
+        yieldMobility *
+        contactMobility *
+        cohesiveFilmMobility *
+        absorptionPinning *
+        max(substrateVariation, 0.2f);
+}
+
+float2 SurfaceFlowVelocity(
+    PaintCellData cell,
+    float mobility,
+    int2 cellCoordinate)
+{
+    float gravityMagnitude = length(_SurfaceGravity);
+    if (gravityMagnitude <= 1e-5f)
+        return float2(0.0f, 0.0f);
+
+    float thickness = ThicknessMeters(cell);
+    float2 gravityDirection = _SurfaceGravity / gravityMagnitude;
+    float2 lateralDirection =
+        float2(-gravityDirection.y, gravityDirection.x);
+    float lateralNoise =
+        ValueNoise((float2)cellCoordinate / 11.0f + 17.31f) * 2.0f - 1.0f;
+    float roughnessVariation =
+        saturate(_SubstrateFlowVariation) *
+        saturate(_SurfaceRoughness);
+    float fingerAmount =
+        saturate(_DripFingerInstability) *
+        lerp(0.35f, 1.0f, roughnessVariation);
+    float laneScale = lerp(23.0f, 8.0f, fingerAmount);
+    float laneNoise =
+        ValueNoise(
+            (float2)cellCoordinate / laneScale +
+            float2(31.7f, -12.4f)
+        );
+    float contactLine =
+        1.0f -
+        smoothstep(
+            max(_ContactLineThickness, 1e-7f) * 1.0f,
+            max(_ContactLineThickness, 1e-7f) * 5.0f,
+            thickness
+        );
+    float fingerBoost =
+        lerp(
+            1.0f,
+            0.62f + laneNoise * 1.05f + contactLine * 0.36f,
+            fingerAmount
+        );
+
+    float2 gravityVelocity =
+        gravityDirection *
+        (gravityMagnitude / 9.81f) *
+        max(_RunoffRate, 0.0f) *
+        0.08f *
+        mobility *
+        max(fingerBoost, 0.25f);
+    float2 lateralVelocity =
+        lateralDirection *
+        lateralNoise *
+        max(_RunoffRate, 0.0f) *
+        lerp(0.06f, 0.105f, fingerAmount) *
+        mobility *
+        roughnessVariation *
+        lerp(0.4f, 1.0f, saturate(cell.Wetness));
+
+    return gravityVelocity + lateralVelocity;
+}
+
+float FaceMobility(
+    PaintCellData a,
+    PaintCellData b,
+    float gravityMagnitude,
+    int2 coordinateA,
+    int2 coordinateB)
+{
+    return 0.5f *
+        (
+            RheologyMobility(a, gravityMagnitude, coordinateA) +
+            RheologyMobility(b, gravityMagnitude, coordinateB)
+        );
+}
+
+[numthreads(8, 8, 1)]
+void Spread(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+    int idx = y * _GridWidth + x;
+
+    PaintCellData self = _PaintCellReadBuffer[idx];
+    PaintCellData right = _PaintCellReadBuffer[GetIdx(x + 1, y)];
+    PaintCellData left = _PaintCellReadBuffer[GetIdx(x - 1, y)];
+    PaintCellData up = _PaintCellReadBuffer[GetIdx(x, y + 1)];
+    PaintCellData down = _PaintCellReadBuffer[GetIdx(x, y - 1)];
+
+    float selfThickness = ThicknessMeters(self);
+    float rightThickness = ThicknessMeters(right);
+    float leftThickness = ThicknessMeters(left);
+    float upThickness = ThicknessMeters(up);
+    float downThickness = ThicknessMeters(down);
+
+    if (selfThickness <= 0.0f &&
+        rightThickness <= 0.0f &&
+        leftThickness <= 0.0f &&
+        upThickness <= 0.0f &&
+        downThickness <= 0.0f)
+    {
+        _PaintCellWriteBuffer[idx] = EmptyCell();
+        return;
+    }
+
+    float dt = max(_DeltaTime, 0.0f);
+    float gravityMagnitude = length(_SurfaceGravity);
+    float surfaceTensionScale =
+        clamp(_SurfaceTension / 0.04f, 0.25f, 3.0f);
+    float capillaryRate =
+        max(_DiffusionRate, 0.0f) * surfaceTensionScale;
+
+    int2 selfCoordinate = int2(x, y);
+    float selfMobility =
+        RheologyMobility(self, gravityMagnitude, selfCoordinate);
+    float mobilityRight = FaceMobility(
+        self,
+        right,
+        gravityMagnitude,
+        selfCoordinate,
+        int2(x + 1, y)
+    );
+    float mobilityLeft = FaceMobility(
+        self,
+        left,
+        gravityMagnitude,
+        selfCoordinate,
+        int2(x - 1, y)
+    );
+    float mobilityUp = FaceMobility(
+        self,
+        up,
+        gravityMagnitude,
+        selfCoordinate,
+        int2(x, y + 1)
+    );
+    float mobilityDown = FaceMobility(
+        self,
+        down,
+        gravityMagnitude,
+        selfCoordinate,
+        int2(x, y - 1)
+    );
+
+    // A raw explicit coefficient of 0.25 * rate * dt becomes unstable when
+    // rendering is slow and delta time grows. The negative lobes are then
+    // clipped to zero while positive lobes grow, creating checkerboards and
+    // artificial paint volume. This exponential response preserves the
+    // small-dt behavior while keeping the four-neighbour stencil below its
+    // strict stability limit for every frame time.
+    float capillaryAlpha =
+        min(0.245f, 0.25f * (1.0f - exp(-capillaryRate * dt)));
+    float capillaryDelta = capillaryAlpha *
+        (
+            mobilityRight * (rightThickness - selfThickness) +
+            mobilityLeft * (leftThickness - selfThickness) +
+            mobilityUp * (upThickness - selfThickness) +
+            mobilityDown * (downThickness - selfThickness)
+        );
+
+    float2 gravityVelocity = SurfaceFlowVelocity(
+        self,
+        selfMobility,
+        selfCoordinate
+    );
+    float2 selfVelocity =
+        self.FlowVelocity * saturate(self.Wetness) +
+        gravityVelocity;
+
+    float newThickness =
+        max(selfThickness + capillaryDelta, 0.0f);
+
+    float capillaryMix = capillaryAlpha;
+    float selfColorWeight = max(selfThickness, 1e-9f);
+    float colorWeight = selfColorWeight;
+    float3 selfColor =
+        SafeColor(self.Color, float4(1.0f, 0.0f, 0.0f, 1.0f)).rgb;
+    float3 colorRgbSum = selfColor * selfColorWeight;
+    float3 colorEncodedSum =
+        EncodePaintColorForMix(selfColor) * selfColorWeight;
+    float wetnessSum = saturate(self.Wetness) * selfColorWeight;
+
+    float rightMix =
+        capillaryMix * mobilityRight * rightThickness;
+    float leftMix =
+        capillaryMix * mobilityLeft * leftThickness;
+    float upMix =
+        capillaryMix * mobilityUp * upThickness;
+    float downMix =
+        capillaryMix * mobilityDown * downThickness;
+
+    float3 rightColor = SafeColor(right.Color, self.Color).rgb;
+    float3 leftColor = SafeColor(left.Color, self.Color).rgb;
+    float3 upColor = SafeColor(up.Color, self.Color).rgb;
+    float3 downColor = SafeColor(down.Color, self.Color).rgb;
+
+    colorRgbSum += rightColor * rightMix;
+    colorRgbSum += leftColor * leftMix;
+    colorRgbSum += upColor * upMix;
+    colorRgbSum += downColor * downMix;
+    colorEncodedSum += EncodePaintColorForMix(rightColor) * rightMix;
+    colorEncodedSum += EncodePaintColorForMix(leftColor) * leftMix;
+    colorEncodedSum += EncodePaintColorForMix(upColor) * upMix;
+    colorEncodedSum += EncodePaintColorForMix(downColor) * downMix;
+    wetnessSum += saturate(right.Wetness) * rightMix;
+    wetnessSum += saturate(left.Wetness) * leftMix;
+    wetnessSum += saturate(up.Wetness) * upMix;
+    wetnessSum += saturate(down.Wetness) * downMix;
+    colorWeight += rightMix + leftMix + upMix + downMix;
+
+    PaintCellData output = self;
+    output.ThicknessInt = (int)round(
+        newThickness * max((float)_ThicknessScale, 1.0f)
+    );
+
+    if (output.ThicknessInt <= 0)
+    {
+        output = EmptyCell();
+    }
+    else
+    {
+        output.Color = float4(
+            WeightedPaintMix(colorRgbSum, colorEncodedSum, colorWeight),
+            1.0f
+        );
+        output.Wetness = saturate(wetnessSum / max(colorWeight, 1e-9f));
+        output.FlowVelocity =
+            selfVelocity * exp(-max(_DynamicViscosity, 0.0f) * dt * 1.5f);
+        output.PaintDensity = max(_PaintDensity, 1.0f);
+        output.IsActive = 1u;
+    }
+
+    _PaintCellWriteBuffer[idx] = output;
+}
+
+[numthreads(8, 8, 1)]
+void Advect(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int x = (int)id.x;
+    int y = (int)id.y;
+    int idx = y * _GridWidth + x;
+
+    PaintCellData self = _PaintCellReadBuffer[idx];
+    PaintCellData right = _PaintCellReadBuffer[GetIdx(x + 1, y)];
+    PaintCellData left = _PaintCellReadBuffer[GetIdx(x - 1, y)];
+    PaintCellData up = _PaintCellReadBuffer[GetIdx(x, y + 1)];
+    PaintCellData down = _PaintCellReadBuffer[GetIdx(x, y - 1)];
+
+    float selfThickness = ThicknessMeters(self);
+    float rightThickness = ThicknessMeters(right);
+    float leftThickness = ThicknessMeters(left);
+    float upThickness = ThicknessMeters(up);
+    float downThickness = ThicknessMeters(down);
+
+    if (selfThickness <= 0.0f &&
+        rightThickness <= 0.0f &&
+        leftThickness <= 0.0f &&
+        upThickness <= 0.0f &&
+        downThickness <= 0.0f)
+    {
+        _PaintCellWriteBuffer[idx] = EmptyCell();
+        return;
+    }
+
+    float dt = max(_DeltaTime, 0.0f);
+    float safeCellU = max(_CellSizeU, 1e-5f);
+    float safeCellV = max(_CellSizeV, 1e-5f);
+
+    // This pass is separate from capillary diffusion so each conservative
+    // operator has its own positivity budget. A cell can lose at most 80% of
+    // its thickness through its four faces in one update.
+    float maxStableSpeed =
+        dt > 1e-6f
+            ? 0.24f * min(safeCellU, safeCellV) / dt
+            : 0.0f;
+
+    float2 selfVelocity = clamp(
+        self.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 rightVelocity = clamp(
+        right.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 leftVelocity = clamp(
+        left.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 upVelocity = clamp(
+        up.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+    float2 downVelocity = clamp(
+        down.FlowVelocity,
+        -maxStableSpeed.xx,
+        maxStableSpeed.xx
+    );
+
+    // Positive face velocity points right/up. Boundary faces remain open so
+    // liquid can leave the physical board instead of accumulating at an
+    // invisible atlas wall.
+    float faceVelocityRight =
+        x < _GridWidth - 1
+            ? 0.5f * (selfVelocity.x + rightVelocity.x)
+            : max(selfVelocity.x, 0.0f);
+    float faceVelocityLeft =
+        x > 0
+            ? 0.5f * (leftVelocity.x + selfVelocity.x)
+            : min(selfVelocity.x, 0.0f);
+    float faceVelocityUp =
+        y < _GridHeight - 1
+            ? 0.5f * (selfVelocity.y + upVelocity.y)
+            : max(selfVelocity.y, 0.0f);
+    float faceVelocityDown =
+        y > 0
+            ? 0.5f * (downVelocity.y + selfVelocity.y)
+            : min(selfVelocity.y, 0.0f);
+
+    float fluxRight =
+        max(faceVelocityRight, 0.0f) * selfThickness +
+        min(faceVelocityRight, 0.0f) * rightThickness;
+    float fluxLeft =
+        max(faceVelocityLeft, 0.0f) * leftThickness +
+        min(faceVelocityLeft, 0.0f) * selfThickness;
+    float fluxUp =
+        max(faceVelocityUp, 0.0f) * selfThickness +
+        min(faceVelocityUp, 0.0f) * upThickness;
+    float fluxDown =
+        max(faceVelocityDown, 0.0f) * downThickness +
+        min(faceVelocityDown, 0.0f) * selfThickness;
+
+    float transferRight = fluxRight * dt / safeCellU;
+    float transferLeft = fluxLeft * dt / safeCellU;
+    float transferUp = fluxUp * dt / safeCellV;
+    float transferDown = fluxDown * dt / safeCellV;
+    float newThickness = max(
+        selfThickness -
+        transferRight +
+        transferLeft -
+        transferUp +
+        transferDown,
+        0.0f
+    );
+
+    float incomingRight = max(-transferRight, 0.0f);
+    float incomingLeft = max(transferLeft, 0.0f);
+    float incomingUp = max(-transferUp, 0.0f);
+    float incomingDown = max(transferDown, 0.0f);
+    float outgoing =
+        max(transferRight, 0.0f) +
+        max(-transferLeft, 0.0f) +
+        max(transferUp, 0.0f) +
+        max(-transferDown, 0.0f);
+    float remainingSelf = max(selfThickness - outgoing, 0.0f);
+
+    float3 selfColor =
+        SafeColor(self.Color, float4(1.0f, 0.0f, 0.0f, 1.0f)).rgb;
+    float3 rightColor = SafeColor(right.Color, self.Color).rgb;
+    float3 leftColor = SafeColor(left.Color, self.Color).rgb;
+    float3 upColor = SafeColor(up.Color, self.Color).rgb;
+    float3 downColor = SafeColor(down.Color, self.Color).rgb;
+    float colorWeight =
+        remainingSelf +
+        incomingRight +
+        incomingLeft +
+        incomingUp +
+        incomingDown;
+    float3 colorRgbSum =
+        selfColor * remainingSelf +
+        rightColor * incomingRight +
+        leftColor * incomingLeft +
+        upColor * incomingUp +
+        downColor * incomingDown;
+    float3 colorEncodedSum =
+        EncodePaintColorForMix(selfColor) * remainingSelf +
+        EncodePaintColorForMix(rightColor) * incomingRight +
+        EncodePaintColorForMix(leftColor) * incomingLeft +
+        EncodePaintColorForMix(upColor) * incomingUp +
+        EncodePaintColorForMix(downColor) * incomingDown;
+    float wetnessSum =
+        saturate(self.Wetness) * remainingSelf +
+        saturate(right.Wetness) * incomingRight +
+        saturate(left.Wetness) * incomingLeft +
+        saturate(up.Wetness) * incomingUp +
+        saturate(down.Wetness) * incomingDown;
+    float2 velocitySum =
+        selfVelocity * remainingSelf +
+        rightVelocity * incomingRight +
+        leftVelocity * incomingLeft +
+        upVelocity * incomingUp +
+        downVelocity * incomingDown;
+
+    PaintCellData output = self;
+    output.ThicknessInt = (int)round(
+        newThickness * max((float)_ThicknessScale, 1.0f)
+    );
+
+    if (output.ThicknessInt <= 0)
+    {
+        output = EmptyCell();
+    }
+    else
+    {
+        output.Color = float4(
+            WeightedPaintMix(colorRgbSum, colorEncodedSum, colorWeight),
+            1.0f
+        );
+        output.Wetness = saturate(wetnessSum / max(colorWeight, 1e-9f));
+        output.FlowVelocity =
+            velocitySum / max(colorWeight, 1e-9f);
+        output.PaintDensity = max(_PaintDensity, 1.0f);
+        output.IsActive = 1u;
+    }
+
+    _PaintCellWriteBuffer[idx] = output;
+}
+
+[numthreads(8, 8, 1)]
+void Evaporate(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight)
+        return;
+
+    int idx = (int)id.y * _GridWidth + (int)id.x;
+    PaintCellData cell = _PaintCellBuffer[idx];
+
+    if (cell.ThicknessInt <= 0)
+    {
+        _PaintCellBuffer[idx] = EmptyCell();
+        return;
+    }
+
+    float thicknessMeters = ThicknessMeters(cell);
+    cell.Age += max(_DeltaTime, 0.0f);
+
+    float normalizedThickness =
+        saturate(thicknessMeters / max(_MinimumWetThickness, 1e-7f));
+    float dryRate =
+        max(_EvaporationRate, 0.0f) *
+        lerp(1.35f, 0.55f, normalizedThickness);
+    float absorptionDryRate =
+        saturate(_SurfaceAbsorptionRate) *
+        lerp(0.16f, 0.045f, normalizedThickness);
+
+    cell.Wetness =
+        max(
+            0.0f,
+            cell.Wetness -
+            (dryRate + absorptionDryRate) * max(_DeltaTime, 0.0f)
+        );
+
+    if (thicknessMeters < _MinimumWetThickness && cell.Wetness <= 0.01f)
+        cell.Wetness = 0.0f;
+
+    cell.FlowVelocity *=
+        saturate(cell.Wetness * 1.1f) *
+        exp(-saturate(_SurfaceAbsorptionRate) * max(_DeltaTime, 0.0f) * 2.2f);
+    cell.IsActive = 1u;
+    _PaintCellBuffer[idx] = cell;
+}

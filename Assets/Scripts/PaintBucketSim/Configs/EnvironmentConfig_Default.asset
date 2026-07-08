@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 59fdfe9396820094fa8f8bcd6ae6d7c4, type: 3}
+  m_Name: EnvironmentConfig_Default
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.EnvironmentConfig
+  gravity: {x: 0, y: -9.81, z: 0}
+  windVelocity: {x: 0, y: 0, z: 0}
+  airDensity: 1.225
+  airViscosity: 0.000018
+  temperatureCelsius: 20
+  relativeHumidity01: 0.5
+  pressurePa: 101325

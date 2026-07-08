@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7d0b0d6a4c8fa243afeaba74e3ceb60, type: 3}
+  m_Name: PaintMaterialConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintMaterialConfig
+  materialPreset: 3
+  autoApplyMaterialPreset: 1
+  densityKgPerM3: 1150
+  baseColor: {r: 0.3479886, g: 0.6749586, b: 0.8679245, a: 0.55}
+  viscosityModel: 1
+  constantViscosityPaS: 0.16
+  zeroShearViscosityPaS: 2.6
+  infiniteShearViscosityPaS: 0.14
+  relaxationTimeSeconds: 0.8
+  yasudaExponent: 2.2
+  flowIndex: 0.55
+  yieldStressPa: 0
+  surfaceTensionNPerM: 0.035
+  dryingRatePerSecond: 0.02
+  absorptionRate: 0.5
+  notes: This material is solver-independent. It can be used by PBF, SPH, DFSPH,
+    MPM, or another fluid model.

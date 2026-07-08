@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 174d9f263d46dfc46b542991f09077c6, type: 3}
+  m_Name: RopeBucketCouplingConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeBucketCouplingConfig
+  enableCoupling: 1
+  snapBucketToRopeOnInitialize: 1
+  attachmentCompliance: 0.000001
+  solverIterations: 8
+  correctRopeEnd: 1
+  correctBucket: 1
+  maxLinearCorrectionPerSubstep: 0.05
+  maxAngularCorrectionPerSubstep: 0.06
+  updateVelocitiesFromCorrection: 1
+  reconstructBucketVelocityFromFinalPose: 1
+  enableVelocityStabilization: 1
+  attachmentVelocityDamping: 0.4
+  maxAttachmentImpulse: 3
+  enableTwistCoupling: 1
+  twistTorqueStiffness: 0.18
+  twistTorqueDamping: 0.025
+  maxTwistTorque: 0.45
+  enableBailUprightTorque: 1
+  bailUprightActivationAngleDegrees: 55
+  bailUprightFullResponseAngleDegrees: 82
+  bailUprightStiffness: 5
+  bailUprightDamping: 0.65
+  maxBailUprightTorque: 8
+  enableDiagnostics: 1

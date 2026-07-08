@@ -1,0 +1,78 @@
+﻿#pragma kernel KDebugColorByState
+
+#pragma kernel KBuildRenderableParticleList
+
+RWStructuredBuffer<float4> _ParticleColor;
+StructuredBuffer<float4> _ParticleStateAgeId;
+AppendStructuredBuffer<uint> _RenderableParticleIndices;
+
+int _ParticleCount;
+int _ParticleIndexStride;
+int _HideCanvasAndLostParticles;
+
+float4 _InsideColor;
+float4 _NearHoleColor;
+float4 _AirborneColor;
+float4 _DepositedColor;
+float4 _FallbackColor;
+
+[numthreads(256, 1, 1)]
+void KDebugColorByState(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_ParticleCount)
+        return;
+
+    float4 stateAgeId = _ParticleStateAgeId[index];
+
+    int state = (int)round(stateAgeId.x);
+
+    // Must match FluidParticleState enum:
+    // Inactive=0, InsideFluid=1, NearBoundary=2, NearHole=3,
+    // Jet=4, Emitted=5, Airborne=6, Spilled=7,
+    // Deposited=8, Absorbed=9, Lost=10
+
+    float4 color = _FallbackColor;
+
+    if (state == 1 || state == 2)
+    {
+        color = _InsideColor;
+    }
+    else if (state == 3)
+    {
+        color = _NearHoleColor;
+    }
+    else if (state == 4 || state == 5 || state == 6 || state == 7)
+    {
+        color = _AirborneColor;
+    }
+    else if (state == 8 || state == 9)
+    {
+        color = _DepositedColor;
+    }
+
+    _ParticleColor[index] = color;
+}
+
+[numthreads(256, 1, 1)]
+void KBuildRenderableParticleList(uint3 id : SV_DispatchThreadID)
+{
+    uint stride = (uint)max(_ParticleIndexStride, 1);
+    uint particleIndex = id.x * stride;
+
+    if (particleIndex >= (uint)_ParticleCount)
+        return;
+
+    if (_HideCanvasAndLostParticles != 0)
+    {
+        int state = (int)round(_ParticleStateAgeId[particleIndex].x);
+
+        // Terminal particles are represented by the paint film and must not
+        // be submitted to the indirect particle draw.
+        if (state == 0 || state == 8 || state == 9 || state == 10)
+            return;
+    }
+
+    _RenderableParticleIndices.Append(particleIndex);
+}

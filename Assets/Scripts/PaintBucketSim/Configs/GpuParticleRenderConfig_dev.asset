@@ -1,0 +1,48 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b6431ec2f923ef845aa52f3a8c0aff55, type: 3}
+  m_Name: GpuParticleRenderConfig_dev
+  m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuParticleRenderConfig
+  enableGpuIndirectRendering: 1
+  fluidRenderMode: 1
+  maxRenderedParticles: 400000
+  renderStride: 1
+  uploadEveryNFrames: 1
+  visualMode: 1
+  visualRadiusScale: 0.8
+  splatNormalStrength: 0.85
+  splatEdgeSoftness: 0.22
+  paintSpecularStrength: 0.18
+  paintFresnelStrength: 0.1
+  usePerParticleColor: 1
+  fallbackColor: {r: 0.1, g: 0.35, b: 1, a: 1}
+  fluidParticleScale: 1.6
+  fluidSmoothingIterations: 3
+  fluidBlurRadiusPixels: 8
+  fluidBlurDepthFalloff: 12
+  fluidResolutionDivisor: 1
+  fluidThicknessPerParticle: 0.55
+  fluidDeepColor: {r: 0.06, g: 0.22, b: 0.46, a: 1}
+  fluidAbsorption: 2.4
+  fluidOpacity: 0
+  fluidFlipVertical: 0
+  fluidUseParticleColor: 1
+  fluidRefractionStrength: 0.035
+  fluidFresnelF0: 0.02
+  fluidReflectionStrength: 0.6
+  fluidSpecularStrength: 1.4
+  fluidSpecularPower: 180
+  fluidLightDirection: {x: 0.35, y: 0.85, z: 0.25}
+  hideCanvasAndLostParticles: 0
+  worldBoundsCenter: {x: 0, y: 0, z: 0}
+  worldBoundsSize: {x: 20, y: 20, z: 20}
+  showWarnings: 1

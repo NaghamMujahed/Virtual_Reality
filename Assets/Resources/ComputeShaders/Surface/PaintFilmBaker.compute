@@ -1,0 +1,66 @@
+#pragma kernel CSMain
+
+struct PaintCellData
+{
+    int    ThicknessInt;
+    float  Wetness;
+    float  Age;
+    uint   IsActive;
+    float4 Color;
+    float2 FlowVelocity;
+    float  PaintDensity;
+    float  _pad0;
+};
+
+RWStructuredBuffer<PaintCellData> _PaintCellBuffer;
+RWTexture2D<float4> _OutputTexture;
+RWTexture2D<float4> _SurfaceDataTexture;
+
+int   _GridWidth;
+int   _GridHeight;
+int   _ThicknessScale;
+float _MaxThickness;
+float _WetnessShine;
+float4 _CanvasBaseColor;
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _GridWidth || (int)id.y >= _GridHeight) return;
+
+    int flatIndex = (int)id.y * _GridWidth + (int)id.x;
+
+    uint2 texCoord = uint2(_GridWidth - 1 - id.x, _GridHeight - 1 - id.y);
+
+    PaintCellData cell = _PaintCellBuffer[flatIndex];
+
+    if (cell.IsActive == 0)
+    {
+        _OutputTexture[texCoord] = float4(saturate(_CanvasBaseColor.rgb), 1.0);
+        _SurfaceDataTexture[texCoord] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    float thickness = (float)cell.ThicknessInt / (float)_ThicknessScale;
+    float coverage = 1.0 - exp(-thickness / max(_MaxThickness, 1e-7));
+
+    float4 color = cell.Color;
+
+    float wetness   = saturate(cell.Wetness);
+    float darkening = lerp(1.0, 0.90, wetness);
+    color.rgb *= darkening;
+
+    float shine = wetness * _WetnessShine;
+    color.rgb = lerp(color.rgb, 1.0.xxx, shine * 0.025);
+
+    color.rgb = lerp(saturate(_CanvasBaseColor.rgb), color.rgb, coverage);
+    color.a = 1.0;
+
+    _OutputTexture[texCoord] = saturate(color);
+    _SurfaceDataTexture[texCoord] = float4(
+        saturate(coverage),
+        wetness,
+        saturate(thickness / max(_MaxThickness * 4.0, 1e-7)),
+        saturate(cell.Age / 60.0)
+    );
+}

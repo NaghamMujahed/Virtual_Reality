@@ -1,0 +1,1029 @@
+#pragma kernel CSMainMlsMpm
+#pragma kernel CollectSurfaceImpactDiagnostics
+#pragma kernel BuildResolveDispatchArgs
+#pragma kernel ResolveDeposits
+#pragma kernel ResetDepositTracking
+
+struct PaintCellData
+{
+    int    ThicknessInt;
+    float  Wetness;
+    float  Age;
+    uint   IsActive;
+    float4 Color;
+    float2 FlowVelocity;
+    float  PaintDensity;
+    float  _pad0;
+};
+
+RWStructuredBuffer<PaintCellData> _PaintCellBuffer;
+
+RWStructuredBuffer<float4> _MlsParticlePositionRadius;
+RWStructuredBuffer<float4> _MlsParticleVelocityMass;
+StructuredBuffer<float4>   _MlsParticleColor;
+RWStructuredBuffer<float4> _MlsParticleStateAgeId;
+StructuredBuffer<float4>   _MlsParticleVolumeJ;
+RWStructuredBuffer<uint>   _SurfaceImpactDiagnostics;
+RWStructuredBuffer<int4>   _DepositColorAccumulator;
+RWStructuredBuffer<int2>   _DepositFlowAccumulator;
+RWStructuredBuffer<uint>   _DepositTouchedFlags;
+RWStructuredBuffer<uint>   _DepositTouchedList;
+RWStructuredBuffer<uint>   _DepositResolveDispatchArgs;
+
+int _GridWidth;
+int _GridHeight;
+float _CellSize;
+float _CellSizeU;
+float _CellSizeV;
+float _GridOriginX;
+float _GridOriginZ;
+float _SurfaceY;
+float3 _SurfaceOriginWS;
+float3 _SurfaceAxisU;
+float3 _SurfaceAxisV;
+float3 _SurfaceNormalWS;
+float3 _PreviousSurfaceOriginWS;
+float3 _PreviousSurfaceAxisU;
+float3 _PreviousSurfaceAxisV;
+float3 _PreviousSurfaceNormalWS;
+float _PreviousCellSizeU;
+float _PreviousCellSizeV;
+float _SurfaceImpactCaptureDistance;
+int _SurfaceDoubleSidedImpact;
+int _ThicknessScale;
+
+float _PaintDensity;
+float _PaintViscosity;
+float _SurfaceTension;
+
+float _DepositionFraction;
+float _SplashMultiplier;
+float _AbsorptionRate;
+float _Roughness;
+float _SpreadSpeed;
+uint  _SurfaceTypeID;
+
+int _MlsParticleCount;
+int _DepositOnlyMlsAirDomainParticles;
+int _MarkMlsParticlesDeposited;
+int _MlsMpmUsesBucketLocalSpace;
+int _EnableSurfaceImpactDiagnostics;
+int _UseMlsParticleVolumeJ;
+int _UseCarreauYasuda;
+float _SurfaceImpactDeltaTime;
+
+float _ZeroShearViscosity;
+float _InfiniteShearViscosity;
+float _RelaxationTime;
+float _YasudaExponent;
+float _FlowIndex;
+float _YieldStress;
+int _ColorMixingMode;
+float _PigmentMixStrength;
+float _PigmentMinReflectance;
+float _PigmentMaxKs;
+
+#define PI 3.14159265f
+#define WE_DEPOSITION 5.0f
+#define WE_SPREAD     25.0f
+#define K_SPLASH      60.0f
+
+#define DIAG_SCANNED          0
+#define DIAG_STATE_ACCEPTED   1
+#define DIAG_NEAR_SURFACE     2
+#define DIAG_IN_GRID          3
+#define DIAG_IMPACTED         4
+#define DIAG_SETTLED          5
+#define DIAG_STATE_SKIPPED    6
+#define DIAG_CELL_WRITES      7
+#define FLOW_ACCUMULATION_SCALE 32.0f
+#define MAX_FOOTPRINT_RADIUS 10
+
+void DiagAdd(uint index, uint value)
+{
+    // Diagnostics run in a separate kernel so the hot impact kernel remains
+    // within D3D11's eight-UAV limit.
+}
+
+float3 SafeNormalize3(float3 value, float3 fallback)
+{
+    float lenSq = dot(value, value);
+    if (lenSq <= 1e-10f)
+        return fallback;
+
+    return value * rsqrt(lenSq);
+}
+
+bool InBounds(int i, int j)
+{
+    return i >= 0 && i < _GridWidth && j >= 0 && j < _GridHeight;
+}
+
+float4 SafePaintColor(float4 color)
+{
+    if (color.a <= 1e-5f)
+        color = float4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    color.a = 1.0f;
+    return saturate(color);
+}
+
+float3 PaintReflectanceToKs(float3 reflectance)
+{
+    float minReflectance = max(_PigmentMinReflectance, 0.001f);
+    float3 r = clamp(
+        saturate(reflectance),
+        float3(minReflectance, minReflectance, minReflectance),
+        float3(0.999f, 0.999f, 0.999f)
+    );
+    float3 one = float3(1.0f, 1.0f, 1.0f);
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    float3 ks = ((one - r) * (one - r)) / (2.0f * r);
+    return min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+}
+
+float3 PaintKsToReflectance(float3 ks)
+{
+    float maxKs = max(_PigmentMaxKs, 1.0f);
+    ks = min(max(ks, float3(0.0f, 0.0f, 0.0f)), float3(maxKs, maxKs, maxKs));
+    return saturate(float3(1.0f, 1.0f, 1.0f) + ks - sqrt(ks * ks + 2.0f * ks));
+}
+
+float3 EncodePaintColorForMix(float3 color)
+{
+    if (_ColorMixingMode == 1)
+        return PaintReflectanceToKs(color);
+
+    return saturate(color);
+}
+
+float3 DecodePaintColorFromMix(float3 encodedColor)
+{
+    if (_ColorMixingMode == 1)
+        return PaintKsToReflectance(encodedColor);
+
+    return saturate(encodedColor);
+}
+
+float3 MixPaintColors(
+    float3 previousColor,
+    float previousWeight,
+    float3 depositedEncoded,
+    float depositedWeight,
+    float totalWeight)
+{
+    previousColor = saturate(previousColor);
+    float3 depositedColor = DecodePaintColorFromMix(depositedEncoded);
+    float safeTotalWeight = max(totalWeight, 1.0f);
+    float3 rgbMix =
+        (
+            previousColor * previousWeight +
+            depositedColor * depositedWeight
+        ) / safeTotalWeight;
+
+    if (_ColorMixingMode != 1)
+        return saturate(rgbMix);
+
+    float3 previousEncoded = EncodePaintColorForMix(previousColor);
+    float3 mixedEncoded =
+        (
+            previousEncoded * previousWeight +
+            depositedEncoded * depositedWeight
+        ) / safeTotalWeight;
+    float3 pigmentMix = DecodePaintColorFromMix(mixedEncoded);
+    return saturate(lerp(rgbMix, pigmentMix, saturate(_PigmentMixStrength)));
+}
+
+float EvaluateImpactViscosity(float shearRate)
+{
+    shearRate = max(shearRate, 0.01f);
+    float viscosity = max(_PaintViscosity, 1e-5f);
+
+    if (_UseCarreauYasuda != 0)
+    {
+        float a = max(_YasudaExponent, 0.25f);
+        float lambdaGamma = max(_RelaxationTime, 0.0f) * shearRate;
+        float exponent = (_FlowIndex - 1.0f) / a;
+        float factor = pow(1.0f + pow(lambdaGamma, a), exponent);
+
+        viscosity =
+            max(_InfiniteShearViscosity, 1e-5f) +
+            (
+                max(_ZeroShearViscosity, _InfiniteShearViscosity) -
+                max(_InfiniteShearViscosity, 1e-5f)
+            ) * factor;
+    }
+
+    viscosity += max(_YieldStress, 0.0f) / shearRate;
+    return max(viscosity, 1e-5f);
+}
+
+bool IsMlsAirDomainState(int state)
+{
+    // PaintBucketSim.Runtime.FluidParticleState:
+    // Jet=4, Emitted=5, Airborne=6, Spilled=7.
+    return state == 4 || state == 5 || state == 6 || state == 7;
+}
+
+bool IsMlsFluidDomainState(int state)
+{
+    // InsideFluid=1, NearBoundary=2, NearHole=3.
+    return state == 1 || state == 2 || state == 3;
+}
+
+bool IsMlsDepositableState(int state)
+{
+    if (state == 0 || state == 8 || state == 9 || state == 10)
+        return false;
+
+    if (_MlsMpmUsesBucketLocalSpace != 0 &&
+        (IsMlsFluidDomainState(state) || state == 4))
+    {
+        return false;
+    }
+
+    if (_DepositOnlyMlsAirDomainParticles != 0)
+        return IsMlsAirDomainState(state);
+
+    return state > 0 && state < 8;
+}
+
+void WriteCell(
+    int i,
+    int j,
+    float weight,
+    int thickness,
+    float4 col,
+    float density,
+    float2 flow)
+{
+    if (!InBounds(i, j))
+        return;
+
+    int idx = j * _GridWidth + i;
+    int w = (int)(thickness * weight);
+    if (w <= 0)
+        return;
+
+    InterlockedAdd(_PaintCellBuffer[idx].ThicknessInt, w);
+    InterlockedMax(_PaintCellBuffer[idx].IsActive, 1u);
+    DiagAdd(DIAG_CELL_WRITES, 1u);
+
+    _PaintCellBuffer[idx].Wetness = 1.0f;
+    _PaintCellBuffer[idx].Age = 0.0f;
+
+    float3 safeColor = saturate(SafePaintColor(col).rgb);
+    float3 encodedColor = EncodePaintColorForMix(safeColor);
+    float3 encodedContribution = clamp(
+        encodedColor * (float)w,
+        float3(0.0f, 0.0f, 0.0f),
+        float3(1000000000.0f, 1000000000.0f, 1000000000.0f)
+    );
+    int3 colorContribution = (int3)round(encodedContribution);
+
+    InterlockedAdd(_DepositColorAccumulator[idx].x, colorContribution.x);
+    InterlockedAdd(_DepositColorAccumulator[idx].y, colorContribution.y);
+    InterlockedAdd(_DepositColorAccumulator[idx].z, colorContribution.z);
+    InterlockedAdd(_DepositColorAccumulator[idx].w, w);
+
+    float2 safeFlow = clamp(
+        flow,
+        float2(-16.0f, -16.0f),
+        float2(16.0f, 16.0f)
+    );
+    float2 flowContributionFloat = clamp(
+        safeFlow * (float)w * FLOW_ACCUMULATION_SCALE,
+        float2(-1000000000.0f, -1000000000.0f),
+        float2(1000000000.0f, 1000000000.0f)
+    );
+    int2 flowContribution = (int2)round(flowContributionFloat);
+
+    InterlockedAdd(_DepositFlowAccumulator[idx].x, flowContribution.x);
+    InterlockedAdd(_DepositFlowAccumulator[idx].y, flowContribution.y);
+
+    uint wasTouched;
+    InterlockedExchange(_DepositTouchedFlags[idx], 1u, wasTouched);
+
+    if (wasTouched == 0u)
+    {
+        uint touchedSlot;
+        InterlockedAdd(_DepositTouchedList[0], 1u, touchedSlot);
+
+        uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+        if (touchedSlot < maxTouched)
+            _DepositTouchedList[touchedSlot + 1u] = (uint)idx;
+    }
+}
+
+float FootprintWeight(
+    int cellU,
+    int cellV,
+    float localU,
+    float localV,
+    float2 tangentDirection,
+    float alongRadius,
+    float acrossRadius,
+    float irregularity,
+    float irregularitySeed)
+{
+    float2 delta =
+        float2((float)cellU + 0.5f - localU, (float)cellV + 0.5f - localV);
+    float2 tangent = SafeNormalize3(
+        float3(tangentDirection, 0.0f),
+        float3(1.0f, 0.0f, 0.0f)
+    ).xy;
+    float2 perpendicular = float2(-tangent.y, tangent.x);
+
+    float along = dot(delta, tangent) / max(alongRadius, 1e-4f);
+    float across = dot(delta, perpendicular) / max(acrossRadius, 1e-4f);
+    float angle = atan2(across, along);
+    float angularShape =
+        sin(angle * 5.0f + irregularitySeed) * 0.12f +
+        sin(angle * 9.0f - irregularitySeed * 1.73f) * 0.07f +
+        sin(angle * 13.0f + irregularitySeed * 0.47f) * 0.035f;
+    float radialScale = max(
+        1.0f + angularShape * saturate(irregularity),
+        0.7f
+    );
+    float radial =
+        sqrt(along * along + across * across) / radialScale;
+
+    if (radial > 1.0f)
+        return 0.0f;
+
+    float core = exp(-radial * radial * 4.0f);
+    float rimDistance = (radial - 0.78f) / 0.14f;
+    float impactRim =
+        exp(-rimDistance * rimDistance) *
+        saturate(irregularity) *
+        0.42f;
+
+    return core + impactRim;
+}
+
+bool DepositSurfaceImpact(
+    uint particleIndex,
+    float3 position,
+    float3 velocity,
+    float mass,
+    float radius,
+    float particleVolume,
+    float4 color,
+    out float3 resolvedPosition,
+    out float3 resolvedVelocity,
+    out float resolvedMass,
+    out float resolvedRadius,
+    out bool settled)
+{
+    resolvedPosition = position;
+    resolvedVelocity = velocity;
+    resolvedMass = max(mass, 0.0f);
+    resolvedRadius = max(radius, 1e-6f);
+    settled = false;
+
+    float3 axisU = SafeNormalize3(_SurfaceAxisU, float3(1.0f, 0.0f, 0.0f));
+    float3 axisV = SafeNormalize3(_SurfaceAxisV, float3(0.0f, 0.0f, 1.0f));
+    float3 normalWS = SafeNormalize3(_SurfaceNormalWS, normalize(cross(axisU, axisV)));
+    float3 previousAxisU = SafeNormalize3(_PreviousSurfaceAxisU, axisU);
+    float3 previousAxisV = SafeNormalize3(_PreviousSurfaceAxisV, axisV);
+    float3 previousNormalWS = SafeNormalize3(_PreviousSurfaceNormalWS, normalWS);
+
+    float sweptDt = max(_SurfaceImpactDeltaTime, 0.0f);
+    float3 previousPosition = position - velocity * sweptDt;
+    float3 currentRelative = position - _SurfaceOriginWS;
+    float3 previousRelative = previousPosition - _PreviousSurfaceOriginWS;
+    float signedDistance = dot(currentRelative, normalWS);
+    float previousSignedDistance = dot(previousRelative, previousNormalWS);
+    float absDistance = abs(signedDistance);
+    float captureDistance =
+        max(_SurfaceImpactCaptureDistance, max(resolvedRadius, _CellSize) * 1.5f);
+    bool sweptImpact =
+        sweptDt > 1e-6f &&
+        abs(previousSignedDistance - signedDistance) > 1e-6f &&
+        previousSignedDistance * signedDistance <= 0.0f;
+    float closestSegmentDistance = sweptImpact ? 0.0f : absDistance;
+
+    if (_SurfaceDoubleSidedImpact != 0)
+    {
+        if (closestSegmentDistance > captureDistance + resolvedRadius)
+            return false;
+    }
+    else if (!sweptImpact && signedDistance > captureDistance + resolvedRadius)
+    {
+        return false;
+    }
+
+    float3 impactPosition = position;
+    float impactSignedDistance = signedDistance;
+
+    if (sweptImpact)
+    {
+        float sweepDenominator = previousSignedDistance - signedDistance;
+        float sweepAlpha =
+            abs(sweepDenominator) > 1e-6f
+                ? previousSignedDistance / sweepDenominator
+                : 1.0f;
+        sweepAlpha = saturate(sweepAlpha);
+        impactPosition = lerp(previousPosition, position, sweepAlpha);
+        impactSignedDistance = dot(impactPosition - _SurfaceOriginWS, normalWS);
+    }
+
+    float3 relative = impactPosition - _SurfaceOriginWS;
+    float surfaceU = dot(relative, axisU);
+    float surfaceV = dot(relative, axisV);
+    float3 currentSurfacePoint =
+        _SurfaceOriginWS + axisU * surfaceU + axisV * surfaceV;
+    float3 previousSurfacePoint =
+        _PreviousSurfaceOriginWS +
+        previousAxisU * surfaceU +
+        previousAxisV * surfaceV;
+    float3 surfaceVelocity =
+        sweptDt > 1e-6f
+            ? (currentSurfacePoint - previousSurfacePoint) / sweptDt
+            : float3(0.0f, 0.0f, 0.0f);
+    float3 relativeVelocity = velocity - surfaceVelocity;
+
+    float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
+    float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
+
+    int baseU = (int)floor(localU);
+    int baseV = (int)floor(localV);
+
+    DiagAdd(DIAG_NEAR_SURFACE, 1u);
+
+    if (baseU < -MAX_FOOTPRINT_RADIUS ||
+        baseU >= _GridWidth + MAX_FOOTPRINT_RADIUS ||
+        baseV < -MAX_FOOTPRINT_RADIUS ||
+        baseV >= _GridHeight + MAX_FOOTPRINT_RADIUS)
+        return false;
+
+    DiagAdd(DIAG_IN_GRID, 1u);
+
+    float speed = length(relativeVelocity);
+    float normalVelocity = dot(relativeVelocity, normalWS);
+    float impactSide =
+        sweptImpact
+            ? (previousSignedDistance >= 0.0f ? 1.0f : -1.0f)
+            : (signedDistance >= 0.0f ? 1.0f : -1.0f);
+
+    if (absDistance < resolvedRadius * 0.5f && abs(normalVelocity) > 1e-5f)
+        impactSide = normalVelocity > 0.0f ? -1.0f : 1.0f;
+
+    float3 velDir =
+        speed > 1e-5f ? relativeVelocity / speed : -normalWS * impactSide;
+
+    float3 tangentDir = velDir - normalWS * dot(velDir, normalWS);
+    float tangentLen = length(tangentDir);
+    if (tangentLen > 1e-5f)
+        tangentDir /= tangentLen;
+    else
+        tangentDir = axisU;
+
+    float tangentU = dot(tangentDir, axisU);
+    float tangentV = dot(tangentDir, axisV);
+
+    float diameter = resolvedRadius * 2.0f;
+    float weber =
+        (_PaintDensity * speed * speed * diameter) /
+        max(_SurfaceTension, 1e-5f);
+    float shearRate = speed / max(diameter, 1e-5f);
+    float impactViscosity = EvaluateImpactViscosity(shearRate);
+    float reynolds =
+        (_PaintDensity * speed * diameter) /
+        impactViscosity;
+    float splashK = weber * sqrt(max(reynolds, 0.0f));
+
+    uint regime = 0u;
+
+    if (weber < WE_DEPOSITION)
+        regime = 0u;
+    else if (weber < WE_SPREAD)
+        regime = 1u;
+    else if (splashK < K_SPLASH)
+        regime = 2u;
+    else
+        regime = 3u;
+
+    float absorption01 = saturate(_AbsorptionRate);
+    float depositionFraction = saturate(_DepositionFraction);
+    depositionFraction = lerp(
+        depositionFraction,
+        1.0f,
+        absorption01 * 0.22f
+    );
+
+    if (regime == 1u)
+        depositionFraction *= 0.95f;
+    else if (regime == 2u)
+        depositionFraction *= 0.70f;
+    else if (regime == 3u)
+        depositionFraction *= 0.50f;
+
+    float spreadSpeed = saturate(_SpreadSpeed);
+    float baseRadiusCells =
+        1.0f +
+        sqrt(max(weber, 0.0f)) *
+        lerp(0.12f, 0.32f, spreadSpeed);
+    baseRadiusCells *= lerp(1.12f, 0.82f, saturate(_Roughness));
+    baseRadiusCells *= lerp(1.0f, 0.84f, absorption01);
+    float alongRadius = clamp(
+        baseRadiusCells * (1.0f + tangentLen * 2.0f),
+        1.0f,
+        (float)MAX_FOOTPRINT_RADIUS
+    );
+    float acrossRadius = clamp(
+        baseRadiusCells,
+        1.0f,
+        (float)MAX_FOOTPRINT_RADIUS * 0.78f
+    );
+    float2 tangentDirection = SafeNormalize3(
+        float3(tangentU, tangentV, 0.0f),
+        float3(1.0f, 0.0f, 0.0f)
+    ).xy;
+    float footprintIrregularity =
+        saturate((weber - 8.0f) / 140.0f) *
+        lerp(0.72f, 1.15f, saturate(_Roughness));
+    float footprintSeed =
+        (float)particleIndex * 0.6180339f +
+        localU * 0.117f +
+        localV * 0.173f;
+
+    float volume =
+        particleVolume > 1e-12f
+            ? particleVolume
+            : resolvedMass / max(_PaintDensity, 1e-5f);
+    float cellArea = max(_CellSizeU * _CellSizeV, 1e-8f);
+    float thickness = volume / cellArea;
+
+    float splash01 =
+        saturate((weber - WE_SPREAD) / 120.0f) *
+        max(_SplashMultiplier, 0.0f);
+
+    float energy = saturate(weber / 150.0f);
+    float bounceFactor =
+        (weber < WE_DEPOSITION) ? 0.0f :
+        (weber < WE_SPREAD)     ? 0.05f :
+        (splashK < K_SPLASH)    ? 0.2f :
+                                  0.5f;
+
+    float3 tangentVelocity = relativeVelocity - normalWS * normalVelocity;
+    resolvedVelocity =
+        surfaceVelocity +
+        tangentVelocity * (1.0f - saturate(depositionFraction));
+    resolvedVelocity += normalWS *
+        (abs(normalVelocity) * bounceFactor * energy * impactSide);
+
+    float3 predictedRelativeVelocity = resolvedVelocity - surfaceVelocity;
+    float predictedNormalSpeed = abs(dot(predictedRelativeVelocity, normalWS));
+    float lowAdhesionSurface =
+        saturate((max(_SplashMultiplier, 0.0f) - 0.9f) / 1.1f) *
+        saturate((0.78f - depositionFraction) / 0.55f) *
+        (1.0f - absorption01);
+    float fluidResidual =
+        saturate((0.45f - impactViscosity) / 0.40f) *
+        saturate((0.20f - max(_YieldStress, 0.0f)) / 0.20f);
+    float highEnergyResidual =
+        saturate((weber - 1200.0f) / 1600.0f);
+    bool allowSweptResidual =
+        lowAdhesionSurface * fluidResidual * highEnergyResidual > 0.08f;
+    bool predictedSettled =
+        (sweptImpact && !allowSweptResidual) ||
+        weber < WE_DEPOSITION ||
+        bounceFactor < 0.05f ||
+        predictedNormalSpeed < 0.5f;
+
+    float effectiveDepositFraction =
+        predictedSettled ? 1.0f : saturate(depositionFraction);
+    int depositInt = (int)round(
+        thickness * effectiveDepositFraction * (float)_ThicknessScale
+    );
+
+    color = SafePaintColor(color);
+
+    float satelliteBudgetFraction =
+        saturate(splash01) * lerp(0.08f, 0.22f, saturate(_SplashMultiplier));
+    satelliteBudgetFraction = min(satelliteBudgetFraction, 0.25f);
+    satelliteBudgetFraction *= lerp(1.0f, 0.38f, absorption01);
+
+    int satelliteBudgetInt =
+        (int)round((float)depositInt * satelliteBudgetFraction);
+    int footprintDepositInt = max(depositInt - satelliteBudgetInt, 0);
+
+    float footprintWeightSum = 0.0f;
+
+    [loop]
+    for (
+        int weightY = -MAX_FOOTPRINT_RADIUS;
+        weightY <= MAX_FOOTPRINT_RADIUS;
+        weightY++
+    )
+    {
+        [loop]
+        for (
+            int weightX = -MAX_FOOTPRINT_RADIUS;
+            weightX <= MAX_FOOTPRINT_RADIUS;
+            weightX++
+        )
+        {
+            int cellU = baseU + weightX;
+            int cellV = baseV + weightY;
+
+            if (!InBounds(cellU, cellV))
+                continue;
+
+            footprintWeightSum += FootprintWeight(
+                cellU,
+                cellV,
+                localU,
+                localV,
+                tangentDirection,
+                alongRadius,
+                acrossRadius,
+                footprintIrregularity,
+                footprintSeed
+            );
+        }
+    }
+
+    float2 impactFlow = tangentDirection * length(tangentVelocity);
+
+    if (footprintDepositInt > 0 && footprintWeightSum > 1e-6f)
+    {
+        [loop]
+        for (
+            int depositY = -MAX_FOOTPRINT_RADIUS;
+            depositY <= MAX_FOOTPRINT_RADIUS;
+            depositY++
+        )
+        {
+            [loop]
+            for (
+                int depositX = -MAX_FOOTPRINT_RADIUS;
+                depositX <= MAX_FOOTPRINT_RADIUS;
+                depositX++
+            )
+            {
+                int cellU = baseU + depositX;
+                int cellV = baseV + depositY;
+
+                float weight = FootprintWeight(
+                    cellU,
+                    cellV,
+                    localU,
+                    localV,
+                    tangentDirection,
+                    alongRadius,
+                    acrossRadius,
+                    footprintIrregularity,
+                    footprintSeed
+                );
+
+                if (weight <= 0.0f)
+                    continue;
+
+                WriteCell(
+                    cellU,
+                    cellV,
+                    weight / footprintWeightSum,
+                    footprintDepositInt,
+                    color,
+                    _PaintDensity,
+                    impactFlow
+                );
+            }
+        }
+    }
+
+    if (satelliteBudgetInt > 0 && splash01 > 0.01f)
+    {
+        float satelliteWeightSum = 0.0f;
+
+        [unroll]
+        for (int weightIndex = 0; weightIndex < 10; weightIndex++)
+        {
+            float weightSeed =
+                (float)particleIndex * 17.113f +
+                (float)weightIndex * 31.719f +
+                localU * 0.137f +
+                localV * 0.271f;
+            float randomWeight =
+                frac(sin(weightSeed + 71.71f) * 13412.9831f);
+            satelliteWeightSum += lerp(0.5f, 1.5f, randomWeight);
+        }
+
+        [unroll]
+        for (int k = 0; k < 10; k++)
+        {
+            float seed =
+                (float)particleIndex * 17.113f +
+                (float)k * 31.719f +
+                localU * 0.137f +
+                localV * 0.271f;
+
+            float r0 = frac(sin(seed) * 43758.5453f);
+            float r1 = frac(sin(seed + 19.19f) * 24634.6345f);
+            float r2 = frac(sin(seed + 71.71f) * 13412.9831f);
+
+            float angle = r0 * 6.2831853f;
+            float dist =
+                lerp(1.4f, 4.8f, r1) *
+                lerp(acrossRadius, alongRadius, 0.65f) *
+                lerp(0.7f, 1.35f, splash01);
+
+            float2 dir = float2(cos(angle), sin(angle));
+            float tangentAlignment =
+                saturate(abs(dot(tangentDirection, dir)));
+
+            dist *= lerp(0.75f, 1.35f, tangentAlignment);
+
+            int satelliteU = baseU + (int)round(dir.x * dist);
+            int satelliteV = baseV + (int)round(dir.y * dist);
+            int satelliteThickness = (int)round(
+                (float)satelliteBudgetInt *
+                lerp(0.5f, 1.5f, r2) /
+                max(satelliteWeightSum, 1e-5f)
+            );
+
+            WriteCell(
+                satelliteU,
+                satelliteV,
+                1.0f,
+                satelliteThickness,
+                color,
+                _PaintDensity,
+                impactFlow * 0.75f
+            );
+        }
+    }
+
+    float2 jitter = float2(
+        frac(sin(localU * 12.3f + particleIndex) * 43758.5f),
+        frac(sin(localV * 91.7f + particleIndex) * 23421.1f)
+    ) - 0.5f;
+
+    float jitterLength = length(jitter);
+    if (jitterLength > 1e-5f)
+    {
+        float splashStrength =
+            saturate((weber - WE_SPREAD) / 100.0f) *
+            max(_SplashMultiplier, 1.0f);
+
+        float3 jitterWorld =
+            axisU * (jitter.x / jitterLength) +
+            axisV * (jitter.y / jitterLength);
+
+        resolvedVelocity += jitterWorld * splashStrength * speed * 0.03f;
+    }
+
+    if (bounceFactor >= 0.05f && weber >= WE_DEPOSITION)
+    {
+        float targetDistance = impactSide * (resolvedRadius + 1e-4f);
+        resolvedPosition = impactPosition +
+            normalWS * (targetDistance - impactSignedDistance);
+    }
+
+    float3 relativeResolvedVelocity = resolvedVelocity - surfaceVelocity;
+    resolvedVelocity -=
+        normalWS * dot(relativeResolvedVelocity, normalWS) * 0.02f;
+
+    float remainingFraction = saturate(1.0f - effectiveDepositFraction);
+    resolvedMass *= remainingFraction;
+    resolvedRadius *= pow(max(remainingFraction, 0.0f), 0.3333333f);
+
+    float resolvedNormalSpeed = abs(dot(resolvedVelocity, normalWS));
+    settled =
+        predictedSettled ||
+        resolvedNormalSpeed < 0.5f ||
+        resolvedRadius < 0.001f ||
+        resolvedMass < 0.000001f;
+
+    if (settled)
+        resolvedVelocity = float3(0.0f, 0.0f, 0.0f);
+
+    return true;
+}
+
+[numthreads(64, 1, 1)]
+void CSMainMlsMpm(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)max(_MlsParticleCount, 0))
+        return;
+
+    DiagAdd(DIAG_SCANNED, 1u);
+
+    float4 stateAgeId = _MlsParticleStateAgeId[i];
+    int state = (int)round(stateAgeId.x);
+
+    if (!IsMlsDepositableState(state))
+    {
+        DiagAdd(DIAG_STATE_SKIPPED, 1u);
+        return;
+    }
+
+    DiagAdd(DIAG_STATE_ACCEPTED, 1u);
+
+    float4 pr = _MlsParticlePositionRadius[i];
+    float4 vm = _MlsParticleVelocityMass[i];
+    float4 col = _MlsParticleColor[i];
+    float4 volumeJ = _MlsParticleVolumeJ[i];
+    float fallbackVolume = max(vm.w, 0.0f) / max(_PaintDensity, 1e-5f);
+    float restMass =
+        max(volumeJ.x, 0.0f) * max(volumeJ.z, _PaintDensity);
+    float remainingMassFraction =
+        restMass > 1e-10f ? saturate(vm.w / restMass) : 1.0f;
+    float particleVolume =
+        _UseMlsParticleVolumeJ != 0 && volumeJ.x > 0.0f
+            ? volumeJ.x *
+              clamp(volumeJ.y, 0.25f, 4.0f) *
+              remainingMassFraction
+            : fallbackVolume;
+
+    float3 resolvedPosition;
+    float3 resolvedVelocity;
+    float resolvedMass;
+    float resolvedRadius;
+    bool settled;
+
+    bool impacted = DepositSurfaceImpact(
+        i,
+        pr.xyz,
+        vm.xyz,
+        vm.w,
+        pr.w,
+        particleVolume,
+        col,
+        resolvedPosition,
+        resolvedVelocity,
+        resolvedMass,
+        resolvedRadius,
+        settled
+    );
+
+    if (!impacted || _MarkMlsParticlesDeposited == 0)
+        return;
+
+    DiagAdd(DIAG_IMPACTED, 1u);
+
+    _MlsParticlePositionRadius[i] = float4(resolvedPosition, max(resolvedRadius, 0.0f));
+    _MlsParticleVelocityMass[i] = float4(resolvedVelocity, max(resolvedMass, 0.0f));
+
+    if (settled)
+    {
+        DiagAdd(DIAG_SETTLED, 1u);
+        stateAgeId.x = _AbsorptionRate >= 0.95f ? 9.0f : 8.0f;
+        stateAgeId.z = 0.0f;
+    }
+    else
+    {
+        stateAgeId.x = 6.0f;
+        stateAgeId.z = 0.0f;
+    }
+
+    _MlsParticleStateAgeId[i] = stateAgeId;
+}
+
+[numthreads(64, 1, 1)]
+void CollectSurfaceImpactDiagnostics(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)max(_MlsParticleCount, 0))
+        return;
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_SCANNED], 1u);
+
+    int state = (int)round(_MlsParticleStateAgeId[i].x);
+    bool accepted =
+        IsMlsDepositableState(state) ||
+        state == 8 ||
+        state == 9;
+
+    if (!accepted)
+    {
+        InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_STATE_SKIPPED], 1u);
+        return;
+    }
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_STATE_ACCEPTED], 1u);
+
+    float3 axisU = SafeNormalize3(_SurfaceAxisU, float3(1.0f, 0.0f, 0.0f));
+    float3 axisV = SafeNormalize3(_SurfaceAxisV, float3(0.0f, 0.0f, 1.0f));
+    float3 normalWS = SafeNormalize3(
+        _SurfaceNormalWS,
+        normalize(cross(axisU, axisV))
+    );
+    float4 positionRadius = _MlsParticlePositionRadius[i];
+    float3 relative = positionRadius.xyz - _SurfaceOriginWS;
+    float distanceToSurface = abs(dot(relative, normalWS));
+    float captureDistance =
+        max(
+            _SurfaceImpactCaptureDistance,
+            max(positionRadius.w, _CellSize) * 1.5f
+        );
+
+    if (distanceToSurface > captureDistance + positionRadius.w)
+        return;
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_NEAR_SURFACE], 1u);
+
+    float localU = dot(relative, axisU) / max(_CellSizeU, 1e-6f);
+    float localV = dot(relative, axisV) / max(_CellSizeV, 1e-6f);
+
+    if (localU < -(float)MAX_FOOTPRINT_RADIUS ||
+        localU >= (float)_GridWidth + (float)MAX_FOOTPRINT_RADIUS ||
+        localV < -(float)MAX_FOOTPRINT_RADIUS ||
+        localV >= (float)_GridHeight + (float)MAX_FOOTPRINT_RADIUS)
+    {
+        return;
+    }
+
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_IN_GRID], 1u);
+    InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_IMPACTED], 1u);
+
+    if (state == 8 || state == 9)
+    {
+        InterlockedAdd(_SurfaceImpactDiagnostics[DIAG_SETTLED], 1u);
+    }
+
+    if (i == 0u)
+    {
+        uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+        uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+        _SurfaceImpactDiagnostics[DIAG_CELL_WRITES] = touchedCount;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void BuildResolveDispatchArgs(uint3 id : SV_DispatchThreadID)
+{
+    uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+    uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+
+    _DepositResolveDispatchArgs[0] = (touchedCount + 63u) / 64u;
+    _DepositResolveDispatchArgs[1] = 1u;
+    _DepositResolveDispatchArgs[2] = 1u;
+}
+
+[numthreads(64, 1, 1)]
+void ResolveDeposits(uint3 id : SV_DispatchThreadID)
+{
+    uint maxTouched = (uint)max(_GridWidth * _GridHeight, 0);
+    uint touchedCount = min(_DepositTouchedList[0], maxTouched);
+
+    if (id.x >= touchedCount)
+        return;
+
+    int index = (int)_DepositTouchedList[id.x + 1u];
+    int4 colorAccum = _DepositColorAccumulator[index];
+    int2 flowAccum = _DepositFlowAccumulator[index];
+
+    if (colorAccum.w > 0)
+    {
+        PaintCellData cell = _PaintCellBuffer[index];
+        int totalThickness = max(cell.ThicknessInt, 0);
+        int depositedThickness = min(colorAccum.w, totalThickness);
+        int previousThickness = max(totalThickness - depositedThickness, 0);
+
+        float3 previousColor = SafePaintColor(cell.Color).rgb;
+        float3 depositedEncodedColor =
+            (float3)colorAccum.xyz / max((float)depositedThickness, 1.0f);
+        float3 mixedColor = MixPaintColors(
+            previousColor,
+            (float)previousThickness,
+            depositedEncodedColor,
+            (float)depositedThickness,
+            (float)totalThickness
+        );
+
+        float2 depositedFlow =
+            (float2)flowAccum /
+            max(
+                (float)depositedThickness * FLOW_ACCUMULATION_SCALE,
+                1.0f
+            );
+        float depositBlend =
+            saturate((float)depositedThickness / max((float)totalThickness, 1.0f));
+
+        cell.Color = float4(saturate(mixedColor), 1.0f);
+        cell.FlowVelocity = lerp(cell.FlowVelocity, depositedFlow, depositBlend);
+        cell.PaintDensity = max(_PaintDensity, 1.0f);
+        cell.Wetness = 1.0f;
+        cell.Age = 0.0f;
+        cell.IsActive = totalThickness > 0 ? 1u : 0u;
+
+        _PaintCellBuffer[index] = cell;
+    }
+
+    _DepositColorAccumulator[index] = int4(0, 0, 0, 0);
+    _DepositFlowAccumulator[index] = int2(0, 0);
+    _DepositTouchedFlags[index] = 0u;
+}
+
+[numthreads(1, 1, 1)]
+void ResetDepositTracking(uint3 id : SV_DispatchThreadID)
+{
+    _DepositTouchedList[0] = 0u;
+    _DepositResolveDispatchArgs[0] = 0u;
+    _DepositResolveDispatchArgs[1] = 1u;
+    _DepositResolveDispatchArgs[2] = 1u;
+}
