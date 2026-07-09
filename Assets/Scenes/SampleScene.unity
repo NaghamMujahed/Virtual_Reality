@@ -2158,6 +2158,7 @@ GameObject:
   - component: {fileID: 232214413}
   - component: {fileID: 232214415}
   - component: {fileID: 232214414}
+  - component: {fileID: 232214416}
   m_Layer: 0
   m_Name: Camera_Center
   m_TagString: Untagged
@@ -2275,6 +2276,40 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
+--- !u!114 &232214416
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 232214412}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1dbb153425fef54c8a82d4b67ac538e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractiveCamera
+  target: {fileID: 1017940780}
+  targetOffset: {x: 0, y: 0.75, z: 0}
+  followTarget: 1
+  defaultDistance: 6
+  minDistance: 1.5
+  maxDistance: 18
+  defaultYaw: 35
+  defaultPitch: 28
+  yawSpeed: 180
+  pitchSpeed: 120
+  minPitch: -10
+  maxPitch: 80
+  zoomSpeed: 2.5
+  zoomSmoothness: 10
+  panSpeed: 0.015
+  positionSmoothTime: 0.06
+  rotationSmoothTime: 0.04
+  enableAutoOrbit: 0
+  autoOrbitSpeed: 8
+  autoOrbitDelay: 3
+  blockInputOverUI: 1
+  lockCursorWhileOrbiting: 0
 --- !u!1 &254908558
 GameObject:
   m_ObjectHideFlags: 0
@@ -6608,6 +6643,7 @@ GameObject:
   - component: {fileID: 948780006}
   - component: {fileID: 948780008}
   - component: {fileID: 948780007}
+  - component: {fileID: 948780009}
   m_Layer: 0
   m_Name: Camera_Diagonal_Hero_View Right
   m_TagString: Untagged
@@ -6705,9 +6741,9 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 52
+  near clip plane: 0.03
+  far clip plane: 500
+  field of view: 55
   orthographic: 0
   orthographic size: 5
   m_Depth: 0
@@ -6725,6 +6761,40 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
+--- !u!114 &948780009
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 948780005}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1dbb153425fef54c8a82d4b67ac538e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractiveCamera
+  target: {fileID: 1017940780}
+  targetOffset: {x: 0, y: 0.75, z: 0}
+  followTarget: 1
+  defaultDistance: 6
+  minDistance: 1.5
+  maxDistance: 18
+  defaultYaw: 35
+  defaultPitch: 28
+  yawSpeed: 180
+  pitchSpeed: 120
+  minPitch: -10
+  maxPitch: 80
+  zoomSpeed: 2.5
+  zoomSmoothness: 10
+  panSpeed: 0.015
+  positionSmoothTime: 0.06
+  rotationSmoothTime: 0.04
+  enableAutoOrbit: 0
+  autoOrbitSpeed: 8
+  autoOrbitDelay: 3
+  blockInputOverUI: 1
+  lockCursorWhileOrbiting: 0
 --- !u!1 &960015465
 GameObject:
   m_ObjectHideFlags: 0
@@ -7077,6 +7147,37 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1009642696}
   m_Mesh: {fileID: 1663697495942858237, guid: d1b62b4a05d05754aafb68119b4c1e99, type: 3}
+--- !u!1 &1017940779
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1017940780}
+  m_Layer: 0
+  m_Name: CameraTarget
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1017940780
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1017940779}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 2.21, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1851241737}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1032295292
 GameObject:
   m_ObjectHideFlags: 0
@@ -14405,6 +14506,7 @@ Transform:
   - {fileID: 1857443996}
   - {fileID: 948780006}
   - {fileID: 232214413}
+  - {fileID: 1017940780}
   m_Father: {fileID: 960015466}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1853843936
@@ -14532,6 +14634,7 @@ GameObject:
   - component: {fileID: 1857443996}
   - component: {fileID: 1857443997}
   - component: {fileID: 1857443998}
+  - component: {fileID: 1857443999}
   m_Layer: 0
   m_Name: Camera_Diagonal_Hero_View Left
   m_TagString: Untagged
@@ -14585,9 +14688,9 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 52
+  near clip plane: 0.03
+  far clip plane: 500
+  field of view: 55
   orthographic: 0
   orthographic size: 5
   m_Depth: 0
@@ -14649,6 +14752,40 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &1857443999
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1857443995}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1dbb153425fef54c8a82d4b67ac538e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractiveCamera
+  target: {fileID: 1017940780}
+  targetOffset: {x: 0, y: 0.75, z: 0}
+  followTarget: 1
+  defaultDistance: 6
+  minDistance: 1.5
+  maxDistance: 18
+  defaultYaw: 35
+  defaultPitch: 28
+  yawSpeed: 180
+  pitchSpeed: 120
+  minPitch: -10
+  maxPitch: 80
+  zoomSpeed: 2.5
+  zoomSmoothness: 10
+  panSpeed: 0.015
+  positionSmoothTime: 0.06
+  rotationSmoothTime: 0.04
+  enableAutoOrbit: 0
+  autoOrbitSpeed: 8
+  autoOrbitDelay: 3
+  blockInputOverUI: 1
+  lockCursorWhileOrbiting: 0
 --- !u!1 &1866750717
 GameObject:
   m_ObjectHideFlags: 0
@@ -14660,6 +14797,7 @@ GameObject:
   - component: {fileID: 1866750718}
   - component: {fileID: 1866750719}
   - component: {fileID: 1866750720}
+  - component: {fileID: 1866750721}
   m_Layer: 0
   m_Name: Camera_Top_View
   m_TagString: Untagged
@@ -14713,9 +14851,9 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 90
+  near clip plane: 0.03
+  far clip plane: 500
+  field of view: 55
   orthographic: 0
   orthographic size: 5
   m_Depth: 0
@@ -14777,6 +14915,40 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &1866750721
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1866750717}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1dbb153425fef54c8a82d4b67ac538e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractiveCamera
+  target: {fileID: 1017940780}
+  targetOffset: {x: 0, y: 0.75, z: 0}
+  followTarget: 1
+  defaultDistance: 6
+  minDistance: 1.5
+  maxDistance: 18
+  defaultYaw: 35
+  defaultPitch: 28
+  yawSpeed: 180
+  pitchSpeed: 120
+  minPitch: -10
+  maxPitch: 80
+  zoomSpeed: 2.5
+  zoomSmoothness: 10
+  panSpeed: 0.015
+  positionSmoothTime: 0.06
+  rotationSmoothTime: 0.04
+  enableAutoOrbit: 0
+  autoOrbitSpeed: 8
+  autoOrbitDelay: 3
+  blockInputOverUI: 1
+  lockCursorWhileOrbiting: 0
 --- !u!1 &1871561926
 GameObject:
   m_ObjectHideFlags: 0

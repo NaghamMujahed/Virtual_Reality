@@ -18,6 +18,9 @@ MonoBehaviour:
   cellSizeMeters: 0.01
   gridBoundaryMarginMeters: 0.02
   rejectUndersizedGrid: 1
+  autoSizeBucketLocalGrid: 1
+  maxAutoGridResolution: 128
+  autoGridResolutionMargin: 2
   bucketFrameAccelerationFilterHalfLife: 0.025
   maxBucketFrameLinearAcceleration: 80
   maxBucketFrameAngularAcceleration: 240
@@ -140,6 +143,13 @@ MonoBehaviour:
   maxJetColumnVelocityCorrectionPerSubstep: 0.5
   jetColumnDragScale: 0.7
   jetColumnMinAxialSpeed: 0.5
+  enableTorricelliOutflow: 1
+  outflowDischargeReferenceViscosity: 3
+  outflowBaseDischargeCoefficient: 0.85
+  outflowMinDischargeCoefficient: 0.2
+  outflowMaxExitSpeed: 10
+  outflowAperturePaddingMeters: 0
+  autoCenterBucketLocalGrid: 1
   enableProjectionDivergenceComputation: 1
   projectionDivergenceScale: 1
   maxAbsProjectionDivergence: 50

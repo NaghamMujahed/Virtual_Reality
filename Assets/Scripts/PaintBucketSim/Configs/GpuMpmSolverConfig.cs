@@ -43,6 +43,17 @@ namespace PaintBucketSim.Configs
         [Tooltip("Stop the GPU step when the configured grid cannot contain the rotating bucket plus transfer stencil.")]
         public bool rejectUndersizedGrid = true;
 
+        [Tooltip("Automatically grow the grid resolution at initialization so the configured cell size always contains the bucket + transfer support + hole jet-collars. gridResolution above is then only a lower bound. Prevents the 'grid does not contain the bucket' error when the bucket is enlarged.")]
+        public bool autoSizeBucketLocalGrid = true;
+
+        [Tooltip("Upper clamp on the auto-sized resolution per axis, to bound GPU memory. If the bucket needs more than this, raise cellSizeMeters or this cap.")]
+        [Range(16, 256)]
+        public int maxAutoGridResolution = 128;
+
+        [Tooltip("Extra cells of headroom added on each side when auto-sizing the grid.")]
+        [Range(0, 8)]
+        public int autoGridResolutionMargin = 2;
+
         [Header("Bucket-Local Non-Inertial Frame")]
         [Tooltip("Half-life used to suppress XPBD acceleration noise without damping physical fluid velocity.")]
         [Min(0.0f)]
@@ -491,6 +502,32 @@ namespace PaintBucketSim.Configs
         [Min(0.01f)]
         public float jetColumnMinAxialSpeed = 0.5f;
 
+        [Header("Outflow Physics (G33)")]
+        [Tooltip("Drive hole exit speed from hydrostatic head (Torricelli v=sqrt(2 g h)) modulated by a viscosity discharge coefficient, instead of only the per-hole exitVelocityBoost. Deeper fluid and thinner paint jet faster; a hole higher on the wall (less head) jets slower.")]
+        public bool enableTorricelliOutflow = true;
+
+        [Tooltip("Reference viscosity (Pa.s) for the outflow discharge coefficient. Higher keeps thick paint flowing faster relative to thin paint.")]
+        [Min(0.01f)]
+        public float outflowDischargeReferenceViscosity = 3.0f;
+
+        [Tooltip("Base orifice discharge coefficient for a thin (water-like) fluid. Real orifices are about 0.6-0.98.")]
+        [Range(0.1f, 1.0f)]
+        public float outflowBaseDischargeCoefficient = 0.85f;
+
+        [Tooltip("Lower clamp for the viscosity-reduced discharge coefficient, so very thick paint still oozes out.")]
+        [Range(0.02f, 1.0f)]
+        public float outflowMinDischargeCoefficient = 0.2f;
+
+        [Tooltip("Clamp on the Torricelli exit speed (m/s).")]
+        [Min(0.0f)]
+        public float outflowMaxExitSpeed = 6.0f;
+
+        [Tooltip("Extra padding (metres) added to the hole half-extents when deciding whether a particle may pass through / exit. 0 = the outflow diameter matches the configured hole. Negative keeps the stream strictly inside the hole.")]
+        public float outflowAperturePaddingMeters = 0.0f;
+
+        [Tooltip("Center the fixed-size bucket-local MPM grid on the bucket (plus each hole's jet-collar region) each step instead of using the fixed gridOriginLocal. Gives symmetric coverage so side-wall holes get the same jet-collar support as bottom holes.")]
+        public bool autoCenterBucketLocalGrid = true;
+
         [Header("MLS-MPM Projection Divergence")]
         public bool enableProjectionDivergenceComputation = true;
 
@@ -570,6 +607,9 @@ namespace PaintBucketSim.Configs
 
             if (cellSizeMeters < 0.005f)
                 cellSizeMeters = 0.005f;
+
+            maxAutoGridResolution = Mathf.Clamp(maxAutoGridResolution, 16, 256);
+            autoGridResolutionMargin = Mathf.Clamp(autoGridResolutionMargin, 0, 8);
 
             gridBoundaryMarginMeters = Mathf.Max(
                 gridBoundaryMarginMeters,
@@ -775,6 +815,16 @@ namespace PaintBucketSim.Configs
 
             if (holeOutflowExitDistanceMeters < 0.0f)
                 holeOutflowExitDistanceMeters = 0.0f;
+
+            outflowDischargeReferenceViscosity = Mathf.Max(
+                outflowDischargeReferenceViscosity, 0.01f);
+            outflowBaseDischargeCoefficient = Mathf.Clamp(
+                outflowBaseDischargeCoefficient, 0.1f, 1.0f);
+            outflowMinDischargeCoefficient = Mathf.Clamp(
+                outflowMinDischargeCoefficient,
+                0.02f,
+                outflowBaseDischargeCoefficient);
+            outflowMaxExitSpeed = Mathf.Max(outflowMaxExitSpeed, 0.0f);
 
             jetMpmCollarDurationSeconds = Mathf.Max(
                 jetMpmCollarDurationSeconds,

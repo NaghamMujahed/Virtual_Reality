@@ -48,14 +48,14 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: -0.055, y: -0.275, z: -0.018}
     localNormal: {x: 0, y: -1, z: 0}
-    radiusMeters: 0.001
+    radiusMeters: 0.02
     sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
     edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 0
+    active: 1
   - name: Blue Compartment Round Hole
     shape: 0
     autoPlaceAtBottomCenter: 0
@@ -74,14 +74,14 @@ MonoBehaviour:
     autoPlaceAtBottomCenter: 0
     localCenter: {x: 0.18, y: -0.2, z: 0}
     localNormal: {x: 1, y: 0, z: 0}
-    radiusMeters: 0.002
+    radiusMeters: 0.01
     sizeMeters: {x: 0.012, y: 0.012}
     localTangent: {x: 1, y: 0, z: 0}
     edgeSoftnessMeters: 0.003
     flowMultiplier: 0.62
     exitVelocityBoostMetersPerSecond: 0.1
     wallThicknessMeters: 0.01
-    active: 1
+    active: 0
   visualRadialSegments: 96
   bucketColor: {r: 0.58, g: 0.62, b: 0.65, a: 1}
   holeColor: {r: 0.4757201, g: 0.49056602, b: 0.11801351, a: 1}

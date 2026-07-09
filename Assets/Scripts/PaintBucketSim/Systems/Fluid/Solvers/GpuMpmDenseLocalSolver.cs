@@ -85,6 +85,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private readonly Stopwatch _cpuDispatchWatch = new Stopwatch();
         private readonly Stopwatch _gpuStageProfileWatch = new Stopwatch();
         private Vector3 _runtimeGridOriginLocal;
+        private Vector3Int _runtimeGridResolution;
+        private int _runtimeGridNodeCount;
+        private Vector3 _runtimeGridSizeWorld;
+        private float _localGravityMagnitude;
         private bool _bucketLocalParticlesInitialized;
         private bool _hasBucketFrameHistory;
         private Vector3 _previousBucketOriginWorld;
@@ -204,6 +208,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             gpuBuffers.SetExternalGpuSimulationMode(true);
             gpuBuffers.SetMpmParticlesUseBucketLocalSpace(false);
 
+            // Fit the grid resolution to the bucket before allocating grid buffers.
+            ComputeRuntimeGridLayout(context);
             AllocateGridBuffers(context);
 
             _stats = new FluidSolverStats
@@ -213,10 +219,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 particleCount = gpuBuffers.UploadedParticleCount,
                 solverIterations = 1,
 
-                gpuGridResolutionX = context.GpuMpmConfig.gridResolution.x,
-                gpuGridResolutionY = context.GpuMpmConfig.gridResolution.y,
-                gpuGridResolutionZ = context.GpuMpmConfig.gridResolution.z,
-                gpuGridNodeCount = context.GpuMpmConfig.GridNodeCount,
+                gpuGridResolutionX = _runtimeGridResolution.x,
+                gpuGridResolutionY = _runtimeGridResolution.y,
+                gpuGridResolutionZ = _runtimeGridResolution.z,
+                gpuGridNodeCount = _runtimeGridNodeCount,
                 gpuCellSizeMeters = context.GpuMpmConfig.cellSizeMeters
             };
 
@@ -226,7 +232,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             {
                 UnityEngine.Debug.Log(
                     "GpuMpmDenseLocalSolver: Initialized dense local GPU MPM prototype. " +
-                    $"Particles={gpuBuffers.UploadedParticleCount}, GridNodes={context.GpuMpmConfig.GridNodeCount}"
+                    $"Particles={gpuBuffers.UploadedParticleCount}, " +
+                    $"GridRes={_runtimeGridResolution.x}x{_runtimeGridResolution.y}x{_runtimeGridResolution.z}, " +
+                    $"GridNodes={_runtimeGridNodeCount}"
                 );
             }
         }
@@ -486,7 +494,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 return;
 
             int particleCount = solverContext.GpuBufferSet.UploadedParticleCount;
-            int gridNodeCount = solverContext.GpuMpmConfig.GridNodeCount;
+            int gridNodeCount = _runtimeGridNodeCount;
 
             if (particleCount <= 0 || gridNodeCount <= 0)
                 return;
@@ -519,8 +527,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (projectionPathEnabled)
             {
                 _activeProjectionMin = Vector3Int.zero;
-                _activeProjectionSize =
-                    solverContext.GpuMpmConfig.gridResolution;
+                _activeProjectionSize = _runtimeGridResolution;
                 _activeProjectionNodeCount = gridNodeCount;
                 _useActiveProjectionBoundsThisStep = false;
                 UpdateSparseProjectionPressureDispatchMode(solverContext);
@@ -799,9 +806,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 gpuMpmCoreMilliseconds +
                 gpuProjectionMilliseconds +
                 gpuParticlePostMilliseconds;
-            _stats.gpuGridResolutionX = solverContext.GpuMpmConfig.gridResolution.x;
-            _stats.gpuGridResolutionY = solverContext.GpuMpmConfig.gridResolution.y;
-            _stats.gpuGridResolutionZ = solverContext.GpuMpmConfig.gridResolution.z;
+            _stats.gpuGridResolutionX = _runtimeGridResolution.x;
+            _stats.gpuGridResolutionY = _runtimeGridResolution.y;
+            _stats.gpuGridResolutionZ = _runtimeGridResolution.z;
             _stats.gpuGridNodeCount = gridNodeCount;
             _stats.gpuCellSizeMeters = solverContext.GpuMpmConfig.cellSizeMeters;
             _stats.gpuGridDensityPredictorUsed = true;
@@ -1153,7 +1160,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
         private void AllocateGridBuffers(FluidSolverContext context)
         {
-            int nodeCount = Mathf.Max(1, context.GpuMpmConfig.GridNodeCount);
+            int nodeCount = Mathf.Max(1, _runtimeGridNodeCount);
 
             _gridAccumIntBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
@@ -1314,7 +1321,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _mpmTileSizeShift = 3;
             }
 
-            Vector3Int resolution = config.gridResolution;
+            Vector3Int resolution = _runtimeGridResolution;
             _mpmTileResolution = new Vector3Int(
                 Mathf.Max(1, Mathf.CeilToInt((float)resolution.x / _mpmTileSizeCells)),
                 Mathf.Max(1, Mathf.CeilToInt((float)resolution.y / _mpmTileSizeCells)),
@@ -1381,10 +1388,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         {
             ComputeShader compute = context.GpuMpmConfig.denseLocalMpmCompute;
 
-            Vector3Int res = context.GpuMpmConfig.gridResolution;
+            Vector3Int res = _runtimeGridResolution;
 
             compute.SetInt("_ParticleCount", context.GpuBufferSet.UploadedParticleCount);
-            compute.SetInt("_GridNodeCount", context.GpuMpmConfig.GridNodeCount);
+            compute.SetInt("_GridNodeCount", _runtimeGridNodeCount);
 
             compute.SetInts("_GridResolution", res.x, res.y, res.z);
             compute.SetVector("_GridOrigin", _runtimeGridOriginLocal);
@@ -1521,6 +1528,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetVector("_Gravity", gravityLocal);
             compute.SetVector("_GravityWorld", gravityWorld);
+            _localGravityMagnitude = gravityWorld.magnitude;
             compute.SetVector(
                 "_BucketFrameLinearAccelerationLocal",
                 _bucketFrameLinearAccelerationLocal
@@ -1770,7 +1778,57 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 context.GpuMpmConfig.killAirborneBelowWorldY ? 1 : 0
             );
 
+            SetOutflowPhysicsParameters(context, compute);
             SetJetColumnCoherenceParameters(context, compute);
+        }
+
+        // G33: bind the aperture + Torricelli outflow parameters. The exit
+        // aperture is driven directly from the configured hole so the outflow
+        // diameter matches; the exit speed comes from hydrostatic head above the
+        // hole scaled by a viscosity discharge coefficient.
+        private void SetOutflowPhysicsParameters(
+            FluidSolverContext context,
+            ComputeShader compute)
+        {
+            GpuMpmSolverConfig cfg = context.GpuMpmConfig;
+
+            compute.SetFloat("_OutflowAperturePadding", cfg.outflowAperturePaddingMeters);
+            compute.SetInt(
+                "_EnableTorricelliOutflow",
+                cfg.enableTorricelliOutflow ? 1 : 0);
+            compute.SetFloat("_OutflowMaxExitSpeed", cfg.outflowMaxExitSpeed);
+            compute.SetFloat("_LocalGravityMagnitude", _localGravityMagnitude);
+
+            // Viscosity-driven discharge coefficient (thin paint jets faster).
+            float viscosity = cfg.lowShearViscosity;
+            if (cfg.usePaintMaterialConfigRheology &&
+                context.MaterialConfig != null)
+            {
+                viscosity = Mathf.Max(
+                    context.MaterialConfig.EvaluateViscosity(0.5f, 20.0f),
+                    1e-4f);
+            }
+            float refVisc = Mathf.Max(cfg.outflowDischargeReferenceViscosity, 0.01f);
+            float cd = cfg.outflowBaseDischargeCoefficient *
+                       refVisc / (refVisc + Mathf.Max(viscosity, 0.0f));
+            cd = Mathf.Clamp(
+                cd,
+                cfg.outflowMinDischargeCoefficient,
+                cfg.outflowBaseDischargeCoefficient);
+            compute.SetFloat("_OutflowDischargeCoefficient", cd);
+
+            // Estimated free-surface height in bucket-local Y for the head term.
+            float bucketHeight = context.BucketSystem != null &&
+                                 context.BucketSystem.Config != null
+                ? Mathf.Max(context.BucketSystem.Config.heightMeters, 0.0f)
+                : 0.0f;
+            float surface01 = _stats.gpuDiagnosticsReady
+                ? _stats.gpuMaximumFillHeight01
+                : (context.FluidConfig != null
+                    ? Mathf.Clamp01(context.FluidConfig.fillFraction01)
+                    : 0.5f);
+            float surfaceLocalY = bucketHeight * (surface01 - 0.5f);
+            compute.SetFloat("_FluidSurfaceLocalY", surfaceLocalY);
         }
 
         // G31: bind the coherent ballistic jet-column parameters. When material
@@ -2795,7 +2853,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (_useActiveProjectionBoundsThisStep)
                 return _activeProjectionSize;
 
-            return context.GpuMpmConfig.gridResolution;
+            return _runtimeGridResolution;
         }
 
         private void DispatchProjectionKernel(
@@ -3007,61 +3065,179 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _hasBucketFrameHistory = true;
         }
 
+        // Local-space AABB the grid must contain: the bucket + quadratic transfer
+        // support, expanded toward each active hole's outward normal to hold the
+        // exit + jet-collar region (bottom or side wall). Shared by init-time
+        // auto-sizing and per-step placement so the two never disagree.
+        private bool ComputeRequiredLocalBounds(
+            FluidSolverContext context,
+            out Vector3 requiredMin,
+            out Vector3 requiredMax)
+        {
+            requiredMin = Vector3.zero;
+            requiredMax = Vector3.zero;
+
+            if (context.BucketSystem == null ||
+                !context.BucketSystem.IsInitialized ||
+                context.BucketSystem.Config == null)
+            {
+                return false;
+            }
+
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            var bucketConfig = context.BucketSystem.Config;
+
+            float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
+            float maxRadius = Mathf.Max(
+                bucketConfig.topRadiusMeters,
+                bucketConfig.bottomRadiusMeters
+            );
+            float support =
+                Mathf.Max(config.gridBoundaryMarginMeters, 0.0f) +
+                2.0f * config.cellSizeMeters;
+            // Always reserve jet-collar headroom, independent of the
+            // enableJetMpmCollar toggle, so toggling it at runtime never makes the
+            // required region exceed the fixed-resolution grid (which cannot be
+            // reallocated mid-play).
+            float jetSupport =
+                Mathf.Max(config.jetMpmCollarMaxDistanceMeters, 0.0f);
+
+            requiredMin = new Vector3(
+                -maxRadius - support,
+                -halfHeight - support,
+                -maxRadius - support
+            );
+            requiredMax = new Vector3(
+                maxRadius + support,
+                halfHeight + support,
+                maxRadius + support
+            );
+
+            float holeSupport = jetSupport + support;
+            BucketHoleConfig[] holes = bucketConfig.holes;
+            if (holes != null)
+            {
+                for (int i = 0; i < holes.Length; i++)
+                {
+                    BucketHoleConfig hole = holes[i];
+                    if (hole == null || !hole.active)
+                        continue;
+
+                    Vector3 center = bucketConfig.GetResolvedHoleLocalCenter(hole);
+                    Vector3 normal =
+                        bucketConfig.GetResolvedHoleLocalNormal(hole).normalized;
+                    Vector3 tip = center + normal * holeSupport;
+
+                    requiredMin = Vector3.Min(requiredMin, tip);
+                    requiredMax = Vector3.Max(requiredMax, tip);
+                }
+            }
+
+            return true;
+        }
+
+        // Init-time: choose the runtime grid resolution/size/origin so the fixed
+        // cell size always contains the bucket. gridResolution is only a lower
+        // bound; the grid grows (clamped to maxAutoGridResolution) instead of
+        // erroring when the bucket is enlarged. Must run before AllocateGridBuffers
+        // since the grid buffers are sized from _runtimeGridNodeCount.
+        private void ComputeRuntimeGridLayout(FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
+            float cellSize = Mathf.Max(config.cellSizeMeters, 1e-4f);
+
+            Vector3Int resolution = config.gridResolution;
+
+            if (config.autoSizeBucketLocalGrid &&
+                ComputeRequiredLocalBounds(
+                    context,
+                    out Vector3 requiredMin,
+                    out Vector3 requiredMax))
+            {
+                Vector3 requiredSize = requiredMax - requiredMin;
+                int margin = Mathf.Max(0, config.autoGridResolutionMargin);
+                int maxRes = Mathf.Clamp(config.maxAutoGridResolution, 16, 256);
+
+                resolution = new Vector3Int(
+                    FitAxisResolution(requiredSize.x, cellSize, config.gridResolution.x, margin, maxRes),
+                    FitAxisResolution(requiredSize.y, cellSize, config.gridResolution.y, margin, maxRes),
+                    FitAxisResolution(requiredSize.z, cellSize, config.gridResolution.z, margin, maxRes)
+                );
+            }
+
+            _runtimeGridResolution = new Vector3Int(
+                Mathf.Max(4, resolution.x),
+                Mathf.Max(4, resolution.y),
+                Mathf.Max(4, resolution.z)
+            );
+            _runtimeGridNodeCount =
+                _runtimeGridResolution.x *
+                _runtimeGridResolution.y *
+                _runtimeGridResolution.z;
+            _runtimeGridSizeWorld = new Vector3(
+                _runtimeGridResolution.x * cellSize,
+                _runtimeGridResolution.y * cellSize,
+                _runtimeGridResolution.z * cellSize
+            );
+            _runtimeGridOriginLocal = config.gridOriginLocal;
+        }
+
+        private static int FitAxisResolution(
+            float requiredSize,
+            float cellSize,
+            int lowerBound,
+            int margin,
+            int maxResolution)
+        {
+            int needed = Mathf.CeilToInt(requiredSize / cellSize) + 2 * margin;
+            return Mathf.Clamp(
+                Mathf.Max(needed, lowerBound),
+                4,
+                maxResolution
+            );
+        }
+
         private void UpdateRuntimeGridPlacement(FluidSolverContext context)
         {
             GpuMpmSolverConfig config = context.GpuMpmConfig;
-            Vector3 gridSize = config.GridSizeWorld;
+            Vector3 gridSize = _runtimeGridSizeWorld;
             _runtimeGridOriginLocal = config.gridOriginLocal;
             _gridContainsBucket = false;
             _stats.gpuRequiredGridExtent = 0.0f;
 
-            if (context.BucketSystem != null &&
-                context.BucketSystem.IsInitialized &&
-                context.BucketSystem.Config != null)
+            if (!ComputeRequiredLocalBounds(
+                    context,
+                    out Vector3 requiredMin,
+                    out Vector3 requiredMax))
             {
-                var bucketConfig = context.BucketSystem.Config;
-                float halfHeight = 0.5f * Mathf.Max(bucketConfig.heightMeters, 0.0f);
-                float maxRadius = Mathf.Max(
-                    bucketConfig.topRadiusMeters,
-                    bucketConfig.bottomRadiusMeters
-                );
-                float support =
-                    Mathf.Max(config.gridBoundaryMarginMeters, 0.0f) +
-                    2.0f * config.cellSizeMeters;
-                float jetSupport =
-                    config.enableJetMpmCollar
-                        ? Mathf.Max(
-                            config.jetMpmCollarMaxDistanceMeters,
-                            0.0f
-                          )
-                        : 0.0f;
-                Vector3 requiredMin = new Vector3(
-                    -maxRadius - support,
-                    -halfHeight - support - jetSupport,
-                    -maxRadius - support
-                );
-                Vector3 requiredMax = new Vector3(
-                    maxRadius + support,
-                    halfHeight + support,
-                    maxRadius + support
-                );
-                Vector3 gridMax =
-                    _runtimeGridOriginLocal + gridSize;
-
-                _gridContainsBucket =
-                    requiredMin.x >= _runtimeGridOriginLocal.x &&
-                    requiredMin.y >= _runtimeGridOriginLocal.y &&
-                    requiredMin.z >= _runtimeGridOriginLocal.z &&
-                    requiredMax.x <= gridMax.x &&
-                    requiredMax.y <= gridMax.y &&
-                    requiredMax.z <= gridMax.z;
-
-                Vector3 requiredSize = requiredMax - requiredMin;
-                _stats.gpuRequiredGridExtent = Mathf.Max(
-                    requiredSize.x,
-                    Mathf.Max(requiredSize.y, requiredSize.z)
-                );
+                return;
             }
+
+            // Center the grid on the required region so coverage is symmetric
+            // (side holes get the same headroom as bottom holes). Auto-sizing
+            // implies centering, otherwise the fitted grid may not sit over the
+            // bucket at the fixed config origin.
+            if (config.autoCenterBucketLocalGrid || config.autoSizeBucketLocalGrid)
+            {
+                Vector3 requiredCenter = 0.5f * (requiredMin + requiredMax);
+                _runtimeGridOriginLocal = requiredCenter - 0.5f * gridSize;
+            }
+
+            Vector3 gridMax = _runtimeGridOriginLocal + gridSize;
+
+            _gridContainsBucket =
+                requiredMin.x >= _runtimeGridOriginLocal.x &&
+                requiredMin.y >= _runtimeGridOriginLocal.y &&
+                requiredMin.z >= _runtimeGridOriginLocal.z &&
+                requiredMax.x <= gridMax.x &&
+                requiredMax.y <= gridMax.y &&
+                requiredMax.z <= gridMax.z;
+
+            Vector3 requiredSizeWorld = requiredMax - requiredMin;
+            _stats.gpuRequiredGridExtent = Mathf.Max(
+                requiredSizeWorld.x,
+                Mathf.Max(requiredSizeWorld.y, requiredSizeWorld.z)
+            );
         }
 
         private void UpdateSparseProjectionPressureDispatchMode(
@@ -3471,7 +3647,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetInt(
                 "_ActiveProjectionNodeCount",
-                GetProjectionDispatchNodeCount(context.GpuMpmConfig.GridNodeCount)
+                GetProjectionDispatchNodeCount(_runtimeGridNodeCount)
             );
 
             compute.SetInt(

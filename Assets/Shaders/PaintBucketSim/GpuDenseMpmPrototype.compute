@@ -237,6 +237,15 @@ float _HoleRadialPadding;
 int _BucketHoleCount;
 float _HoleOutflowExitDistance;
 
+// G33 outflow physics: aperture that matches the configured hole (no radial
+// padding inflation) + Torricelli hydrostatic exit speed modulated by viscosity.
+float _OutflowAperturePadding;      // added to hole half-extents for pass-through/exit (0 = exact)
+int _EnableTorricelliOutflow;
+float _OutflowDischargeCoefficient; // viscosity-derived Cd in [0,1]
+float _FluidSurfaceLocalY;          // estimated free-surface height in bucket-local Y
+float _LocalGravityMagnitude;       // |gravity| in the bucket-local frame
+float _OutflowMaxExitSpeed;
+
 // Physical paint-color compartment dividers.
 int _EnableColorCompartmentDividers;
 int _ColorCompartmentCount;
@@ -2902,6 +2911,50 @@ bool IsInsideHoleFootprintLocal(
     return nx * nx + ny * ny <= 1.0;
 }
 
+// Tight aperture matching the configured hole dimensions (G33). Unlike
+// IsInsideHoleFootprintLocal it does NOT add edge softness or the particle
+// radius, so the set of particles allowed through the wall / marked as exiting
+// matches the authored hole area — the outflow diameter tracks the config.
+bool IsInsideHoleApertureLocal(
+    float3 localP,
+    int holeIndex,
+    float extraPadding)
+{
+    if (!IsValidGpuHoleIndex(holeIndex))
+        return false;
+
+    if (_BucketHoleData2[holeIndex].w <= 0.5)
+        return false;
+
+    float3 delta = localP - GetHoleCenterLocal(holeIndex);
+    float u = dot(delta, GetHoleTangentLocal(holeIndex));
+    float v = dot(delta, GetHoleBitangentLocal(holeIndex));
+
+    float2 halfExtents = GetHoleHalfExtents(holeIndex) + extraPadding;
+    float a = max(halfExtents.x, 0.0005);
+    float b = max(halfExtents.y, 0.0005);
+    int shape = GetHoleShape(holeIndex);
+
+    if (shape == HOLE_SHAPE_SQUARE ||
+        shape == HOLE_SHAPE_RECTANGLE)
+    {
+        return abs(u) <= a && abs(v) <= b;
+    }
+
+    if (shape == HOLE_SHAPE_SLOT)
+    {
+        float sr = max(b, 0.0005);
+        float segmentHalfLength = max(a - sr, 0.0);
+        float du = max(abs(u) - segmentHalfLength, 0.0);
+        return du * du + v * v <= sr * sr;
+    }
+
+    // Circle and ellipse.
+    float nx = u / a;
+    float ny = v / b;
+    return nx * nx + ny * ny <= 1.0;
+}
+
 bool IsInsideAnyOpenHoleRegionLocal(
     float3 localP,
     float radius,
@@ -2927,9 +2980,7 @@ bool IsInsideAnyOpenHoleRegionLocal(
         if (abs(planeDistance) > heightLimit)
             continue;
 
-        float padding = _HoleRadialPadding + radius;
-
-        if (!IsInsideHoleFootprintLocal(localP, i, padding))
+        if (!IsInsideHoleApertureLocal(localP, i, _OutflowAperturePadding))
             continue;
 
         holeIndex = i;
@@ -2963,9 +3014,7 @@ bool IsPastOpenHoleExitLocal(
         if (planeDistance <= exitDistance)
             continue;
 
-        float padding = _HoleRadialPadding + radius;
-
-        if (!IsInsideHoleFootprintLocal(localP, i, padding))
+        if (!IsInsideHoleApertureLocal(localP, i, _OutflowAperturePadding))
             continue;
 
         holeIndex = i;
@@ -4289,12 +4338,27 @@ void RunBucketCollisionParticle(uint particleIndex)
     {
         float3 holeNormalLocal = GetHoleNormalLocal(exitHoleIndex);
         float perHoleFlow = max(_BucketHoleData4[exitHoleIndex].z, 0.0);
-        float exitBoost =
+        float configBoost =
             max(_BucketHoleData4[exitHoleIndex].w, 0.0) *
             perHoleFlow;
 
+        // Torricelli: hydrostatic head above this hole drives the jet, scaled by
+        // a viscosity discharge coefficient (thin paint jets faster than thick).
+        // A hole higher on the wall has less head, so it jets more gently.
+        float head = max(
+            _FluidSurfaceLocalY - GetHoleCenterLocal(exitHoleIndex).y,
+            0.0);
+        float torricelli = _EnableTorricelliOutflow != 0
+            ? _OutflowDischargeCoefficient *
+              sqrt(2.0 * max(_LocalGravityMagnitude, 0.0) * head)
+            : 0.0;
+
+        float exitSpeed = max(configBoost, torricelli);
+        if (_OutflowMaxExitSpeed > 0.0)
+            exitSpeed = min(exitSpeed, _OutflowMaxExitSpeed);
+
         float normalSpeed = dot(vLocal, holeNormalLocal);
-        float targetNormalSpeed = max(normalSpeed, exitBoost);
+        float targetNormalSpeed = max(normalSpeed, exitSpeed);
 
         vLocal +=
             (targetNormalSpeed - normalSpeed) *

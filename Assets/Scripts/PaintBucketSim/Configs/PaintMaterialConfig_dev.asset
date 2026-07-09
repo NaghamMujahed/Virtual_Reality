@@ -12,20 +12,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a7d0b0d6a4c8fa243afeaba74e3ceb60, type: 3}
   m_Name: PaintMaterialConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.PaintMaterialConfig
-  materialPreset: 1
+  materialPreset: 5
   autoApplyMaterialPreset: 1
-  densityKgPerM3: 1000
+  densityKgPerM3: 1280
   baseColor: {r: 0.3479886, g: 0.6749586, b: 0.8679245, a: 0.55}
-  viscosityModel: 0
-  constantViscosityPaS: 0.0012
-  zeroShearViscosityPaS: 0.0012
-  infiniteShearViscosityPaS: 0.001
-  relaxationTimeSeconds: 0.02
-  yasudaExponent: 2
-  flowIndex: 1
-  yieldStressPa: 0
-  surfaceTensionNPerM: 0.072
-  dryingRatePerSecond: 0.004
-  absorptionRate: 0.18
+  viscosityModel: 1
+  constantViscosityPaS: 0.3
+  zeroShearViscosityPaS: 5.5
+  infiniteShearViscosityPaS: 0.25
+  relaxationTimeSeconds: 1.6
+  yasudaExponent: 2.6
+  flowIndex: 0.42
+  yieldStressPa: 0.35
+  surfaceTensionNPerM: 0.033
+  dryingRatePerSecond: 0.012
+  absorptionRate: 0.65
   notes: This material is solver-independent. It can be used by PBF, SPH, DFSPH,
     MPM, or another fluid model.
