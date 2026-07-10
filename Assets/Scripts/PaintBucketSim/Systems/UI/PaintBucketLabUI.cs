@@ -271,6 +271,8 @@ namespace PaintBucketSim.Systems.UI
                 SelectTab(LabTab.Run);
             if (Input.GetKeyDown(KeyCode.Alpha2))
                 SelectTab(LabTab.Board);
+
+
             if (Input.GetKeyDown(KeyCode.Alpha3))
                 SelectTab(LabTab.Fluid);
             if (Input.GetKeyDown(KeyCode.Alpha4))
@@ -292,7 +294,7 @@ namespace PaintBucketSim.Systems.UI
 
             _canvas = gameObject.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            _canvas.sortingOrder = 5000;
+            _canvas.sortingOrder = 5000;//////////////////////////////////
 
             _scaler = gameObject.AddComponent<CanvasScaler>();
             _scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -328,7 +330,7 @@ namespace PaintBucketSim.Systems.UI
             _topBar.anchorMax = new Vector2(1f, 1f);
             _topBar.pivot = new Vector2(0.5f, 1f);
             _topBar.sizeDelta = new Vector2(0f, 64f);
-            _topBar.anchoredPosition = Vector2.zero;
+            _topBar.anchoredPosition = Vector2.zero;//////////////////////////
             Image bg = top.AddComponent<Image>();
             bg.color = TopBg;
 
@@ -491,11 +493,8 @@ namespace PaintBucketSim.Systems.UI
             bg.color = new Color(0.045f, 0.050f, 0.054f, 0.90f);
 
             _hintText = CreateText(
-                "Space/P Pause  |  O Step  |  R Reset  |  M Board Motion  |  B/N Mode  |  C Clear Paint  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI",
-                hints.transform,
-                12,
-                FontStyle.Bold,
-                MutedText);
+                "Space/P Pause  |  O Step  |  R Reset  |  M Board Motion  |  B/N Mode  |  C Clear Paint  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI | WASD Move",
+                hints.transform, 12, FontStyle.Bold, MutedText);
             Stretch(_hintText.rectTransform);
             _hintText.alignment = TextAnchor.MiddleCenter;
         }
