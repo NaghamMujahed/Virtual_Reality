@@ -29,11 +29,8 @@ MonoBehaviour:
   enablePhysicalColorDividers: 1
   colorDividerThicknessMeters: 0.014
   carveInitialParticlesAroundPhysicalDividers: 1
-  previewMode: 0
-  maxParticleCapacity: 530000
   renderParticles: 1
   visualParticleSizeScale: 1
-  highParticleWarningThreshold: 400000
   enableRenderLod: 1
   maxRenderedParticles: 400000
   renderStride: 1

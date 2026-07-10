@@ -13,7 +13,6 @@ MonoBehaviour:
   m_Name: FluidSolverArchitectureConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.FluidSolverArchitectureConfig
   activeSolver: 1
-  fallbackToCpuPbfIfSelectedSolverUnavailable: 1
   enableSolverStats: 1
   logSolverLifecycle: 1
   architectureGoal: The paint system is solver-independent. CPU PBF remains as a

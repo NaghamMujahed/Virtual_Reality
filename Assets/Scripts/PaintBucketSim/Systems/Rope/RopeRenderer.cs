@@ -14,7 +14,7 @@ namespace PaintBucketSim.Systems.Rope
         [Header("Visual")]
         [SerializeField] private Color ropeColor = new Color(0.85f, 0.75f, 0.55f);
         [SerializeField] private Color brokenPartColor = new Color(1.0f, 0.45f, 0.25f);
-        [SerializeField] private float fallbackWidth = 0.02f;
+        [SerializeField] private float defaultWidth = 0.02f;
 
         [Header("Professional Rope Mesh")]
         [SerializeField] private bool useProceduralTube = true;
@@ -111,7 +111,7 @@ namespace PaintBucketSim.Systems.Rope
 
             float width = ropeSystem.Config != null
                 ? ropeSystem.Config.visualRadiusMeters * 2.0f
-                : fallbackWidth;
+                : defaultWidth;
 
             if (useProceduralTube && !ropeSystem.IsBroken)
             {
@@ -207,8 +207,8 @@ namespace PaintBucketSim.Systems.Rope
             renderer.startColor = color;
             renderer.endColor = color;
 
-            renderer.startWidth = fallbackWidth;
-            renderer.endWidth = fallbackWidth;
+            renderer.startWidth = defaultWidth;
+            renderer.endWidth = defaultWidth;
         }
 
         private void EnsureMeshRenderer()

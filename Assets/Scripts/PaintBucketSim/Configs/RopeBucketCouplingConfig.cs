@@ -37,7 +37,7 @@ namespace PaintBucketSim.Configs
         public float maxAngularCorrectionPerSubstep = 0.06f;
 
         [Header("Velocity Update")]
-        [Tooltip("Legacy mode that adds each positional correction to velocity. Keep disabled when pose reconstruction is enabled.")]
+        [Tooltip("Compatibility mode that adds each positional correction to velocity. Keep disabled when pose reconstruction is enabled.")]
         public bool updateVelocitiesFromCorrection = false;
 
         [Tooltip("Rebuild rigid-body velocity once from the final constrained pose. This is the energy-stable PBD velocity update.")]

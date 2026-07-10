@@ -17,6 +17,7 @@ namespace PaintBucketSim.Systems.Bucket
         [Header("Visual References")]
         [SerializeField] private MeshFilter meshFilter;
         [SerializeField] private MeshRenderer meshRenderer;
+        [SerializeField] private bool showBucketMesh = true;
 
         [Header("Debug Visuals")]
         [SerializeField] private bool showAttachmentJoint = true;
@@ -68,6 +69,8 @@ namespace PaintBucketSim.Systems.Bucket
         private int _renderedHoleCount;
 
         public int RenderedHoleCount => _renderedHoleCount;
+        public bool BucketMeshVisible =>
+            meshRenderer != null && meshRenderer.enabled;
         public bool FluidSurfaceVisible =>
             _fluidSurfaceObject != null &&
             _fluidSurfaceObject.activeSelf &&
@@ -78,6 +81,13 @@ namespace PaintBucketSim.Systems.Bucket
                 ? _fluidSurfaceObject.transform.position
                 : Vector3.zero;
         public float FluidSurfaceRadius => _fluidSurfaceRadius;
+
+        public void SetBucketMeshVisible(bool visible)
+        {
+            showBucketMesh = visible;
+            if (meshRenderer != null)
+                meshRenderer.enabled = visible;
+        }
 
         private void Awake()
         {
@@ -195,7 +205,7 @@ namespace PaintBucketSim.Systems.Bucket
             _generatedMesh = GenerateBucketMesh(config);
             meshFilter.sharedMesh = _generatedMesh;
 
-            meshRenderer.enabled = true;
+            meshRenderer.enabled = showBucketMesh;
 
             if (_runtimeMaterial != null)
             {

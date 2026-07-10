@@ -30,6 +30,7 @@ namespace PaintBucketSim.Systems.Fluid
         private ComputeShader _visibilityCompute;
         private int _kernelBuildRenderableParticleList = -1;
         private bool _usingGpuVisibilityCompaction;
+        private ScreenSpaceFluidRenderer _screenSpaceFluidRenderer;
 
         private MaterialPropertyBlock _mpb;
         private Mesh _generatedParticleMesh;
@@ -40,6 +41,10 @@ namespace PaintBucketSim.Systems.Fluid
         private GpuParticleRenderStats _stats;
 
         public GpuParticleRenderStats Stats => _stats;
+        public GpuParticleRenderConfig RenderConfig => renderConfig;
+
+        private PaintFluidConfig FluidConfig =>
+            gpuBufferSet != null ? gpuBufferSet.FluidConfig : null;
 
         private void Awake()
         {
@@ -52,6 +57,8 @@ namespace PaintBucketSim.Systems.Fluid
 
             if (particleMaterial == null)
                 particleMaterial = CreateDefaultMaterial();
+            else
+                particleMaterial.enableInstancing = true;
 
             _mpb = new MaterialPropertyBlock();
 
@@ -64,11 +71,12 @@ namespace PaintBucketSim.Systems.Fluid
         // config ScriptableObject is not discoverable via FindAnyObjectByType.
         private void EnsureScreenSpaceFluidRenderer()
         {
-            var fluidRenderer = GetComponent<ScreenSpaceFluidRenderer>();
-            if (fluidRenderer == null)
-                fluidRenderer = gameObject.AddComponent<ScreenSpaceFluidRenderer>();
+            if (_screenSpaceFluidRenderer == null)
+                _screenSpaceFluidRenderer = GetComponent<ScreenSpaceFluidRenderer>();
+            if (_screenSpaceFluidRenderer == null)
+                _screenSpaceFluidRenderer = gameObject.AddComponent<ScreenSpaceFluidRenderer>();
 
-            fluidRenderer.Configure(gpuBufferSet, renderConfig, bucketSystem);
+            _screenSpaceFluidRenderer.Configure(gpuBufferSet, renderConfig, bucketSystem);
         }
 
         private void OnEnable()
@@ -93,9 +101,7 @@ namespace PaintBucketSim.Systems.Fluid
         {
             if (renderConfig == null ||
                 !renderConfig.enableGpuIndirectRendering ||
-                // Screen-space fluid mode renders the liquid surface instead of
-                // discrete particles; skip the particle draw to avoid doubling.
-                renderConfig.fluidRenderMode == FluidRenderMode.ScreenSpaceFluid ||
+                ShouldSuppressParticleDrawForScreenSpaceFluid() ||
                 gpuBufferSet == null ||
                 !gpuBufferSet.IsInitialized ||
                 gpuBufferSet.UploadedParticleCount <= 0 ||
@@ -113,6 +119,19 @@ namespace PaintBucketSim.Systems.Fluid
             _usingGpuVisibilityCompaction = BuildRenderableParticleList();
             RenderParticles();
             UpdateStats();
+        }
+
+        private bool ShouldSuppressParticleDrawForScreenSpaceFluid()
+        {
+            if (renderConfig == null ||
+                renderConfig.fluidRenderMode != FluidRenderMode.ScreenSpaceFluid)
+            {
+                return false;
+            }
+
+            EnsureScreenSpaceFluidRenderer();
+            return _screenSpaceFluidRenderer != null &&
+                   _screenSpaceFluidRenderer.CanRenderFluidSurface;
         }
 
         private void EnsureCommandBuffer()
@@ -149,12 +168,12 @@ namespace PaintBucketSim.Systems.Fluid
 
         private void EnsureVisibilityResources()
         {
+            int bufferCapacity = gpuBufferSet != null ? gpuBufferSet.Capacity : 1;
             int requestedCapacity = Mathf.Max(
                 1,
-                Mathf.Min(
-                    gpuBufferSet != null ? gpuBufferSet.Capacity : 1,
-                    renderConfig != null ? renderConfig.maxRenderedParticles : 1
-                )
+                FluidConfig != null
+                    ? FluidConfig.GetRenderParticleBudget(bufferCapacity)
+                    : bufferCapacity
             );
 
             if (_renderableParticleIndices == null ||
@@ -198,20 +217,10 @@ namespace PaintBucketSim.Systems.Fluid
         private void UpdateCommandBuffer()
         {
             int uploadedCount = Mathf.Max(0, gpuBufferSet.UploadedParticleCount);
-            int stride = renderConfig != null
-                ? Mathf.Max(1, renderConfig.renderStride)
+            int stride = FluidConfig != null
+                ? FluidConfig.GetRenderStride(uploadedCount)
                 : 1;
-
             int visibleCount = Mathf.CeilToInt(uploadedCount / (float)stride);
-
-            if (renderConfig != null && visibleCount > renderConfig.maxRenderedParticles)
-            {
-                stride = Mathf.Max(
-                    stride,
-                    Mathf.CeilToInt(uploadedCount / (float)renderConfig.maxRenderedParticles)
-                );
-                visibleCount = Mathf.CeilToInt(uploadedCount / (float)stride);
-            }
 
             _effectiveRenderStride = stride;
 
@@ -305,7 +314,7 @@ namespace PaintBucketSim.Systems.Fluid
                 "_HideCanvasAndLostParticles",
                 renderConfig.hideCanvasAndLostParticles ? 1.0f : 0.0f
             );
-            _mpb.SetColor("_FallbackColor", renderConfig.fallbackColor);
+            _mpb.SetColor("_FallbackColor", renderConfig.defaultParticleColor);
             _mpb.SetInt("_ParticleIndexStride", _effectiveRenderStride);
             _mpb.SetInt("_ParticleCount", gpuBufferSet.UploadedParticleCount);
             bool useBucketLocal =
@@ -365,9 +374,9 @@ namespace PaintBucketSim.Systems.Fluid
                 ? gpuBufferSet.UploadedParticleCount
                 : 0;
 
-            _stats.maxRenderedParticles = renderConfig != null
-                ? renderConfig.maxRenderedParticles
-                : 0;
+            _stats.maxRenderedParticles = FluidConfig != null
+                ? FluidConfig.GetRenderParticleBudget(_stats.uploadedParticles)
+                : _stats.uploadedParticles;
 
             _stats.renderStride = _effectiveRenderStride;
             _stats.visualMode = renderConfig != null

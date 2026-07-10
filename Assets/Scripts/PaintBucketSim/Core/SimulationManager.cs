@@ -8,6 +8,7 @@ using UnityEngine.InputSystem;
 using PaintBucketSim.Systems.Coupling;
 using PaintBucketSim.Systems.Boundary;
 using PaintBucketSim.Systems.Fluid;
+using PaintBucketSim.Systems.Surface;
 
 namespace PaintBucketSim.Core
 {
@@ -23,6 +24,7 @@ namespace PaintBucketSim.Core
         [SerializeField] private RopeBucketCouplingSystem ropeBucketCouplingSystem;
         [SerializeField] private BoundarySystem boundarySystem;
         [SerializeField] private PaintFluidSystem paintFluidSystem;
+        [SerializeField] private LabBoardMotionController boardMotionController;
 
         [Header("Runtime")]
         [SerializeField] private bool initializeOnStart = true;
@@ -82,6 +84,9 @@ namespace PaintBucketSim.Core
 
             if (paintFluidSystem == null)
                 paintFluidSystem = FindAnyObjectByType<PaintFluidSystem>();
+
+            if (boardMotionController == null)
+                boardMotionController = FindAnyObjectByType<LabBoardMotionController>();
 
             Context = new SimulationContext();
             Context.Initialize(simulationConfig, environmentConfig);
@@ -173,7 +178,8 @@ namespace PaintBucketSim.Core
             if (keyboard == null)
                 return;
 
-            if (keyboard.pKey.wasPressedThisFrame)
+            if (keyboard.pKey.wasPressedThisFrame ||
+                keyboard.spaceKey.wasPressedThisFrame)
             {
                 TimeController.TogglePause();
             }
@@ -196,6 +202,12 @@ namespace PaintBucketSim.Core
             TimeController.Reset();
 
             _environmentSystem.Initialize(Context);
+
+            if (boardMotionController == null)
+                boardMotionController = FindAnyObjectByType<LabBoardMotionController>();
+
+            if (boardMotionController != null)
+                boardMotionController.ResetBoardPose(true);
 
             if (ropeSystem != null)
                 ropeSystem.ResetSystem(Context);

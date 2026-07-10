@@ -10,20 +10,12 @@ namespace PaintBucketSim.Configs
         [Header("Ownership")]
         public bool enableGpuFluidBuffers = true;
 
-        [Tooltip("Maximum GPU-side particle capacity for rendering and future GPU solvers.")]
-        [Min(1)]
-        public int maxGpuParticles = 100000;
-
         [Tooltip("During CPU/PBF phase, upload CPU particle snapshot to GPU. Later GPU solvers will write buffers directly.")]
         public bool uploadFromCpuWhileCpuSolverActive = true;
 
         [Tooltip("Upload CPU snapshot every N frames.")]
         [Min(1)]
         public int uploadEveryNFrames = 1;
-
-        [Tooltip("Upload every Nth active particle. 1 means upload all active particles.")]
-        [Min(1)]
-        public int uploadStride = 1;
 
         [Header("Compute Preparation")]
         public bool enableComputePostProcess = false;
@@ -36,24 +28,15 @@ namespace PaintBucketSim.Configs
         public Color nearHoleColor = new Color(1.0f, 0.25f, 0.05f, 1.0f);
         public Color airborneColor = new Color(0.7f, 0.9f, 1.0f, 1.0f);
         public Color depositedColor = new Color(0.15f, 0.9f, 0.25f, 1.0f);
-        public Color fallbackColor = new Color(1.0f, 1.0f, 1.0f, 1.0f);
+        public Color defaultStateColor = new Color(1.0f, 1.0f, 1.0f, 1.0f);
 
         [Header("Debug")]
         public bool logLifecycle = true;
 
         private void OnValidate()
         {
-            if (maxGpuParticles < 1)
-                maxGpuParticles = 1;
-
-            if (maxGpuParticles > 4000000)
-                maxGpuParticles = 4000000;
-
             if (uploadEveryNFrames < 1)
                 uploadEveryNFrames = 1;
-
-            if (uploadStride < 1)
-                uploadStride = 1;
         }
     }
 }

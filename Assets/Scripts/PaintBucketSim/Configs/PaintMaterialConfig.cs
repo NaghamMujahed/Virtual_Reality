@@ -20,6 +20,17 @@ namespace PaintBucketSim.Configs
         HerschelBulkley = 2
     }
 
+    public struct PaintRheologyProfile
+    {
+        public float mpmViscosityPaS;
+        public float lowShearViscosityPaS;
+        public float highShearViscosityPaS;
+        public float relaxationTimeSeconds;
+        public float flowIndex;
+        public float yasudaExponent;
+        public float yieldStressPa;
+    }
+
     [System.Serializable]
     public struct PaintSurfaceFilmProfile
     {
@@ -418,6 +429,38 @@ namespace PaintBucketSim.Configs
             float safeShear = Mathf.Max(shearRate, 0.01f);
             float consistency = constantViscosityPaS;
             return yieldStressPa / safeShear + consistency * Mathf.Pow(safeShear, flowIndex - 1.0f);
+        }
+
+        public PaintRheologyProfile EvaluateRheologyProfile(float temperatureCelsius)
+        {
+            float lowShear = Mathf.Max(
+                EvaluateViscosity(0.05f, temperatureCelsius),
+                0.0001f
+            );
+            float highShear = Mathf.Max(
+                EvaluateViscosity(80.0f, temperatureCelsius),
+                0.0001f
+            );
+
+            if (highShear > lowShear)
+                highShear = lowShear;
+
+            return new PaintRheologyProfile
+            {
+                mpmViscosityPaS = Mathf.Max(
+                    EvaluateViscosity(20.0f, temperatureCelsius),
+                    0.0001f
+                ),
+                lowShearViscosityPaS = lowShear,
+                highShearViscosityPaS = highShear,
+                relaxationTimeSeconds = Mathf.Max(
+                    relaxationTimeSeconds,
+                    0.0001f
+                ),
+                flowIndex = Mathf.Clamp(flowIndex, 0.05f, 1.0f),
+                yasudaExponent = Mathf.Clamp(yasudaExponent, 0.25f, 8.0f),
+                yieldStressPa = Mathf.Max(yieldStressPa, 0.0f)
+            };
         }
 
         public PaintSurfaceFilmProfile EvaluateSurfaceFilmProfile(

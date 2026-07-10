@@ -151,11 +151,11 @@ namespace PaintSim.Scripts.Stages.Surface
             InitBuffer();
         }
 
-        private static Vector3 SafeNormalized(Vector3 value, Vector3 fallback)
+        private static Vector3 SafeNormalized(Vector3 value, Vector3 defaultValue)
         {
             float sqrMagnitude = value.sqrMagnitude;
             if (sqrMagnitude < 1e-10f)
-                return fallback.normalized;
+                return defaultValue.normalized;
 
             return value / Mathf.Sqrt(sqrMagnitude);
         }

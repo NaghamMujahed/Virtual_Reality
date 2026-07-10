@@ -275,7 +275,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private void AllocateHashMaps(FluidSolverContext context)
         {
             int fluidCapacity = Mathf.CeilToInt(
-                context.FluidConfig.maxParticleCapacity *
+                context.FluidConfig.ParticleCapacity *
                 context.PbfConfig.hashCapacityMultiplier
             );
 

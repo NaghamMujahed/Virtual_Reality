@@ -3,7 +3,7 @@ using UnityEngine.EventSystems;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Camera))]
-public class OrbitCameraController : MonoBehaviour
+public class InteractiveCamera : MonoBehaviour
 {
     [Header("Target")]
     [Tooltip("The object or empty transform that the camera will orbit around.")]
@@ -33,12 +33,24 @@ public class OrbitCameraController : MonoBehaviour
     [Tooltip("Mouse wheel zoom speed.")]
     public float zoomSpeed = 3.0f;
 
+    [Tooltip("Pinch zoom speed for devices that report two-finger zoom as touch input.")]
+    public float pinchZoomSpeed = 0.01f;
+
+    [Tooltip("Zoom response for a native Windows touchpad pinch gesture.")]
+    public float touchpadPinchZoomSpeed = 8.0f;
+
     [Tooltip("Higher value means faster zoom smoothing.")]
     public float zoomSmoothness = 12f;
 
     [Header("Pan Settings")]
-    [Tooltip("Middle mouse button pan speed.")]
+    [Tooltip("Middle mouse or Shift + drag pan speed.")]
     public float panSpeed = 0.018f;
+
+    [Tooltip("World-space response to a native Windows two-finger pan gesture.")]
+    public float touchpadPanSpeed = 0.0015f;
+
+    [Tooltip("Arrow key and WASD pan speed.")]
+    public float keyboardPanSpeed = 0.65f;
 
     [Header("Smoothing")]
     public float positionSmoothTime = 0.06f;
@@ -66,11 +78,35 @@ public class OrbitCameraController : MonoBehaviour
     private Quaternion rotationVelocity;
 
     private float lastInputTime;
+    private float previousPinchDistance;
     private bool initialized;
+    private bool hasPreviousPinchDistance;
+    private Camera controlledCamera;
+
+    public bool IsViewActive =>
+        isActiveAndEnabled &&
+        (controlledCamera == null || controlledCamera.enabled);
+
+    public bool AutoOrbitEnabled
+    {
+        get => enableAutoOrbit;
+        set
+        {
+            enableAutoOrbit = value;
+            lastInputTime = Time.unscaledTime;
+        }
+    }
 
     private void Awake()
     {
+        controlledCamera = GetComponent<Camera>();
+        WindowsTouchpadGestures.Acquire();
         InitializeCamera();
+    }
+
+    private void OnDestroy()
+    {
+        WindowsTouchpadGestures.Release();
     }
 
     private void Reset()
@@ -108,6 +144,9 @@ public class OrbitCameraController : MonoBehaviour
         if (!initialized)
             InitializeCamera();
 
+        if (!IsViewActive)
+            return;
+
         bool pointerOverUI =
             blockInputOverUI &&
             EventSystem.current != null &&
@@ -116,10 +155,13 @@ public class OrbitCameraController : MonoBehaviour
         if (!pointerOverUI)
         {
             HandleOrbitInput();
-            HandleZoomInput();
+            HandleMouseWheelZoom();
             HandlePanInput();
         }
 
+        HandleTouchpadGestures();
+        HandleTouchscreenPinch();
+        UpdateZoomSmoothing();
         HandleKeyboardInput();
         HandleAutoOrbit();
         HandleCursorState();
@@ -127,13 +169,16 @@ public class OrbitCameraController : MonoBehaviour
 
     private void LateUpdate()
     {
-        ApplyCameraTransform(false);
+        if (IsViewActive)
+            ApplyCameraTransform(false);
     }
 
     private void HandleOrbitInput()
     {
-        // Right Mouse Button = rotate around target
-        if (Input.GetMouseButton(1))
+        bool shiftHeld =
+            Input.GetKey(KeyCode.LeftShift) ||
+            Input.GetKey(KeyCode.RightShift);
+        if (Input.GetMouseButton(1) && !shiftHeld)
         {
             lastInputTime = Time.unscaledTime;
 
@@ -147,19 +192,63 @@ public class OrbitCameraController : MonoBehaviour
         }
     }
 
-    private void HandleZoomInput()
+    private void HandleMouseWheelZoom()
     {
-        // Mouse Wheel = zoom in / zoom out
         float scroll = Input.mouseScrollDelta.y;
-
-        if (Mathf.Abs(scroll) > 0.001f)
+        if (Mathf.Abs(scroll) <= 0.001f)
         {
-            lastInputTime = Time.unscaledTime;
-
-            targetDistance -= scroll * zoomSpeed;
-            targetDistance = Mathf.Clamp(targetDistance, minDistance, maxDistance);
+            scroll = Input.GetAxisRaw("Mouse ScrollWheel");
         }
 
+        if (Mathf.Abs(scroll) > 0.0001f)
+            ApplyZoomDelta(scroll * zoomSpeed);
+    }
+
+    private void HandleTouchpadGestures()
+    {
+        if (!WindowsTouchpadGestures.TryConsume(
+                out float pinchZoom,
+                out Vector2 panPixels))
+        {
+            return;
+        }
+
+        if (Mathf.Abs(pinchZoom) > 0.00001f)
+        {
+            ApplyZoomDelta(
+                pinchZoom * Mathf.Max(touchpadPinchZoomSpeed, 0.01f));
+        }
+
+        if (panPixels.sqrMagnitude > 0.0001f)
+            ApplyTouchpadPan(panPixels);
+    }
+
+    private void HandleTouchscreenPinch()
+    {
+        if (Input.touchCount >= 2)
+        {
+            Touch first = Input.GetTouch(0);
+            Touch second = Input.GetTouch(1);
+            float pinchDistance = Vector2.Distance(first.position, second.position);
+
+            if (hasPreviousPinchDistance)
+            {
+                float pinchDelta = pinchDistance - previousPinchDistance;
+                if (Mathf.Abs(pinchDelta) > 0.01f)
+                    ApplyZoomDelta(pinchDelta * pinchZoomSpeed);
+            }
+
+            previousPinchDistance = pinchDistance;
+            hasPreviousPinchDistance = true;
+        }
+        else
+        {
+            hasPreviousPinchDistance = false;
+        }
+    }
+
+    private void UpdateZoomSmoothing()
+    {
         distance = Mathf.Lerp(
             distance,
             targetDistance,
@@ -167,10 +256,24 @@ public class OrbitCameraController : MonoBehaviour
         );
     }
 
+    private void ApplyZoomDelta(float zoomDelta)
+    {
+        lastInputTime = Time.unscaledTime;
+        targetDistance -= zoomDelta;
+        targetDistance = Mathf.Clamp(targetDistance, minDistance, maxDistance);
+    }
+
     private void HandlePanInput()
     {
-        // Middle Mouse Button = pan focus point
-        if (Input.GetMouseButton(2))
+        bool shiftHeld =
+            Input.GetKey(KeyCode.LeftShift) ||
+            Input.GetKey(KeyCode.RightShift);
+        bool dragPan =
+            Input.GetMouseButton(2) ||
+            (shiftHeld &&
+             (Input.GetMouseButton(0) || Input.GetMouseButton(1)));
+
+        if (dragPan)
         {
             lastInputTime = Time.unscaledTime;
 
@@ -186,6 +289,15 @@ public class OrbitCameraController : MonoBehaviour
         }
     }
 
+    private void ApplyTouchpadPan(Vector2 screenDelta)
+    {
+        lastInputTime = Time.unscaledTime;
+        float scale = Mathf.Max(touchpadPanSpeed, 0.00001f) * distance;
+        panOffset +=
+            (-transform.right * screenDelta.x + transform.up * screenDelta.y) *
+            scale;
+    }
+
     private void HandleKeyboardInput()
     {
         if (Input.GetKeyDown(KeyCode.F))
@@ -193,9 +305,46 @@ public class OrbitCameraController : MonoBehaviour
             FocusTarget();
         }
 
-        if (Input.GetKeyDown(KeyCode.R))
+        if (Input.GetKeyDown(KeyCode.R) || Input.GetKeyDown(KeyCode.Home))
         {
             ResetView();
+        }
+
+        if (Input.GetKeyDown(KeyCode.V))
+        {
+            AutoOrbitEnabled = !AutoOrbitEnabled;
+        }
+
+        if (EventSystem.current != null &&
+            EventSystem.current.currentSelectedGameObject != null &&
+            EventSystem.current.currentSelectedGameObject.GetComponent<UnityEngine.UI.InputField>() != null)
+        {
+            return;
+        }
+
+        float horizontal = 0f;
+        float vertical = 0f;
+        if (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A))
+            horizontal -= 1f;
+        if (Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D))
+            horizontal += 1f;
+        if (Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.S))
+            vertical -= 1f;
+        if (Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.W))
+            vertical += 1f;
+
+        Vector2 movement = new Vector2(horizontal, vertical);
+        if (movement.sqrMagnitude > 0.001f)
+        {
+            movement.Normalize();
+            float scale =
+                Mathf.Max(keyboardPanSpeed, 0.01f) *
+                distance *
+                Time.unscaledDeltaTime;
+            panOffset +=
+                (transform.right * movement.x + transform.up * movement.y) *
+                scale;
+            lastInputTime = Time.unscaledTime;
         }
     }
 
@@ -323,7 +472,6 @@ public class OrbitCameraController : MonoBehaviour
         if (Time.unscaledDeltaTime < Mathf.Epsilon)
             return current;
 
-        // Ensure shortest rotation path.
         if (Quaternion.Dot(current, target) < 0f)
         {
             target.x = -target.x;

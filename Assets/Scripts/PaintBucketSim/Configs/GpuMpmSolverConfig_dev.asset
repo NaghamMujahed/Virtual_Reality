@@ -79,21 +79,11 @@ MonoBehaviour:
   gridDensityEosActivationRatio: 1.01
   gridDensityEosMaxVelocityCorrection: 0.2
   bulkModulus: 850
-  mpmViscosity: 0.02
   materialStressStrength: 0.65
   maxStressMagnitude: 4500
   minJ: 0.65
   maxJ: 1.35
-  paintMaterialPreset: 1
-  autoApplyPaintMaterialPreset: 1
-  usePaintMaterialConfigRheology: 1
   enablePaintRheology: 1
-  lowShearViscosity: 0.02
-  highShearViscosity: 0.01
-  shearThinningRelaxationTime: 0.05
-  shearThinningPowerN: 1
-  carreauYasudaExponent: 2
-  yieldStress: 0
   yieldRegularizationRate: 15
   maxYieldViscosityContribution: 0.25
   maxEffectiveViscosity: 0.5
@@ -115,8 +105,6 @@ MonoBehaviour:
   enableAdaptivePostG2PBucketCollision: 1
   topBoundaryMode: 2
   topBoundaryPadding: 0.01
-  classifyBottomHoleRegion: 1
-  enableBottomHoleOpening: 1
   maxGpuBucketHoles: 16
   holeRadiusMultiplier: 1
   holeNearHeightMeters: 0.08

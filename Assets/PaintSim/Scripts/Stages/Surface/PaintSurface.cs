@@ -67,6 +67,38 @@ namespace PaintSim.Scripts.Stages.Surface
         public PaintFilmGrid PaintFilmGrid { get; private set; }
         public SurfaceProperties SurfaceProperties { get; private set; }
         public SurfaceType SurfaceType => _surfaceType;
+        public bool EvolutionEnabled
+        {
+            get => _enableEvolution;
+            set
+            {
+                _enableEvolution = value;
+                if (_enableEvolution && _evolver == null && PaintFilmGrid != null)
+                    InitEvolver();
+            }
+        }
+        public bool IncludeSurfaceInertiaInFlow
+        {
+            get => _includeSurfaceInertiaInFlow;
+            set => _includeSurfaceInertiaInFlow = value;
+        }
+        public int RenderEveryNFrames
+        {
+            get => _renderEveryNFrames;
+            set => _renderEveryNFrames = Mathf.Max(1, value);
+        }
+        public int EvolveEveryNFrames
+        {
+            get => _evolveEveryNFrames;
+            set => _evolveEveryNFrames = Mathf.Max(1, value);
+        }
+        public PaintColorMixingMode ColorMixingMode => _colorMixingMode;
+        public float PigmentMixStrength => _pigmentMixStrength;
+        public float PigmentMinReflectance => _pigmentMinReflectance;
+        public float PigmentMaxKs => _pigmentMaxKs;
+        public RenderTexture PaintTexture => _renderer != null
+            ? _renderer.PaintTexture
+            : null;
 
         private PaintSurfaceRenderer _renderer;
         private PaintEvolver _evolver;
@@ -525,6 +557,53 @@ namespace PaintSim.Scripts.Stages.Surface
                 ApplySurfaceAppearanceToRenderer();
                 _renderer?.Render();
             }
+        }
+
+        public void ClearPaintFilm()
+        {
+            PaintFilmGrid?.Clear();
+            _renderer?.Render();
+        }
+
+        public void BakePaintTextureNow()
+        {
+            ApplySurfaceAppearanceToRenderer();
+            _renderer?.Render();
+        }
+
+        public void SetSurfaceType(SurfaceType type)
+        {
+            _surfaceType = type;
+            SurfaceProperties = SurfaceProperties.FromType(_surfaceType);
+            ApplySurfaceAppearanceToRenderer();
+        }
+
+        public void ResetSurfaceMotionTracking()
+        {
+            if (PaintFilmGrid == null)
+                return;
+
+            RefreshSurfaceFrameFromTransform();
+            ResolveSurfaceFrame(
+                out Vector3 originWS,
+                out Vector3 axisU,
+                out Vector3 axisV,
+                out _,
+                out float worldWidth,
+                out float worldHeight
+            );
+
+            ResetSurfaceMotionSample(
+                originWS + axisU * (worldWidth * 0.5f) + axisV * (worldHeight * 0.5f)
+            );
+        }
+
+        public void ResetRuntimeSurface(bool clearPaintFilm)
+        {
+            ResetSurfaceMotionTracking();
+
+            if (clearPaintFilm)
+                ClearPaintFilm();
         }
 
         public void ConfigureFilmMaterial(PaintSurfaceFilmProfile profile)

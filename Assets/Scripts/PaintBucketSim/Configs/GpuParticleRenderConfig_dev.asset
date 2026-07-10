@@ -14,17 +14,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.GpuParticleRenderConfig
   enableGpuIndirectRendering: 1
   fluidRenderMode: 1
-  maxRenderedParticles: 400000
-  renderStride: 1
-  uploadEveryNFrames: 1
   visualMode: 1
-  visualRadiusScale: 0.8
+  visualRadiusScale: 1.25
   splatNormalStrength: 0.85
   splatEdgeSoftness: 0.22
   paintSpecularStrength: 0.18
   paintFresnelStrength: 0.1
   usePerParticleColor: 1
-  fallbackColor: {r: 0.1, g: 0.35, b: 1, a: 1}
+  defaultParticleColor: {r: 0.1, g: 0.35, b: 1, a: 1}
   fluidParticleScale: 1.6
   fluidSmoothingIterations: 3
   fluidBlurRadiusPixels: 8
@@ -42,6 +39,9 @@ MonoBehaviour:
   fluidSpecularStrength: 1.4
   fluidSpecularPower: 180
   fluidLightDirection: {x: 0.35, y: 0.85, z: 0.25}
+  fluidParticleImposterShader: {fileID: 4800000, guid: 1177e64f9f8c23643ac3987d026a7d14, type: 3}
+  fluidDepthBlurShader: {fileID: 4800000, guid: 0b2749b6ffd4aa2499f654cbea00e4b1, type: 3}
+  fluidCompositeShader: {fileID: 4800000, guid: a4228adbc3c04714e8de2e1ae2c8b8c8, type: 3}
   hideCanvasAndLostParticles: 0
   worldBoundsCenter: {x: 0, y: 0, z: 0}
   worldBoundsSize: {x: 20, y: 20, z: 20}

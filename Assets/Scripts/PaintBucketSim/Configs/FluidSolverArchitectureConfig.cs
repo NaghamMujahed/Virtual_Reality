@@ -11,9 +11,6 @@ namespace PaintBucketSim.Configs
         [Header("Active Solver")]
         public FluidSolverType activeSolver = FluidSolverType.CpuPbf;
 
-        [Tooltip("If GPU MPM is selected before it is implemented, fallback to CPU PBF instead of stopping the simulation.")]
-        public bool fallbackToCpuPbfIfSelectedSolverUnavailable = true;
-
         [Header("Educational / Debug Architecture")]
         public bool enableSolverStats = true;
 

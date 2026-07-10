@@ -56,7 +56,7 @@ namespace PaintBucketSim.Systems.Fluid
 
         public bool IsGpuSolverActive =>
             _activeSolver != null &&
-            _activeSolver.SolverType == FluidSolverType.GpuSparseMpmPrototype;
+            _activeSolver.SolverType == FluidSolverType.GpuMpm;
 
         private FluidParticlePoolStats _poolStats;
         public FluidParticlePoolStats PoolStats => _poolStats;
@@ -106,7 +106,7 @@ namespace PaintBucketSim.Systems.Fluid
             if (_data == null)
                 _data = new FluidParticleData();
 
-            _data.Allocate(paintFluidConfig.maxParticleCapacity, Allocator.Persistent);
+            _data.Allocate(paintFluidConfig.ParticleCapacity, Allocator.Persistent);
 
             GenerateParticlesInsideBucket();
 
@@ -167,18 +167,12 @@ namespace PaintBucketSim.Systems.Fluid
             if (_activeSolver == null || !_activeSolver.IsInitialized)
                 return;
 
-            // If PBF is disabled while CPU PBF is selected, keep the old preview behavior.
+            // CPU PBF is an explicit solver path. If it is disabled in config,
+            // the fluid stays idle instead of switching to a visual-only preview.
             if (_activeSolver.SolverType == FluidSolverType.CpuPbf &&
                 pbfSolverConfig != null &&
                 !pbfSolverConfig.enablePbf)
             {
-                if (paintFluidConfig.previewMode == FluidPreviewMode.FollowBucketKinematically)
-                {
-                    UpdateWorldFromLocalPreview();
-
-                    StepParticlePool(dt);
-                }
-
                 UpdateDiagnostics();
                 UpdatePoolStats();
                 UpdateBucketFluidLoad(dt);
@@ -359,7 +353,7 @@ namespace PaintBucketSim.Systems.Fluid
             {
                 _activeSolver = new CpuPbfFluidSolver();
             }
-            else if (requestedSolver == FluidSolverType.GpuSparseMpmPrototype)
+            else if (requestedSolver == FluidSolverType.GpuMpm)
             {
                 bool gpuReady =
                     gpuMpmSolverConfig != null &&
@@ -370,21 +364,13 @@ namespace PaintBucketSim.Systems.Fluid
                 {
                     _activeSolver = new GpuMpmDenseLocalSolver();
                 }
-                else if (architectureConfig.fallbackToCpuPbfIfSelectedSolverUnavailable)
-                {
-                    _activeSolver = new CpuPbfFluidSolver();
-
-                    if (architectureConfig.logSolverLifecycle)
-                    {
-                        Debug.LogWarning(
-                            "PaintFluidSystem: GPU MPM selected, but GPU config/buffers/compute are missing. " +
-                            "Falling back to CpuPbfSolver."
-                        );
-                    }
-                }
                 else
                 {
-                    _activeSolver = new GpuMpmDenseLocalSolver();
+                    Debug.LogError(
+                        "PaintFluidSystem: GPU MPM is selected, but GPU config, buffers, or compute shader are missing. " +
+                        "Assign the GPU references or select CpuPbf explicitly."
+                    );
+                    _activeSolver = null;
                 }
             }
             else
@@ -394,10 +380,15 @@ namespace PaintBucketSim.Systems.Fluid
 
             if (architectureConfig.logSolverLifecycle)
             {
-                Debug.Log($"PaintFluidSystem: Created solver {_activeSolver.SolverType}");
+                Debug.Log(
+                    _activeSolver != null
+                        ? $"PaintFluidSystem: Created solver {_activeSolver.SolverType}"
+                        : "PaintFluidSystem: No fluid solver was created."
+                );
             }
 
-            _activeSolver.Initialize(_solverContext);
+            if (_activeSolver != null)
+                _activeSolver.Initialize(_solverContext);
         }
 
         private void RunWarmup(SimulationContext context)

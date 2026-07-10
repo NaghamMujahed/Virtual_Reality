@@ -38,7 +38,6 @@ namespace PaintSim.Scripts.UnityBridge
 
         [Header("Material Source")]
         [SerializeField] private bool _syncPaintMaterialEveryFrame = true;
-        [SerializeField] private bool _warnWhenGpuSolverPresetDiffersFromMaterial = true;
 
         [Header("Color Mixing / Pigments")]
         [SerializeField] private PaintColorMixingMode _colorMixingMode =
@@ -53,7 +52,47 @@ namespace PaintSim.Scripts.UnityBridge
         private float _paintViscosity = 0.1f;
         private float _paintSurfaceTension = 0.04f;
         private int _lastPaintMaterialSignature = int.MinValue;
-        private bool _warnedMaterialPresetMismatch;
+
+        public bool RenderPaintSurface
+        {
+            get => _renderPaintSurface;
+            set => _renderPaintSurface = value;
+        }
+
+        public bool DepositInLateUpdate
+        {
+            get => _depositInLateUpdate;
+            set => _depositInLateUpdate = value;
+        }
+
+        public int DepositEveryNFrames
+        {
+            get => _depositEveryNFrames;
+            set => _depositEveryNFrames = Mathf.Max(1, value);
+        }
+
+        public bool SkipWhenNoAirDomainParticles
+        {
+            get => _skipWhenNoAirDomainParticles;
+            set => _skipWhenNoAirDomainParticles = value;
+        }
+
+        public bool DepositOnlyAirDomainParticles
+        {
+            get => _depositOnlyAirDomainParticles;
+            set => _depositOnlyAirDomainParticles = value;
+        }
+
+        public bool MarkMlsMpmParticlesOnImpact
+        {
+            get => _markMlsMpmParticlesOnImpact;
+            set => _markMlsMpmParticlesOnImpact = value;
+        }
+
+        public PaintColorMixingMode ColorMixingMode => _colorMixingMode;
+        public float PigmentMixStrength => _pigmentMixStrength;
+        public float PigmentMinReflectance => _pigmentMinReflectance;
+        public float PigmentMaxKs => _pigmentMaxKs;
 
         private void Awake()
         {
@@ -132,7 +171,6 @@ namespace PaintSim.Scripts.UnityBridge
             _paintDepositor?.ConfigurePaintProperties(_paintProperties);
             ApplyMaterialRheologyToDepositor(material);
             ApplyMaterialFilmProfileToSurface(material);
-            WarnIfGpuSolverPresetDiffersFromMaterial(material);
             return true;
         }
 
@@ -228,6 +266,23 @@ namespace PaintSim.Scripts.UnityBridge
                 _pigmentMinReflectance,
                 _pigmentMaxKs
             );
+        }
+
+        public void ConfigureColorMixingRuntime(
+            PaintColorMixingMode mode,
+            float pigmentMixStrength,
+            float pigmentMinReflectance,
+            float pigmentMaxKs)
+        {
+            _colorMixingMode = mode;
+            _pigmentMixStrength = Mathf.Clamp01(pigmentMixStrength);
+            _pigmentMinReflectance = Mathf.Clamp(
+                pigmentMinReflectance,
+                0.001f,
+                0.35f
+            );
+            _pigmentMaxKs = Mathf.Clamp(pigmentMaxKs, 1.0f, 64.0f);
+            ApplyColorMixingConfiguration();
         }
 
         private void DispatchMlsMpmDepositor()
@@ -329,38 +384,6 @@ namespace PaintSim.Scripts.UnityBridge
         private static int Quantize(float value)
         {
             return Mathf.RoundToInt(value * 100000.0f);
-        }
-
-        private void WarnIfGpuSolverPresetDiffersFromMaterial(PaintMaterialConfig material)
-        {
-            if (!_warnWhenGpuSolverPresetDiffersFromMaterial ||
-                _warnedMaterialPresetMismatch ||
-                _paintFluidSystem == null ||
-                _paintFluidSystem.GpuMpmConfig == null ||
-                material == null)
-            {
-                return;
-            }
-
-            string materialPreset = material.materialPreset.ToString();
-            string gpuPreset =
-                _paintFluidSystem.GpuMpmConfig.paintMaterialPreset.ToString();
-
-            if (materialPreset == "Custom" || gpuPreset == "Custom" ||
-                materialPreset == gpuPreset)
-            {
-                return;
-            }
-
-            _warnedMaterialPresetMismatch = true;
-            Debug.LogWarning(
-                "[PaintSimulationHost] Material preset mismatch: " +
-                $"PaintMaterialConfig={materialPreset}, " +
-                $"GpuMpmSolverConfig={gpuPreset}. " +
-                "PaintMaterialConfig is now the authoritative visual/rheology " +
-                "source for deposition and board-film flow. Use the GPU preset " +
-                "only as a solver-stability package, or match both presets."
-            );
         }
 
         private void OnDestroy()

@@ -225,7 +225,7 @@ namespace PaintBucketSim.Configs
         [Min(0.001f)]
         public float maxTwistGradientRadians = 0.42f;
 
-        [Tooltip("Legacy endpoint-follow value retained for old assets. Torque coupling is used by the current rod solver.")]
+        [Tooltip("Endpoint-follow contribution retained for compatibility. Torque coupling is used by the current rod solver.")]
         [Range(0.0f, 1.0f)]
         public float endpointTwistFollow = 0.35f;
 

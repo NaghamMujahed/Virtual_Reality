@@ -31,18 +31,6 @@ namespace PaintBucketSim.Configs
         [Tooltip("Particles = discrete splats/meshes. ScreenSpaceFluid = continuous liquid surface via screen-space depth smoothing + thickness. This is the enable/disable switch for realistic fluid rendering.")]
         public FluidRenderMode fluidRenderMode = FluidRenderMode.Particles;
 
-        [Tooltip("Maximum number of particles uploaded to GPU renderer.")]
-        [Min(1)]
-        public int maxRenderedParticles = 50000;
-
-        [Tooltip("Draw every Nth particle. 1 means draw all selected particles.")]
-        [Min(1)]
-        public int renderStride = 1;
-
-        [Tooltip("Upload particle buffers every N frames. 1 means every frame.")]
-        [Min(1)]
-        public int uploadEveryNFrames = 1;
-
         [Header("Visual")]
         public GpuParticleVisualMode visualMode = GpuParticleVisualMode.CameraFacingSplat;
 
@@ -68,7 +56,7 @@ namespace PaintBucketSim.Configs
 
         public bool usePerParticleColor = true;
 
-        public Color fallbackColor = new Color(0.1f, 0.35f, 1.0f, 1.0f);
+        public Color defaultParticleColor = new Color(0.1f, 0.35f, 1.0f, 1.0f);
 
         [Header("Screen-Space Fluid Surface")]
         [Tooltip("Particle sphere radius multiplier used only by the screen-space fluid pass. Larger values fuse neighbouring particles into a smoother, gap-free surface.")]
@@ -136,6 +124,16 @@ namespace PaintBucketSim.Configs
         [Tooltip("Main light direction used for the fluid specular/diffuse shading, if no scene directional light is bound.")]
         public Vector3 fluidLightDirection = new Vector3(0.35f, 0.85f, 0.25f);
 
+        [Header("Screen-Space Fluid Shaders")]
+        [Tooltip("Sphere-imposter shader used to write fluid depth and thickness. Keep assigned so builds do not strip it.")]
+        public Shader fluidParticleImposterShader;
+
+        [Tooltip("Bilateral depth blur shader used by the screen-space fluid surface. Keep assigned so builds do not strip it.")]
+        public Shader fluidDepthBlurShader;
+
+        [Tooltip("Fullscreen composite shader for the shaded fluid surface. Keep assigned so builds do not strip it.")]
+        public Shader fluidCompositeShader;
+
         [Header("State Filtering")]
         [Tooltip("Hide particles that have already been deposited/absorbed on the canvas, or marked lost/inactive.")]
         public bool hideCanvasAndLostParticles = true;
@@ -151,18 +149,6 @@ namespace PaintBucketSim.Configs
 
         private void OnValidate()
         {
-            if (maxRenderedParticles < 1)
-                maxRenderedParticles = 1;
-
-            if (maxRenderedParticles > 2000000)
-                maxRenderedParticles = 2000000;
-
-            if (renderStride < 1)
-                renderStride = 1;
-
-            if (uploadEveryNFrames < 1)
-                uploadEveryNFrames = 1;
-
             if (visualRadiusScale < 0.001f)
                 visualRadiusScale = 0.001f;
 

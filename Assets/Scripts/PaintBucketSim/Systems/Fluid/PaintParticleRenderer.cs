@@ -63,25 +63,12 @@ namespace PaintBucketSim.Systems.Fluid
         {
             int particleCount = paintFluidSystem.ParticleCount;
 
-            int stride = 1;
-            int maxRendered = particleCount;
-
-            if (paintFluidConfig != null && paintFluidConfig.enableRenderLod)
-            {
-                stride = Mathf.Max(1, paintFluidConfig.renderStride);
-                maxRendered = Mathf.Min(
-                    particleCount,
-                    Mathf.Max(1, paintFluidConfig.maxRenderedParticles)
-                );
-
-                if (particleCount > maxRendered)
-                {
-                    stride = Mathf.Max(
-                        stride,
-                        Mathf.CeilToInt((float)particleCount / maxRendered)
-                    );
-                }
-            }
+            int stride = paintFluidConfig != null
+                ? paintFluidConfig.GetRenderStride(particleCount)
+                : 1;
+            int maxRendered = paintFluidConfig != null
+                ? paintFluidConfig.GetRenderParticleBudget(particleCount)
+                : particleCount;
 
             int rendered = 0;
             int batchCount = 0;

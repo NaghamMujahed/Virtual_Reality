@@ -13,7 +13,7 @@ namespace PaintSim.Scripts.Rendering
         private RenderTexture _paintTexture;
         private RenderTexture _surfaceDataTexture;
         private Color _canvasBaseColor = new Color(0.72f, 0.65f, 0.55f, 1.0f);
-        private Material _runtimeFallbackMaterial;
+        private Material _runtimeDefaultMaterial;
 
         private readonly int _kernelIndex;
 
@@ -72,6 +72,7 @@ namespace PaintSim.Scripts.Rendering
 
         public float MaxThickness = 0.0001f;
         public float WetnessShine = 0.8f;
+        public RenderTexture PaintTexture => _paintTexture;
 
         public PaintSurfaceRenderer(
             ComputeShader bakerShader,
@@ -230,18 +231,18 @@ namespace PaintSim.Scripts.Rendering
                 if (shader == null)
                     return null;
 
-                _runtimeFallbackMaterial = new Material(shader)
+                _runtimeDefaultMaterial = new Material(shader)
                 {
                     name = "Runtime Paint Surface Material"
                 };
 
-                if (_runtimeFallbackMaterial.HasProperty(ID_BaseColor))
-                    _runtimeFallbackMaterial.SetColor(ID_BaseColor, _canvasBaseColor);
+                if (_runtimeDefaultMaterial.HasProperty(ID_BaseColor))
+                    _runtimeDefaultMaterial.SetColor(ID_BaseColor, _canvasBaseColor);
 
-                if (_runtimeFallbackMaterial.HasProperty(ID_Color))
-                    _runtimeFallbackMaterial.SetColor(ID_Color, _canvasBaseColor);
+                if (_runtimeDefaultMaterial.HasProperty(ID_Color))
+                    _runtimeDefaultMaterial.SetColor(ID_Color, _canvasBaseColor);
 
-                _surfaceRenderer.sharedMaterial = _runtimeFallbackMaterial;
+                _surfaceRenderer.sharedMaterial = _runtimeDefaultMaterial;
             }
 
             return Application.isPlaying
@@ -307,14 +308,14 @@ namespace PaintSim.Scripts.Rendering
                 _surfaceDataTexture = null;
             }
 
-            if (_runtimeFallbackMaterial != null)
+            if (_runtimeDefaultMaterial != null)
             {
                 if (Application.isPlaying)
-                    Object.Destroy(_runtimeFallbackMaterial);
+                    Object.Destroy(_runtimeDefaultMaterial);
                 else
-                    Object.DestroyImmediate(_runtimeFallbackMaterial);
+                    Object.DestroyImmediate(_runtimeDefaultMaterial);
 
-                _runtimeFallbackMaterial = null;
+                _runtimeDefaultMaterial = null;
             }
         }
     }

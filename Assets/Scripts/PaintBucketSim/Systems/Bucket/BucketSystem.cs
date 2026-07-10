@@ -76,6 +76,21 @@ namespace PaintBucketSim.Systems.Bucket
             Initialize(context);
         }
 
+        public void RefreshHoleConfiguration()
+        {
+            if (!IsInitialized || bucketConfig == null)
+                return;
+
+            int holeCount = bucketConfig.holes != null
+                ? bucketConfig.holes.Length
+                : 0;
+            if (_data.Holes == null || _data.Holes.Length != holeCount)
+                _data.AllocateHoles(holeCount);
+
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
         public void Step(SimulationContext context, float dt)
         {
             if (!IsInitialized)

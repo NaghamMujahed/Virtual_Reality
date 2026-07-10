@@ -8,12 +8,6 @@ namespace PaintBucketSim.Configs
         ManualSpacing = 1
     }
 
-    public enum FluidPreviewMode
-    {
-        FollowBucketKinematically = 0,
-        FixedWorldPositions = 1
-    }
-
     public enum FluidColorCompartmentAxis
     {
         BucketLocalX = 0,
@@ -26,6 +20,8 @@ namespace PaintBucketSim.Configs
         menuName = "Paint Bucket Sim/Paint Fluid Config")]
     public class PaintFluidConfig : ScriptableObject
     {
+        private const float ParticleCapacityHeadroomMultiplier = 1.5f;
+
         [Header("Initialization")]
         public FluidInitializationMode initializationMode = FluidInitializationMode.TargetParticleCount;
 
@@ -87,24 +83,11 @@ namespace PaintBucketSim.Configs
         [Tooltip("Use physical divider thickness when removing initial particles from divider volume.")]
         public bool carveInitialParticlesAroundPhysicalDividers = true;
 
-        [Header("Runtime Preview")]
-        [Tooltip("Before the real PBF solver is added, particles can follow the bucket for visualization.")]
-        public FluidPreviewMode previewMode = FluidPreviewMode.FollowBucketKinematically;
-
-        [Header("Capacity")]
-        [Tooltip("Hard capacity for NativeArrays. Keep higher than the target count if you plan to increase particles.")]
-        [Min(1)]
-        public int maxParticleCapacity = 25000;
-
         [Header("Rendering")]
         public bool renderParticles = true;
 
         [Min(0.001f)]
         public float visualParticleSizeScale = 1.0f;
-
-        [Tooltip("Warning threshold for high particle count in current renderer.")]
-        [Min(1000)]
-        public int highParticleWarningThreshold = 50000;
 
         [Header("Render LOD")]
         public bool enableRenderLod = true;
@@ -117,13 +100,46 @@ namespace PaintBucketSim.Configs
         [Min(1)]
         public int renderStride = 1;
 
+        public int ParticleCapacity =>
+            Mathf.Max(
+                1,
+                Mathf.CeilToInt(
+                    Mathf.Max(1, targetParticleCount) *
+                    ParticleCapacityHeadroomMultiplier
+                )
+            );
+
+        public int GetRenderParticleBudget(int availableParticleCount)
+        {
+            int available = Mathf.Max(0, availableParticleCount);
+            if (available == 0)
+                return 0;
+
+            if (!enableRenderLod)
+                return available;
+
+            return Mathf.Min(available, Mathf.Max(1, maxRenderedParticles));
+        }
+
+        public int GetRenderStride(int availableParticleCount)
+        {
+            int stride = Mathf.Max(1, renderStride);
+
+            if (!enableRenderLod)
+                return stride;
+
+            int available = Mathf.Max(0, availableParticleCount);
+            int budget = Mathf.Max(1, maxRenderedParticles);
+            if (available > budget)
+                stride = Mathf.Max(stride, Mathf.CeilToInt(available / (float)budget));
+
+            return stride;
+        }
+
         private void OnValidate()
         {
             if (targetParticleCount < 1)
                 targetParticleCount = 1;
-
-            if (maxParticleCapacity < targetParticleCount)
-                maxParticleCapacity = targetParticleCount;
 
             if (manualParticleSpacingMeters < 0.005f)
                 manualParticleSpacingMeters = 0.005f;

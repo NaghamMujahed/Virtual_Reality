@@ -3,7 +3,7 @@
     public enum FluidSolverType
     {
         CpuPbf = 0,
-        GpuSparseMpmPrototype = 1
+        GpuMpm = 1
     }
 
     public enum FluidSolverStatus
@@ -11,9 +11,7 @@
         NotInitialized = 0,
         Running = 1,
         Disabled = 2,
-        Fallback = 3,
-        NotImplemented = 4,
-        Error = 5
+        Error = 3
     }
 
     public struct FluidSolverStepInput

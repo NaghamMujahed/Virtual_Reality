@@ -174,7 +174,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private const int DiagnosticJetColumnParticles = 33;
         private const int DiagnosticJetColumnSpreadSum = 34;
 
-        public FluidSolverType SolverType => FluidSolverType.GpuSparseMpmPrototype;
+        public FluidSolverType SolverType => FluidSolverType.GpuMpm;
         public bool IsInitialized { get; private set; }
         public FluidSolverStats Stats => _stats;
 
@@ -214,7 +214,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             _stats = new FluidSolverStats
             {
-                solverType = FluidSolverType.GpuSparseMpmPrototype,
+                solverType = FluidSolverType.GpuMpm,
                 status = FluidSolverStatus.Running,
                 particleCount = gpuBuffers.UploadedParticleCount,
                 solverIterations = 1,
@@ -231,7 +231,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (context.GpuMpmConfig.logLifecycle)
             {
                 UnityEngine.Debug.Log(
-                    "GpuMpmDenseLocalSolver: Initialized dense local GPU MPM prototype. " +
+                    "GpuMpmDenseLocalSolver: Initialized dense local GPU MPM solver. " +
                     $"Particles={gpuBuffers.UploadedParticleCount}, " +
                     $"GridRes={_runtimeGridResolution.x}x{_runtimeGridResolution.y}x{_runtimeGridResolution.z}, " +
                     $"GridNodes={_runtimeGridNodeCount}"
@@ -518,7 +518,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                     UnityEngine.Debug.LogError(
                         "GpuMpmDenseLocalSolver: The required tiled MLS-MPM path " +
                         "is unavailable. The rejected particle-ordering and dense " +
-                        "P2G fallbacks are intentionally disabled."
+                        "Only the tiled MLS-MPM execution path is enabled."
                     );
                 }
                 return;
@@ -749,7 +749,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             }
 
             bool runAirborneAdvection =
-                ShouldRunAirborneAdvection(solverContext.GpuMpmConfig);
+                ShouldRunAirborneAdvection(solverContext);
             int airborneDispatches = 0;
             if (runAirborneAdvection)
             {
@@ -998,7 +998,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.pressureJacobiRelaxation = 0.0f;
 
             _stats.pressureRedBlackSorOmega =
-                ResolvePressureSorOmega(solverContext.GpuMpmConfig);
+                ResolvePressureSorOmega(solverContext);
 
             _stats.maxProjectionPressure = solverContext.GpuMpmConfig.maxProjectionPressure;
 
@@ -1027,9 +1027,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.gpuGridOriginZ = _runtimeGridOriginLocal.z;
             _stats.gpuDiagnosticsEnabled = solverContext.GpuMpmConfig.enableGpuDiagnostics;
             _stats.gpuConfiguredHoleCount = _uploadedBucketHoleCount;
-            _stats.gpuHoleOpeningEnabled =
-                solverContext.GpuMpmConfig.enableBottomHoleOpening &&
-                _uploadedBucketHoleCount > 0;
+            _stats.gpuHoleOpeningEnabled = _uploadedBucketHoleCount > 0;
             _stats.gpuAirborneAdvectionEnabled =
                 solverContext.GpuMpmConfig.enableAirborneParticleAdvection;
             _stats.gpuAirborneDispatchRan = runAirborneAdvection;
@@ -1580,52 +1578,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetFloat("_ApicDInverse", dInverse);
 
-            float mpmViscosity = context.GpuMpmConfig.mpmViscosity;
-            float lowShearViscosity = context.GpuMpmConfig.lowShearViscosity;
-            float highShearViscosity = context.GpuMpmConfig.highShearViscosity;
-            float shearThinningRelaxationTime =
-                context.GpuMpmConfig.shearThinningRelaxationTime;
-            float shearThinningPowerN = context.GpuMpmConfig.shearThinningPowerN;
-            float carreauYasudaExponent =
-                context.GpuMpmConfig.carreauYasudaExponent;
-            float yieldStress = context.GpuMpmConfig.yieldStress;
-
-            if (context.GpuMpmConfig.usePaintMaterialConfigRheology &&
-                context.MaterialConfig != null)
-            {
-                PaintMaterialConfig material = context.MaterialConfig;
-
-                mpmViscosity = Mathf.Clamp(
-                    material.EvaluateViscosity(20.0f, 20.0f),
-                    0.0001f,
-                    context.GpuMpmConfig.maxEffectiveViscosity
-                );
-                lowShearViscosity = Mathf.Max(
-                    material.EvaluateViscosity(0.05f, 20.0f),
-                    0.0001f
-                );
-                highShearViscosity = Mathf.Max(
-                    material.EvaluateViscosity(80.0f, 20.0f),
-                    0.0001f
-                );
-
-                if (highShearViscosity > lowShearViscosity)
-                    highShearViscosity = lowShearViscosity;
-
-                shearThinningRelaxationTime =
-                    Mathf.Max(material.relaxationTimeSeconds, 0.0001f);
-                shearThinningPowerN = Mathf.Clamp(
-                    material.flowIndex,
-                    0.05f,
-                    1.0f
-                );
-                carreauYasudaExponent = Mathf.Clamp(
-                    material.yasudaExponent,
-                    0.25f,
-                    8.0f
-                );
-                yieldStress = Mathf.Max(material.yieldStressPa, 0.0f);
-            }
+            PaintRheologyProfile rheology =
+                context.MaterialConfig.EvaluateRheologyProfile(20.0f);
+            float mpmViscosity = Mathf.Clamp(
+                rheology.mpmViscosityPaS,
+                0.0001f,
+                context.GpuMpmConfig.maxEffectiveViscosity
+            );
 
             compute.SetInt("_EnableMaterialStress", context.GpuMpmConfig.enableMaterialStress ? 1 : 0);
             compute.SetFloat("_BulkModulus", context.GpuMpmConfig.bulkModulus);
@@ -1636,13 +1595,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetFloat("_MaxJ", context.GpuMpmConfig.maxJ);
             compute.SetInt("_EnablePaintRheology", context.GpuMpmConfig.enablePaintRheology ? 1 : 0);
 
-            compute.SetFloat("_LowShearViscosity", lowShearViscosity);
-            compute.SetFloat("_HighShearViscosity", highShearViscosity);
-            compute.SetFloat("_ShearThinningRelaxationTime", shearThinningRelaxationTime);
-            compute.SetFloat("_ShearThinningPowerN", shearThinningPowerN);
-            compute.SetFloat("_CarreauYasudaExponent", carreauYasudaExponent);
+            compute.SetFloat("_LowShearViscosity", rheology.lowShearViscosityPaS);
+            compute.SetFloat("_HighShearViscosity", rheology.highShearViscosityPaS);
+            compute.SetFloat("_ShearThinningRelaxationTime", rheology.relaxationTimeSeconds);
+            compute.SetFloat("_ShearThinningPowerN", rheology.flowIndex);
+            compute.SetFloat("_CarreauYasudaExponent", rheology.yasudaExponent);
 
-            compute.SetFloat("_YieldStress", yieldStress);
+            compute.SetFloat("_YieldStress", rheology.yieldStressPa);
             compute.SetFloat("_YieldRegularizationRate", context.GpuMpmConfig.yieldRegularizationRate);
             compute.SetFloat("_MaxYieldViscosityContribution", context.GpuMpmConfig.maxYieldViscosityContribution);
             compute.SetFloat("_MaxEffectiveViscosity", context.GpuMpmConfig.maxEffectiveViscosity);
@@ -1800,14 +1759,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.SetFloat("_LocalGravityMagnitude", _localGravityMagnitude);
 
             // Viscosity-driven discharge coefficient (thin paint jets faster).
-            float viscosity = cfg.lowShearViscosity;
-            if (cfg.usePaintMaterialConfigRheology &&
-                context.MaterialConfig != null)
-            {
-                viscosity = Mathf.Max(
-                    context.MaterialConfig.EvaluateViscosity(0.5f, 20.0f),
-                    1e-4f);
-            }
+            float viscosity = Mathf.Max(
+                context.MaterialConfig.EvaluateViscosity(0.5f, 20.0f),
+                1e-4f);
             float refVisc = Mathf.Max(cfg.outflowDischargeReferenceViscosity, 0.01f);
             float cd = cfg.outflowBaseDischargeCoefficient *
                        refVisc / (refVisc + Mathf.Max(viscosity, 0.0f));
@@ -1835,8 +1789,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         // scaling is on, the coherence length and collimation strength are
         // derived from the authoritative PaintMaterialConfig rheology so the jet
         // reads as the selected paint (thin -> short, breaks into droplets;
-        // heavy body -> a long coherent rope). The inspector base values on
-        // GpuMpmSolverConfig are the scaling-off fallback / GPU-preset path.
+        // heavy body -> a long coherent rope).
         private void SetJetColumnCoherenceParameters(
             FluidSolverContext context,
             ComputeShader compute)
@@ -1854,7 +1807,6 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             float columnDragScale = cfg.jetColumnDragScale;
 
             if (cfg.jetCoherenceMaterialScaling &&
-                cfg.usePaintMaterialConfigRheology &&
                 context.MaterialConfig != null)
             {
                 // Neutral latex-reference anchors; a matching latex material
@@ -2578,13 +2530,33 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             compute.Dispatch(kernel, Groups(particleCount), 1, 1);
         }
 
-        private bool ShouldRunAirborneAdvection(GpuMpmSolverConfig config)
+        private static bool HasActiveBucketHoles(FluidSolverContext context)
         {
+            BucketConfig config = context != null &&
+                                  context.BucketSystem != null
+                ? context.BucketSystem.Config
+                : null;
+            BucketHoleConfig[] holes = config != null ? config.holes : null;
+            if (holes == null)
+                return false;
+
+            for (int i = 0; i < holes.Length; i++)
+            {
+                if (holes[i] != null && holes[i].active)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool ShouldRunAirborneAdvection(FluidSolverContext context)
+        {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
             if (!config.enableAirborneParticleAdvection)
                 return false;
 
             bool canCreateAirDomainParticles =
-                config.enableBottomHoleOpening ||
+                HasActiveBucketHoles(context) ||
                 config.topBoundaryMode == GpuBucketTopMode.MarkSpilled;
 
             if (canCreateAirDomainParticles)
@@ -2609,20 +2581,21 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             if (!config.enableAdaptivePostG2PBucketCollision)
                 return true;
 
-            return config.enableBottomHoleOpening ||
+            return _uploadedBucketHoleCount > 0 ||
                    config.topBoundaryMode == GpuBucketTopMode.MarkSpilled;
         }
 
         private float ResolvePressureSorOmega(
-            GpuMpmSolverConfig config)
+            FluidSolverContext context)
         {
+            GpuMpmSolverConfig config = context.GpuMpmConfig;
             float configured = Mathf.Clamp(
                 config.pressureRedBlackSorOmega,
                 0.05f,
                 1.95f
             );
 
-            if (config.enableBottomHoleOpening)
+            if (HasActiveBucketHoles(context))
                 return Mathf.Min(configured, 1.35f);
 
             bool stronglyAcceleratingFrame =
@@ -2683,7 +2656,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                         0.0f,
                         config.adaptiveProjectionBucketAngularSpeed
                     ) ||
-                config.enableBottomHoleOpening ||
+                HasActiveBucketHoles(context) ||
                 _adaptiveAirParticleCount > 0;
 
             bool calmCandidate =
@@ -2794,7 +2767,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 1,
                 2
             );
-            if (config.enableBottomHoleOpening)
+            if (HasActiveBucketHoles(context))
                 ownerListInterval = 1;
             if (currentParticleCount <
                 Mathf.Max(0, config.ownerTileListReuseMinParticles))
@@ -3360,11 +3333,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             int activeHoleCount = UploadBucketHoleData(context);
             bool hasHole = activeHoleCount > 0;
 
-            compute.SetInt("_ClassifyBottomHoleRegion",
-                context.GpuMpmConfig.classifyBottomHoleRegion && hasHole ? 1 : 0);
+            compute.SetInt("_ClassifyBottomHoleRegion", hasHole ? 1 : 0);
 
-            compute.SetInt("_EnableBottomHoleOpening",
-                context.GpuMpmConfig.enableBottomHoleOpening && hasHole ? 1 : 0);
+            compute.SetInt("_EnableBottomHoleOpening", hasHole ? 1 : 0);
 
             compute.SetInt("_BucketHoleCount", activeHoleCount);
 
@@ -3677,7 +3648,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
 
             compute.SetFloat(
                 "_ProjectionPressureSorOmega",
-                ResolvePressureSorOmega(context.GpuMpmConfig)
+                ResolvePressureSorOmega(context)
             );
 
             compute.SetFloat(

@@ -9,16 +9,6 @@ namespace PaintBucketSim.Configs
         MarkSpilled = 2
     }
 
-    public enum GpuPaintMaterialPreset
-    {
-        Custom = 0,
-        WaterLike = 1,
-        ThinPaint = 2,
-        LatexPaint = 3,
-        ThickPaint = 4,
-        HeavyBodyPaint = 5
-    }
-
     [CreateAssetMenu(
         fileName = "GpuMpmSolverConfig",
         menuName = "Paint Bucket Sim/GPU MPM Solver Config")]
@@ -74,11 +64,11 @@ namespace PaintBucketSim.Configs
         [Header("Simulation")]
         public bool enableGpuDenseMpm = true;
 
-        [Tooltip("Gravity multiplier inside GPU MPM prototype.")]
+        [Tooltip("Gravity multiplier inside the GPU MPM solver.")]
         [Range(0.0f, 2.0f)]
         public float gravityScale = 1.0f;
 
-        [Tooltip("Velocity damping used only for this early prototype.")]
+        [Tooltip("Velocity damping applied inside the GPU MPM solver.")]
         [Range(0.0f, 5.0f)]
         public float velocityDampingPerSecond = 0.05f;
 
@@ -131,15 +121,15 @@ namespace PaintBucketSim.Configs
         public int diagnosticsReadbackInterval = 15;
 
         [Header("MLS-MPM Affine Transfer")]
-        [Tooltip("Damping applied to affine C each step to prevent early prototype instability.")]
+        [Tooltip("Damping applied to affine C each step for numerical stability.")]
         [Range(0.0f, 1.0f)]
         public float affineDamping = 0.02f;
 
-        [Tooltip("Clamp affine C values to avoid explosion in early prototype.")]
+        [Tooltip("Clamp affine C values for numerical stability.")]
         [Min(0.1f)]
         public float maxAffineMagnitude = 25.0f;
 
-        [Tooltip("Approximate inverse D matrix scale. For linear prototype, 4 / dx² is a useful starting approximation.")]
+        [Tooltip("Approximate inverse D matrix scale. 4 / dx² is a useful starting approximation.")]
         public bool useAutomaticApicDInverse = true;
 
         [Min(0.0001f)]
@@ -243,7 +233,7 @@ namespace PaintBucketSim.Configs
         [Tooltip("If true, cells above the bucket top are treated as air. If false, top can behave like a temporary lid.")]
         public bool projectionTopOpen = true;
 
-        [Header("MLS/MPM Material Prototype")]
+        [Header("MLS/MPM Material Response")]
         public bool enableMaterialStress = true;
 
         [Header("Bucket-Local Grid Density Predictor")]
@@ -266,66 +256,27 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float gridDensityEosMaxVelocityCorrection = 0.2f;
 
-        [Tooltip("Simple bulk modulus used for weakly-compressible paint prototype. Start low for stability.")]
+        [Tooltip("Bulk modulus used for weakly-compressible paint. Start low for stability.")]
         [Min(0.0f)]
         public float bulkModulus = 1500.0f;
-
-        [Tooltip("Simple viscous stress coefficient. This is not the final paint rheology yet.")]
-        [Min(0.0f)]
-        public float mpmViscosity = 0.2f;
 
         [Tooltip("Global multiplier for stress contribution during P2G.")]
         [Range(0.0f, 1.0f)]
         public float materialStressStrength = 0.25f;
 
-        [Tooltip("Clamp stress components to prevent early prototype explosions.")]
+        [Tooltip("Clamp stress components for numerical stability.")]
         [Min(1.0f)]
         public float maxStressMagnitude = 5000.0f;
 
-        [Tooltip("Clamp determinant J to keep the prototype stable.")]
+        [Tooltip("Clamp determinant J for numerical stability.")]
         [Range(0.1f, 1.0f)]
         public float minJ = 0.4f;
 
         [Range(1.0f, 3.0f)]
         public float maxJ = 1.8f;
 
-        [Header("Professional Paint Material Presets")]
-        [Tooltip("High-level material preset. Custom leaves the numeric solver values editable; the named presets apply a consistent rheology, cohesion, and pressure-stability package.")]
-        public GpuPaintMaterialPreset paintMaterialPreset =
-            GpuPaintMaterialPreset.LatexPaint;
-
-        [Tooltip("When true, selecting a named material preset in the inspector drives the numeric rheology/cohesion/incompressibility fields. Turn off if you want to keep a named preset label while manually tuning values.")]
-        public bool autoApplyPaintMaterialPreset = true;
-
-        [Tooltip("When true, GPU MLS-MPM rheology values are sourced from PaintMaterialConfig. The fields below remain as legacy fallback / numerical-stability tuning, not the authoritative material definition.")]
-        public bool usePaintMaterialConfigRheology = true;
-
-        [Header("Paint Rheology / Non-Newtonian Prototype")]
+        [Header("Paint Rheology Solver Response")]
         public bool enablePaintRheology = true;
-
-        [Tooltip("Low-shear viscosity. Higher means the paint resists slow motion more.")]
-        [Min(0.0f)]
-        public float lowShearViscosity = 2.0f;
-
-        [Tooltip("High-shear viscosity. Lower than lowShearViscosity for shear-thinning paint.")]
-        [Min(0.0f)]
-        public float highShearViscosity = 0.15f;
-
-        [Tooltip("Controls when shear-thinning becomes visible. Higher = stronger dependence on shear rate.")]
-        [Min(0.0f)]
-        public float shearThinningRelaxationTime = 0.8f;
-
-        [Tooltip("Flow index. n < 1 means shear-thinning. Start around 0.45 to 0.8.")]
-        [Range(0.05f, 1.0f)]
-        public float shearThinningPowerN = 0.55f;
-
-        [Tooltip("Carreau-Yasuda transition sharpness a. a=2 reduces to the classic Carreau form; higher values create a sharper transition from low-shear to high-shear viscosity.")]
-        [Range(0.25f, 8.0f)]
-        public float carreauYasudaExponent = 2.0f;
-
-        [Tooltip("Yield-like stress. Higher means the paint behaves more resistant at very low shear.")]
-        [Min(0.0f)]
-        public float yieldStress = 0.0f;
 
         [Tooltip("Papanastasiou-style regularization rate for yield stress. Higher values make yield behavior sharper; lower values are smoother and safer.")]
         [Min(0.0f)]
@@ -404,12 +355,7 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float topBoundaryPadding = 0.01f;
 
-        [Header("GPU Hole Region - Prototype")]
-        public bool classifyBottomHoleRegion = true;
-
-        [Tooltip("If true, particles inside active GPU hole apertures are allowed to pass through the bucket wall.")]
-        public bool enableBottomHoleOpening = false;
-
+        [Header("GPU Hole Region")]
         [Tooltip("Maximum number of active BucketConfig holes uploaded to the GPU solver.")]
         [Range(1, 64)]
         public int maxGpuBucketHoles = 16;
@@ -427,7 +373,7 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float holeOutflowExitDistanceMeters = 0.004f;
 
-        [Header("GPU Outflow / Airborne Prototype")]
+        [Header("GPU Outflow / Airborne")]
         public bool enableAirborneParticleAdvection = true;
 
         [Tooltip("Skip the airborne-particle pass while holes are closed and no airborne/spilled particles have been produced.")]
@@ -735,39 +681,11 @@ namespace PaintBucketSim.Configs
                 1.1f
             );
 
-            if (mpmViscosity < 0.0f)
-                mpmViscosity = 0.0f;
-
             if (maxStressMagnitude < 1.0f)
                 maxStressMagnitude = 1.0f;
 
-            if (autoApplyPaintMaterialPreset &&
-                paintMaterialPreset != GpuPaintMaterialPreset.Custom)
-            {
-                ApplyPaintMaterialPreset(paintMaterialPreset);
-            }
-
             minJ = Mathf.Clamp(minJ, 0.1f, 1.0f);
             maxJ = Mathf.Clamp(maxJ, 1.0f, 3.0f);
-
-            if (lowShearViscosity < 0.0f)
-                lowShearViscosity = 0.0f;
-
-            if (highShearViscosity < 0.0f)
-                highShearViscosity = 0.0f;
-
-            if (shearThinningRelaxationTime < 0.0f)
-                shearThinningRelaxationTime = 0.0f;
-
-            shearThinningPowerN = Mathf.Clamp(shearThinningPowerN, 0.05f, 1.0f);
-            carreauYasudaExponent = Mathf.Clamp(
-                carreauYasudaExponent,
-                0.25f,
-                8.0f
-            );
-
-            if (yieldStress < 0.0f)
-                yieldStress = 0.0f;
 
             if (yieldRegularizationRate < 0.0f)
                 yieldRegularizationRate = 0.0f;
@@ -777,9 +695,6 @@ namespace PaintBucketSim.Configs
 
             if (maxEffectiveViscosity < 0.001f)
                 maxEffectiveViscosity = 0.001f;
-
-            if (highShearViscosity > lowShearViscosity)
-                highShearViscosity = lowShearViscosity;
 
             if (freeSurfaceGradientScale < 1e-6f)
                 freeSurfaceGradientScale = 1e-6f;
@@ -911,170 +826,6 @@ namespace PaintBucketSim.Configs
             if (maxPressureVelocityCorrection < 0.01f)
                 maxPressureVelocityCorrection = 0.01f;
 
-        }
-
-        public void ApplyPaintMaterialPreset()
-        {
-            ApplyPaintMaterialPreset(paintMaterialPreset);
-        }
-
-        public void ApplyPaintMaterialPreset(GpuPaintMaterialPreset preset)
-        {
-            paintMaterialPreset = preset;
-
-            if (preset == GpuPaintMaterialPreset.Custom)
-                return;
-
-            enableMaterialStress = true;
-            enablePaintRheology = true;
-            enableFreeSurfacePolish = true;
-            enableJetCohesion = true;
-            enableJetColumnCoherence = true;
-            jetColumnMinAxialSpeed = 0.5f;
-            maxJetColumnVelocityCorrectionPerSubstep = 0.5f;
-            referenceClampNegativePressure = true;
-            referenceEosExponent = 5.0f;
-            pressureRedBlackSorIterations = Mathf.Max(
-                pressureRedBlackSorIterations,
-                10
-            );
-            bulkModulus = 850.0f;
-            // gridDensityEosPressureScale = 2.8f;
-            gridDensityEosActivationRatio = 1.01f;
-            projectionDensityDriftStrength = 0.8f;
-            projectionDensityDriftMinRatio = 1.005f;
-            projectionDensityDriftMaxDivergence = 40.0f;
-            materialStressStrength = 0.65f;
-            minJ = 0.65f;
-            maxJ = 1.35f;
-
-            switch (preset)
-            {
-                case GpuPaintMaterialPreset.WaterLike:
-                    maxStressMagnitude = 4500.0f;
-                    gridDensityEosMaxVelocityCorrection = 0.2f;
-                    maxPressureVelocityCorrection = 2.5f;
-                    mpmViscosity = 0.02f;
-                    lowShearViscosity = 0.02f;
-                    highShearViscosity = 0.01f;
-                    shearThinningRelaxationTime = 0.05f;
-                    shearThinningPowerN = 1.0f;
-                    carreauYasudaExponent = 2.0f;
-                    yieldStress = 0.0f;
-                    yieldRegularizationRate = 15.0f;
-                    maxYieldViscosityContribution = 0.25f;
-                    maxEffectiveViscosity = 0.5f;
-                    freeSurfaceNormalDampingPerSecond = 1.5f;
-                    freeSurfaceCohesionAcceleration = 0.25f;
-                    maxFreeSurfaceVelocityCorrection = 0.25f;
-                    jetCohesionAcceleration = 0.15f;
-                    maxJetCohesionVelocityCorrection = 0.12f;
-                    jetCoherenceLengthMeters = 0.10f;
-                    jetTransverseDampingPerSecond = 6.0f;
-                    jetCenterlineAttractionPerSecond = 12.0f;
-                    jetColumnDragScale = 0.7f;
-                    break;
-
-                case GpuPaintMaterialPreset.ThinPaint:
-                    maxStressMagnitude = 6500.0f;
-                    gridDensityEosMaxVelocityCorrection = 0.2f;
-                    maxPressureVelocityCorrection = 2.8f;
-                    mpmViscosity = 0.10f;
-                    lowShearViscosity = 1.0f;
-                    highShearViscosity = 0.08f;
-                    shearThinningRelaxationTime = 0.45f;
-                    shearThinningPowerN = 0.68f;
-                    carreauYasudaExponent = 2.0f;
-                    yieldStress = 0.10f;
-                    yieldRegularizationRate = 20.0f;
-                    maxYieldViscosityContribution = 1.5f;
-                    maxEffectiveViscosity = 4.0f;
-                    freeSurfaceNormalDampingPerSecond = 2.1f;
-                    freeSurfaceCohesionAcceleration = 0.65f;
-                    maxFreeSurfaceVelocityCorrection = 0.32f;
-                    jetCohesionAcceleration = 0.40f;
-                    maxJetCohesionVelocityCorrection = 0.18f;
-                    jetCoherenceLengthMeters = 0.22f;
-                    jetTransverseDampingPerSecond = 10.0f;
-                    jetCenterlineAttractionPerSecond = 20.0f;
-                    jetColumnDragScale = 0.5f;
-                    break;
-
-                case GpuPaintMaterialPreset.LatexPaint:
-                    maxStressMagnitude = 5200.0f;
-                    gridDensityEosMaxVelocityCorrection = 0.2f;
-                    maxPressureVelocityCorrection = 2.2f;
-                    mpmViscosity = 0.28f;
-                    lowShearViscosity = 3.2f;
-                    highShearViscosity = 0.16f;
-                    shearThinningRelaxationTime = 0.8f;
-                    shearThinningPowerN = 0.55f;
-                    carreauYasudaExponent = 2.2f;
-                    yieldStress = 0.08f;
-                    yieldRegularizationRate = 25.0f;
-                    maxYieldViscosityContribution = 3.0f;
-                    maxEffectiveViscosity = 9.0f;
-                    freeSurfaceNormalDampingPerSecond = 4.5f;
-                    freeSurfaceCohesionAcceleration = 0.25f;
-                    maxFreeSurfaceVelocityCorrection = 0.18f;
-                    jetCohesionAcceleration = 0.15f;
-                    maxJetCohesionVelocityCorrection = 0.08f;
-                    jetCoherenceLengthMeters = 0.38f;
-                    jetTransverseDampingPerSecond = 16.0f;
-                    jetCenterlineAttractionPerSecond = 30.0f;
-                    jetColumnDragScale = 0.35f;
-                    break;
-
-                case GpuPaintMaterialPreset.ThickPaint:
-                    maxStressMagnitude = 8500.0f;
-                    gridDensityEosMaxVelocityCorrection = 0.2f;
-                    maxPressureVelocityCorrection = 3.0f;
-                    mpmViscosity = 0.22f;
-                    lowShearViscosity = 4.0f;
-                    highShearViscosity = 0.18f;
-                    shearThinningRelaxationTime = 1.15f;
-                    shearThinningPowerN = 0.48f;
-                    carreauYasudaExponent = 2.4f;
-                    yieldStress = 0.25f;
-                    yieldRegularizationRate = 30.0f;
-                    maxYieldViscosityContribution = 2.0f;
-                    maxEffectiveViscosity = 9.0f;
-                    freeSurfaceNormalDampingPerSecond = 2.8f;
-                    freeSurfaceCohesionAcceleration = 0.9f;
-                    maxFreeSurfaceVelocityCorrection = 0.4f;
-                    jetCohesionAcceleration = 0.65f;
-                    maxJetCohesionVelocityCorrection = 0.24f;
-                    jetCoherenceLengthMeters = 0.60f;
-                    jetTransverseDampingPerSecond = 20.0f;
-                    jetCenterlineAttractionPerSecond = 34.0f;
-                    jetColumnDragScale = 0.28f;
-                    break;
-
-                case GpuPaintMaterialPreset.HeavyBodyPaint:
-                    maxStressMagnitude = 9000.0f;
-                    gridDensityEosMaxVelocityCorrection = 0.2f;
-                    maxPressureVelocityCorrection = 3.0f;
-                    mpmViscosity = 0.30f;
-                    lowShearViscosity = 5.5f;
-                    highShearViscosity = 0.25f;
-                    shearThinningRelaxationTime = 1.6f;
-                    shearThinningPowerN = 0.42f;
-                    carreauYasudaExponent = 2.6f;
-                    yieldStress = 0.35f;
-                    yieldRegularizationRate = 35.0f;
-                    maxYieldViscosityContribution = 2.5f;
-                    maxEffectiveViscosity = 10.0f;
-                    freeSurfaceNormalDampingPerSecond = 3.0f;
-                    freeSurfaceCohesionAcceleration = 1.0f;
-                    maxFreeSurfaceVelocityCorrection = 0.42f;
-                    jetCohesionAcceleration = 0.8f;
-                    maxJetCohesionVelocityCorrection = 0.28f;
-                    jetCoherenceLengthMeters = 0.85f;
-                    jetTransverseDampingPerSecond = 24.0f;
-                    jetCenterlineAttractionPerSecond = 38.0f;
-                    jetColumnDragScale = 0.22f;
-                    break;
-            }
         }
 
         private static int NormalizeTileSizeCells(int value)

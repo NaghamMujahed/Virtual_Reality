@@ -34,6 +34,8 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         private GpuFluidBufferStats _stats;
 
         public GpuFluidBufferConfig Config => bufferConfig;
+        public PaintFluidConfig FluidConfig =>
+            paintFluidSystem != null ? paintFluidSystem.FluidConfig : null;
         public ComputeShader UtilityCompute => utilityCompute;
 
         public GraphicsBuffer PositionRadiusBuffer => _positionRadiusBuffer;
@@ -41,7 +43,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         public GraphicsBuffer ColorBuffer => _colorBuffer;
         public GraphicsBuffer StateAgeIdBuffer => _stateAgeIdBuffer;
 
-        // G5 Changes //
         private GraphicsBuffer _affineC0Buffer;
         private GraphicsBuffer _affineC1Buffer;
         private GraphicsBuffer _affineC2Buffer;
@@ -54,17 +55,11 @@ namespace PaintBucketSim.Systems.Fluid.GPU
         public GraphicsBuffer AffineC1Buffer => _affineC1Buffer;
         public GraphicsBuffer AffineC2Buffer => _affineC2Buffer;
 
-        // End G5 Changes //
-
-        ////////////////    G6.A Changes   //////////////////
-
         private GraphicsBuffer _volumeJBuffer;
 
         private Vector4[] _cpuVolumeJ;
 
         public GraphicsBuffer VolumeJBuffer => _volumeJBuffer;
-
-        ////////////////    End G6.A Changes   //////////////////
 
         public int UploadedParticleCount => _uploadedCount;
         public int Capacity => _capacity;
@@ -75,15 +70,10 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _velocityMassBuffer != null &&
             _colorBuffer != null &&
             _stateAgeIdBuffer != null &&
-            // G5 Changes //
             _affineC0Buffer != null &&
             _affineC1Buffer != null &&
             _affineC2Buffer != null &&
-            // End G5 Changes //
-
-            // G6.A Changes //
             _volumeJBuffer != null
-            // End G6.A Changes //
             ;
 
         public GpuFluidBufferStats Stats => _stats;
@@ -168,7 +158,9 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             if (bufferConfig == null)
                 return;
 
-            int requestedCapacity = Mathf.Max(1, bufferConfig.maxGpuParticles);
+            int requestedCapacity = FluidConfig != null
+                ? FluidConfig.ParticleCapacity
+                : 1;
 
             if (IsInitialized && _capacity == requestedCapacity)
                 return;
@@ -182,15 +174,11 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _cpuColor = new Vector4[_capacity];
             _cpuStateAgeId = new Vector4[_capacity];
 
-            // G5 Changes //
             _cpuAffineC0 = new Vector4[_capacity];
             _cpuAffineC1 = new Vector4[_capacity];
             _cpuAffineC2 = new Vector4[_capacity];
-            // End G5 Changes //
 
-            // G6.A Changes //
             _cpuVolumeJ = new Vector4[_capacity];
-            // End G6.A Changes //
 
             // All buffers use Vector4/float4 => stride 16 bytes.
             _positionRadiusBuffer = new GraphicsBuffer(
@@ -217,7 +205,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 sizeof(float) * 4
             );
 
-            // G5 Changes //
             _affineC0Buffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 _capacity,
@@ -235,16 +222,12 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _capacity,
                 sizeof(float) * 4
             );
-            // End G5 Changes //
 
-            // G6.A Changes //
             _volumeJBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 _capacity,
                 sizeof(float) * 4
             );
-
-            // End G6.A Changes //
 
             _uploadedCount = 0;
             _lastUploadFrame = -1;
@@ -267,8 +250,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _uploadWatch.Restart();
             MpmParticlesUseBucketLocalSpace = false;
 
-            int stride = Mathf.Max(1, bufferConfig.uploadStride);
-
             _uploadedCount = paintFluidSystem.CopyParticleGpuData(
                 _cpuPositionRadius,
                 _cpuVelocityMass,
@@ -276,7 +257,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _cpuStateAgeId,
                 _cpuVolumeJ,
                 _capacity,
-                stride
+                1
             );
 
             if (_uploadedCount > 0)
@@ -289,14 +270,9 @@ namespace PaintBucketSim.Systems.Fluid.GPU
 
                 _stateAgeIdBuffer.SetData(_cpuStateAgeId, 0, 0, _uploadedCount);
 
-                ////////// G6.A Changes //////////
-
                 _volumeJBuffer.SetData(_cpuVolumeJ, 0, 0, _uploadedCount);
-
-                ////////// End G6.A Changes //////////
             }
 
-            ////////// G5 Changes //////////
             // During CPU → GPU bootstrap, APIC affine C starts as zero.
             // The GPU solver will update these buffers after simulation begins.
             if (_uploadedCount > 0 && !_externalGpuSimulationMode)
@@ -305,7 +281,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _affineC1Buffer.SetData(_cpuAffineC1, 0, 0, _uploadedCount);
                 _affineC2Buffer.SetData(_cpuAffineC2, 0, 0, _uploadedCount);
             }
-            ////////// End G5 Changes //////////
 
             _lastUploadFrame = Time.frameCount;
 
@@ -330,7 +305,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             utilityCompute.SetVector("_NearHoleColor", bufferConfig.nearHoleColor);
             utilityCompute.SetVector("_AirborneColor", bufferConfig.airborneColor);
             utilityCompute.SetVector("_DepositedColor", bufferConfig.depositedColor);
-            utilityCompute.SetVector("_FallbackColor", bufferConfig.fallbackColor);
+            utilityCompute.SetVector("_FallbackColor", bufferConfig.defaultStateColor);
 
             utilityCompute.SetBuffer(
                 _kernelDebugColorByState,
@@ -357,7 +332,7 @@ namespace PaintBucketSim.Systems.Fluid.GPU
 
             _stats.capacity = _capacity;
             _stats.uploadedParticles = _uploadedCount;
-            _stats.uploadStride = bufferConfig != null ? bufferConfig.uploadStride : 1;
+            _stats.uploadStride = 1;
             _stats.uploadFrame = _lastUploadFrame;
 
             _stats.cpuUploadMilliseconds = (float)_uploadWatch.Elapsed.TotalMilliseconds;
@@ -374,15 +349,11 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _stats.debugColorByStateEnabled =
                 bufferConfig != null && bufferConfig.debugColorByStateOnGpu;
 
-            //////////// G5 Changes //////////
             _stats.affineC0BufferReady = _affineC0Buffer != null;
             _stats.affineC1BufferReady = _affineC1Buffer != null;
             _stats.affineC2BufferReady = _affineC2Buffer != null;
-            //////////// End G5 Changes //////////
 
-            //////////// G6.A Changes //////////
             _stats.volumeJBufferReady = _volumeJBuffer != null;
-            //////////// End G6.A Changes //////////
 
         }
 
@@ -412,7 +383,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
                 _stateAgeIdBuffer = null;
             }
 
-            ////////////// G5 Changes ////////////
             if (_affineC0Buffer != null)
             {
                 _affineC0Buffer.Release();
@@ -435,10 +405,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             _cpuAffineC1 = null;
             _cpuAffineC2 = null;
 
-            ////////////// End G5 Changes ////////////
-
-            ////////////// G6.A Changes ////////////
-
             if (_volumeJBuffer != null)
             {
                 _volumeJBuffer.Release();
@@ -446,8 +412,6 @@ namespace PaintBucketSim.Systems.Fluid.GPU
             }
 
             _cpuVolumeJ = null;
-
-            ////////////// End G6.A Changes ////////////
 
             _cpuPositionRadius = null;
             _cpuVelocityMass = null;
