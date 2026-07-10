@@ -114,15 +114,15 @@ namespace PaintBucketSim.Configs
         public float restBendAngleDegrees = 0.0f;
 
         [Header("Damping")]
-        public RopeDampingMode dampingMode = RopeDampingMode.Combined;
+        public RopeDampingMode dampingMode = RopeDampingMode.ExponentialVelocity;
 
         [Tooltip("Numerical velocity damping. Useful for stability but not a physical material model.")]
         [Range(0.0f, 10.0f)]
-        public float exponentialDampingPerSecond = 0.08f;
+        public float exponentialDampingPerSecond = 0.05f;
 
         [Tooltip("Physical-like damping ratio for relative motion between rope particles.")]
         [Range(0.0f, 2.0f)]
-        public float segmentDampingRatio = 0.08f;
+        public float segmentDampingRatio = 0.0f;
 
         [Header("Break Condition")]
         public bool enableBreakByTension = true;
@@ -171,11 +171,11 @@ namespace PaintBucketSim.Configs
         public float maxGrabSpeedMetersPerSecond = 1.2f;
 
         [Header("Air Drag")]
-        public RopeAirDragMode airDragMode = RopeAirDragMode.Linear;
+        public RopeAirDragMode airDragMode = RopeAirDragMode.Quadratic;
 
         [Tooltip("Linear drag coefficient in kg/s per rope particle. Approximate, practical value.")]
         [Min(0.0f)]
-        public float linearAirDragKgPerSecond = 0.015f;
+        public float linearAirDragKgPerSecond = 0.0f;
 
         [Tooltip("Quadratic drag coefficient. Used with air density and rope radius.")]
         [Min(0.0f)]
@@ -195,11 +195,11 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Angular velocity damping per second for segment material frames.")]
         [Min(0.0f)]
-        public float twistDamping = 0.1f;
+        public float twistDamping = 1.1f;
 
         [Tooltip("Effective GJ torsional rigidity in N*m^2. Braided rope is much softer in torsion than a solid cylinder.")]
         [Min(0.0001f)]
-        public float torsionalRigidityNewtonMeterSquared = 0.035f;
+        public float torsionalRigidityNewtonMeterSquared = 0.06f;
 
         [Tooltip("Scales polar segment inertia to account for rotating strands and unresolved fibers.")]
         [Min(0.01f)]
@@ -207,19 +207,19 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Safety clamp for segment angular velocity around the rope axis.")]
         [Min(1.0f)]
-        public float maxTwistAngularSpeedRadiansPerSecond = 45.0f;
+        public float maxTwistAngularSpeedRadiansPerSecond = 18.0f;
 
         [Tooltip("Number of scalar torsion smoothing iterations used by the material-frame rope stage.")]
         [Range(0, 24)]
-        public int torsionSolverIterations = 6;
+        public int torsionSolverIterations = 12;
 
         [Tooltip("How strongly neighboring material frames resist twist discontinuities.")]
         [Range(0.0f, 1.0f)]
-        public float torsionPropagationStrength = 0.28f;
+        public float torsionPropagationStrength = 0.45f;
 
         [Tooltip("How strongly the ceiling end resists axial twist. 1 means the top material frame is fixed.")]
         [Range(0.0f, 1.0f)]
-        public float topTwistAnchorStrength = 0.65f;
+        public float topTwistAnchorStrength = 0.85f;
 
         [Tooltip("Maximum allowed twist change between neighboring segments after smoothing.")]
         [Min(0.001f)]

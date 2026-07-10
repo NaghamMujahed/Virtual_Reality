@@ -17,6 +17,13 @@ namespace PaintBucketSim.Configs
         KinematicFollowTransform = 2
     }
 
+    public enum BucketGravityMode
+    {
+        Disabled = 0,
+        FullBody = 1,
+        RopeSuspendedPayload = 2
+    }
+
     public enum BucketHoleShape
     {
         Circular = 0,
@@ -116,17 +123,33 @@ namespace PaintBucketSim.Configs
         [Min(0.0f)]
         public float maxFluidCenterOfMassOffsetMeters = 0.14f;
 
+        [Tooltip("Exchange the contained paint's relative linear and angular momentum with the bucket.")]
+        public bool enableTwoWayFluidCoupling = true;
+
+        [Tooltip("GPU/CPU momentum sampling cadence in simulation substeps.")]
+        [Range(1, 8)]
+        public int fluidCouplingSampleIntervalSubsteps = 2;
+
+        [Tooltip("Safety limit on the bucket velocity change from one delayed fluid sample.")]
+        [Min(0.01f)]
+        public float maxFluidReactionDeltaVelocity = 0.65f;
+
+        [Tooltip("Safety limit on the bucket angular-velocity change from one delayed fluid sample.")]
+        [Min(0.05f)]
+        public float maxFluidReactionDeltaAngularVelocity = 2.5f;
+
         [Header("Motion")]
         public BucketMotionMode motionMode = BucketMotionMode.LockedInitialPose;
 
-        [Tooltip("In DynamicFree mode, gravity can be applied. Keep false until rope-bucket coupling is active.")]
-        public bool applyGravityInDynamicMode = false;
+        [Tooltip("RopeSuspendedPayload lets the rope proxy carry translation while gravity still restores the bucket below its attachment.")]
+        public BucketGravityMode gravityMode =
+            BucketGravityMode.RopeSuspendedPayload;
 
         [Range(0.0f, 10.0f)]
-        public float linearDampingPerSecond = 0.15f;
+        public float linearDampingPerSecond = 0.04f;
 
         [Range(0.0f, 10.0f)]
-        public float angularDampingPerSecond = 0.15f;
+        public float angularDampingPerSecond = 0.3f;
 
         [Header("Attachment Joint")]
         [Tooltip("If true, attachment point is placed above the top center.")]
@@ -203,6 +226,17 @@ namespace PaintBucketSim.Configs
 
             if (maxFluidCenterOfMassOffsetMeters < 0.0f)
                 maxFluidCenterOfMassOffsetMeters = 0.0f;
+
+            fluidCouplingSampleIntervalSubsteps = Mathf.Clamp(
+                fluidCouplingSampleIntervalSubsteps,
+                1,
+                8);
+            maxFluidReactionDeltaVelocity = Mathf.Max(
+                maxFluidReactionDeltaVelocity,
+                0.01f);
+            maxFluidReactionDeltaAngularVelocity = Mathf.Max(
+                maxFluidReactionDeltaAngularVelocity,
+                0.05f);
 
             bailHingeMaxAngleDegrees = Mathf.Clamp(
                 bailHingeMaxAngleDegrees,

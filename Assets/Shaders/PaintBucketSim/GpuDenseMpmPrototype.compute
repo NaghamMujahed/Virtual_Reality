@@ -1,4 +1,6 @@
 #pragma kernel KClearMpmDiagnostics
+#pragma kernel KClearBucketCoupling
+#pragma kernel KCollectBucketCoupling
 #pragma kernel KInitializeBucketLocalParticles
 #pragma kernel KClearAdaptiveActivity
 #pragma kernel KClassifyAdaptiveActivity
@@ -97,6 +99,7 @@ StructuredBuffer<float> _ProjectionPressureRead;
 StructuredBuffer<uint> _ProjectionFluidCellIndicesRead;
 StructuredBuffer<uint> _ProjectionFluidCellMetaRead;
 RWStructuredBuffer<uint> _MpmDiagnostics;
+RWStructuredBuffer<int> _BucketFluidCoupling;
 RWStructuredBuffer<uint> _AdaptiveParticlePriority;
 RWStructuredBuffer<uint> _AdaptiveActivitySummary;
 StructuredBuffer<uint> _AdaptiveParticlePriorityRead;
@@ -357,6 +360,8 @@ static const uint DIAG_LOCAL_Z_SUM = 32;
 static const uint DIAG_JET_COLUMN_PARTICLES = 33;
 static const uint DIAG_JET_COLUMN_SPREAD_SUM = 34;
 static const uint MPM_DIAGNOSTIC_COUNT = 35;
+static const uint BUCKET_COUPLING_VALUE_COUNT = 14;
+static const float BUCKET_COUPLING_FIXED_SCALE = 1000000.0;
 static const uint MPM_TILE_THREAD_DIM = 8u;
 static const uint MPM_TILE_CELL_COUNT = 512u;
 static const uint MPM_TILE_P2G_THREAD_COUNT = 256u;
@@ -1647,6 +1652,132 @@ void KClearMpmDiagnostics(uint3 id : SV_DispatchThreadID)
         (index == DIAG_J_MIN || index == DIAG_LOCAL_Y_MIN)
             ? 0xffffffffu
             : 0u;
+}
+
+[numthreads(64, 1, 1)]
+void KClearBucketCoupling(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < BUCKET_COUPLING_VALUE_COUNT)
+        _BucketFluidCoupling[id.x] = 0;
+}
+
+groupshared uint _BucketCouplingCountGroup[256];
+groupshared float _BucketCouplingMassGroup[256];
+groupshared float3 _BucketCouplingFirstMomentGroup[256];
+groupshared float3 _BucketCouplingSecondMomentGroup[256];
+groupshared float3 _BucketCouplingLinearMomentumGroup[256];
+groupshared float3 _BucketCouplingAngularMomentumGroup[256];
+
+int BucketCouplingToFixed(float value)
+{
+    return (int)round(
+        clamp(value, -2048.0, 2048.0) *
+        BUCKET_COUPLING_FIXED_SCALE);
+}
+
+[numthreads(256, 1, 1)]
+void KCollectBucketCoupling(
+    uint3 id : SV_DispatchThreadID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint lane = groupThreadId.x;
+    uint contained = 0u;
+    float mass = 0.0;
+    float3 firstMoment = float3(0, 0, 0);
+    float3 secondMoment = float3(0, 0, 0);
+    float3 linearMomentum = float3(0, 0, 0);
+    float3 angularMomentum = float3(0, 0, 0);
+
+    if (id.x < (uint)_ParticleCount)
+    {
+        int state = (int)round(_ParticleStateAgeIdRead[id.x].x);
+        if (IsBucketCollisionState(state))
+        {
+            float3 positionLocal =
+                _ParticlePositionRadiusRead[id.x].xyz;
+            float4 velocityMass =
+                _ParticleVelocityMassRead[id.x];
+            float particleMass = max(velocityMass.w, 0.0);
+
+            if (particleMass > 0.0 &&
+                IsFiniteFloat3(positionLocal) &&
+                IsFiniteFloat3(velocityMass.xyz) &&
+                IsFiniteFloat(particleMass))
+            {
+                float3 particleMomentum =
+                    velocityMass.xyz * particleMass;
+                contained = 1u;
+                mass = particleMass;
+                firstMoment = positionLocal * particleMass;
+                secondMoment =
+                    positionLocal * positionLocal * particleMass;
+                linearMomentum = particleMomentum;
+                angularMomentum = cross(
+                    positionLocal,
+                    particleMomentum);
+            }
+        }
+    }
+
+    _BucketCouplingCountGroup[lane] = contained;
+    _BucketCouplingMassGroup[lane] = mass;
+    _BucketCouplingFirstMomentGroup[lane] = firstMoment;
+    _BucketCouplingSecondMomentGroup[lane] = secondMoment;
+    _BucketCouplingLinearMomentumGroup[lane] = linearMomentum;
+    _BucketCouplingAngularMomentumGroup[lane] = angularMomentum;
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint stride = 128u; stride > 0u; stride >>= 1u)
+    {
+        if (lane < stride)
+        {
+            _BucketCouplingCountGroup[lane] +=
+                _BucketCouplingCountGroup[lane + stride];
+            _BucketCouplingMassGroup[lane] +=
+                _BucketCouplingMassGroup[lane + stride];
+            _BucketCouplingFirstMomentGroup[lane] +=
+                _BucketCouplingFirstMomentGroup[lane + stride];
+            _BucketCouplingSecondMomentGroup[lane] +=
+                _BucketCouplingSecondMomentGroup[lane + stride];
+            _BucketCouplingLinearMomentumGroup[lane] +=
+                _BucketCouplingLinearMomentumGroup[lane + stride];
+            _BucketCouplingAngularMomentumGroup[lane] +=
+                _BucketCouplingAngularMomentumGroup[lane + stride];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (lane != 0u)
+        return;
+
+    InterlockedAdd(
+        _BucketFluidCoupling[0],
+        (int)_BucketCouplingCountGroup[0]);
+    InterlockedAdd(
+        _BucketFluidCoupling[1],
+        BucketCouplingToFixed(_BucketCouplingMassGroup[0]));
+
+    [unroll]
+    for (uint component = 0u; component < 3u; component++)
+    {
+        InterlockedAdd(
+            _BucketFluidCoupling[2u + component],
+            BucketCouplingToFixed(
+                _BucketCouplingFirstMomentGroup[0][component]));
+        InterlockedAdd(
+            _BucketFluidCoupling[5u + component],
+            BucketCouplingToFixed(
+                _BucketCouplingSecondMomentGroup[0][component]));
+        InterlockedAdd(
+            _BucketFluidCoupling[8u + component],
+            BucketCouplingToFixed(
+                _BucketCouplingLinearMomentumGroup[0][component]));
+        InterlockedAdd(
+            _BucketFluidCoupling[11u + component],
+            BucketCouplingToFixed(
+                _BucketCouplingAngularMomentumGroup[0][component]));
+    }
 }
 
 groupshared int _TileP2GMass[512];

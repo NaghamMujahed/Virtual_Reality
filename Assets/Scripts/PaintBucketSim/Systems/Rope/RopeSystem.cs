@@ -676,8 +676,8 @@ namespace PaintBucketSim.Systems.Rope
             float breakStrain = Mathf.Max(ropeConfig.breakStrain, 0.001f);
             float materialPoint = Mathf.Clamp(
                 _grabSegmentIndex + _grabSegmentT,
-                0.001f,
-                _data.SegmentCount - 0.001f);
+                0.0f,
+                _data.SegmentCount);
             float segmentRestLength =
                 ropeConfig.lengthMeters / Mathf.Max(_data.SegmentCount, 1);
 
@@ -685,14 +685,19 @@ namespace PaintBucketSim.Systems.Rope
             float lowerRestLength =
                 segmentRestLength * (_data.SegmentCount - materialPoint);
 
-            float upperStrain = ComputePathDemandStrain(
-                ToVector3(pivot),
-                ToVector3(grabTarget),
-                upperRestLength);
-            float lowerStrain = ComputePathDemandStrain(
-                ToVector3(grabTarget),
-                GetRopeEndPosition(),
-                lowerRestLength);
+            float minimumSideLength = segmentRestLength * 0.02f;
+            float upperStrain = upperRestLength > minimumSideLength
+                ? ComputePathDemandStrain(
+                    ToVector3(pivot),
+                    ToVector3(grabTarget),
+                    upperRestLength)
+                : 0.0f;
+            float lowerStrain = lowerRestLength > minimumSideLength
+                ? ComputePathDemandStrain(
+                    ToVector3(grabTarget),
+                    GetRopeEndPosition(),
+                    lowerRestLength)
+                : 0.0f;
 
             bool upperFails = upperStrain > breakStrain;
             bool lowerFails = lowerStrain > breakStrain;
@@ -956,7 +961,17 @@ namespace PaintBucketSim.Systems.Rope
                 return Vector3.down;
 
             int end = _data.ParticleCount - 1;
-            float3 delta = _data.Positions[end] - _data.Positions[end - 1];
+            int supportSpan = math.min(3, end);
+            float3 delta =
+                _data.Positions[end] -
+                _data.Positions[end - supportSpan];
+
+            if (math.lengthsq(delta) < 1e-10f)
+            {
+                delta =
+                    _data.Positions[end] -
+                    _data.Positions[end - 1];
+            }
 
             if (math.lengthsq(delta) < 1e-10f)
                 return Vector3.down;

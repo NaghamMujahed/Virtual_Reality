@@ -18,7 +18,7 @@ MonoBehaviour:
   visualRadiusMeters: 0.018
   initialDirection: {x: 0, y: -1, z: 0}
   ropeMassKg: 0.26
-  temporaryTipMassKg: 0.6
+  temporaryTipMassKg: 0.08
   integrationMode: 0
   complianceMode: 1
   manualStretchCompliance: 0.000001
@@ -32,9 +32,9 @@ MonoBehaviour:
   bendingModel: 1
   enableBending: 1
   restBendAngleDegrees: 0
-  dampingMode: 3
-  exponentialDampingPerSecond: 0.08
-  segmentDampingRatio: 0.08
+  dampingMode: 1
+  exponentialDampingPerSecond: 0.05
+  segmentDampingRatio: 0
   enableBreakByTension: 0
   breakTensionNewton: 850
   enableBreakByStrain: 1
@@ -49,20 +49,20 @@ MonoBehaviour:
   grabCompliance: 0.000001
   maxGrabCorrectionPerIteration: 0.065
   maxGrabSpeedMetersPerSecond: 1.5
-  airDragMode: 1
-  linearAirDragKgPerSecond: 0.015
+  airDragMode: 2
+  linearAirDragKgPerSecond: 0
   quadraticDragCoefficient: 1.1
   gravityScale: 1
   enableTwistData: 1
   twistStiffnessScale: 1
-  twistDamping: 0.45
-  torsionalRigidityNewtonMeterSquared: 0.035
+  twistDamping: 1.1
+  torsionalRigidityNewtonMeterSquared: 0.06
   twistInertiaScale: 6
-  maxTwistAngularSpeedRadiansPerSecond: 45
-  torsionSolverIterations: 8
-  torsionPropagationStrength: 0.32
-  topTwistAnchorStrength: 0.7
-  maxTwistGradientRadians: 0.38
+  maxTwistAngularSpeedRadiansPerSecond: 18
+  torsionSolverIterations: 12
+  torsionPropagationStrength: 0.45
+  topTwistAnchorStrength: 0.85
+  maxTwistGradientRadians: 0.3
   endpointTwistFollow: 0.35
   maxEndpointTwistCorrectionRadians: 0.1
   enableTensionDiagnostics: 1

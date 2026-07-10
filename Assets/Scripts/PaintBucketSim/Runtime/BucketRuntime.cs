@@ -64,6 +64,9 @@ namespace PaintBucketSim.Runtime
         public float totalMass;
         public float3 centerOfMassLocal;
         public float3 centerOfMassWorld;
+        public int fluidCouplingSampleStep;
+        public float3 fluidReactionLinearImpulse;
+        public float3 fluidReactionAngularImpulse;
         public float bailHingeAngleRadians;
         public float bailHingeAngularVelocity;
 

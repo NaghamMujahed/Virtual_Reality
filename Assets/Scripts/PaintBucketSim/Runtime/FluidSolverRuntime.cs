@@ -21,6 +21,21 @@
         public bool isWarmup;
     }
 
+    public struct BucketFluidCouplingSample
+    {
+        public bool valid;
+        public int stepIndex;
+        public float simulationTime;
+        public int containedParticleCount;
+
+        public float massKg;
+        public Unity.Mathematics.float3 centerOfMassLocal;
+        public Unity.Mathematics.float3 secondMomentLocal;
+        public Unity.Mathematics.float3 relativeLinearMomentumLocal;
+        public Unity.Mathematics.float3 relativeAngularMomentumLocal;
+        public Unity.Mathematics.quaternion bucketRotationWorld;
+    }
+
     public struct FluidSolverStats
     {
         public FluidSolverType solverType;

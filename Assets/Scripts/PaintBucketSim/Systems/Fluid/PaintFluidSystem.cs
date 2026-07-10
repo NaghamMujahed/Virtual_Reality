@@ -39,6 +39,12 @@ namespace PaintBucketSim.Systems.Fluid
 
         private bool _initialized;
         private int _solverStepIndex;
+        private BucketFluidCouplingSample _latestBucketCouplingSample;
+        private bool _hasFluidMomentumHistory;
+        private int _lastFluidMomentumSampleStep;
+        private float _lastFluidMomentumSampleTime;
+        private float3 _filteredFluidLinearMomentumWorld;
+        private float3 _filteredFluidAngularMomentumWorld;
 
         public PaintMaterialConfig MaterialConfig => paintMaterialConfig;
         public PaintFluidConfig FluidConfig => paintFluidConfig;
@@ -57,6 +63,11 @@ namespace PaintBucketSim.Systems.Fluid
         public bool IsGpuSolverActive =>
             _activeSolver != null &&
             _activeSolver.SolverType == FluidSolverType.GpuMpm;
+
+        public bool FluidCouplingReady =>
+            _latestBucketCouplingSample.valid;
+        public BucketFluidCouplingSample LatestBucketCouplingSample =>
+            _latestBucketCouplingSample;
 
         private FluidParticlePoolStats _poolStats;
         public FluidParticlePoolStats PoolStats => _poolStats;
@@ -112,6 +123,7 @@ namespace PaintBucketSim.Systems.Fluid
 
             _initialized = true;
             _solverStepIndex = 0;
+            ResetFluidCouplingHistory();
 
             BuildSolverContext();
             CreateAndInitializeSolver();
@@ -148,6 +160,7 @@ namespace PaintBucketSim.Systems.Fluid
 
             _initialized = false;
             _initialLatticeCellVolumeM3 = 0.0f;
+            ResetFluidCouplingHistory();
         }
 
         private void DisposeSolverOnly()
@@ -221,9 +234,24 @@ namespace PaintBucketSim.Systems.Fluid
             float mass;
             float3 localCenter;
             float fillHeight;
+            BucketFluidCouplingSample couplingSample = default;
+            bool hasMeasuredCouplingSample =
+                _activeSolver != null &&
+                _activeSolver.TryGetLatestBucketCouplingSample(
+                    out couplingSample);
+            if (hasMeasuredCouplingSample)
+                _latestBucketCouplingSample = couplingSample;
 
             FluidSolverStats stats = SolverStats;
-            if (IsGpuSolverActive && stats.gpuDiagnosticsReady)
+            if (hasMeasuredCouplingSample)
+            {
+                mass = Mathf.Max(couplingSample.massKg, 0.0f);
+                localCenter = couplingSample.centerOfMassLocal;
+                fillHeight = EstimateFillHeightFromSample(
+                    couplingSample,
+                    height);
+            }
+            else if (IsGpuSolverActive && stats.gpuDiagnosticsReady)
             {
                 float particleMass = Mathf.Max(
                     _calibrationStats.massPerParticleKg,
@@ -257,11 +285,183 @@ namespace PaintBucketSim.Systems.Fluid
                     0.0f);
             }
 
-            bucketSystem.SetContainedFluidLoad(
-                mass,
-                localCenter,
-                fillHeight,
-                dt);
+            if (hasMeasuredCouplingSample)
+            {
+                bucketSystem.SetContainedFluidLoad(
+                    mass,
+                    localCenter,
+                    fillHeight,
+                    dt,
+                    couplingSample.secondMomentLocal);
+                UpdateTwoWayFluidCoupling(couplingSample);
+            }
+            else
+            {
+                bucketSystem.SetContainedFluidLoad(
+                    mass,
+                    localCenter,
+                    fillHeight,
+                    dt);
+            }
+        }
+
+        private float EstimateFillHeightFromSample(
+            BucketFluidCouplingSample sample,
+            float bucketHeight)
+        {
+            if (sample.massKg <= 1e-7f)
+                return 0.01f;
+
+            float meanSquareY =
+                sample.secondMomentLocal.y / sample.massKg;
+            float varianceY = Mathf.Max(
+                meanSquareY -
+                sample.centerOfMassLocal.y *
+                sample.centerOfMassLocal.y,
+                0.0f);
+            return Mathf.Clamp(
+                Mathf.Sqrt(12.0f * varianceY),
+                0.01f,
+                bucketHeight);
+        }
+
+        private void UpdateTwoWayFluidCoupling(
+            BucketFluidCouplingSample sample)
+        {
+            BucketConfig config = bucketSystem.Config;
+            if (!sample.valid ||
+                config == null ||
+                !config.enableTwoWayFluidCoupling ||
+                config.motionMode != BucketMotionMode.DynamicFree)
+            {
+                _hasFluidMomentumHistory = false;
+                return;
+            }
+
+            if (sample.stepIndex <= _lastFluidMomentumSampleStep)
+                return;
+
+            float rawMass = Mathf.Max(sample.massKg, 0.0f);
+            float scaledMass = Mathf.Clamp(
+                rawMass * Mathf.Max(config.containedFluidMassScale, 0.0f),
+                0.0f,
+                Mathf.Max(config.maxContainedFluidMassKg, 0.1f));
+            float momentumScale = rawMass > 1e-7f
+                ? scaledMass / rawMass
+                : 0.0f;
+            float3 linearMomentumLocal =
+                sample.relativeLinearMomentumLocal * momentumScale;
+            float3 combinedCenterLocal =
+                sample.centerOfMassLocal *
+                (scaledMass /
+                 Mathf.Max(bucketSystem.State.dryMass + scaledMass, 0.01f));
+            float3 angularMomentumLocal =
+                sample.relativeAngularMomentumLocal * momentumScale -
+                math.cross(combinedCenterLocal, linearMomentumLocal);
+
+            quaternion rotation = math.normalize(
+                sample.bucketRotationWorld);
+            float3 linearMomentumWorld = math.rotate(
+                rotation,
+                linearMomentumLocal);
+            float3 angularMomentumWorld = math.rotate(
+                rotation,
+                angularMomentumLocal);
+            if (!math.all(math.isfinite(linearMomentumWorld)) ||
+                !math.all(math.isfinite(angularMomentumWorld)))
+            {
+                return;
+            }
+
+            float sampleDt =
+                sample.simulationTime - _lastFluidMomentumSampleTime;
+            bool historyIsContinuous =
+                _hasFluidMomentumHistory &&
+                sampleDt > 1e-6f &&
+                sampleDt <= 0.5f;
+            if (!historyIsContinuous)
+            {
+                _filteredFluidLinearMomentumWorld =
+                    linearMomentumWorld;
+                _filteredFluidAngularMomentumWorld =
+                    angularMomentumWorld;
+                _hasFluidMomentumHistory = true;
+                _lastFluidMomentumSampleStep = sample.stepIndex;
+                _lastFluidMomentumSampleTime = sample.simulationTime;
+                return;
+            }
+
+            float response = 1.0f - Mathf.Exp(
+                -Mathf.Max(config.fluidLoadResponsePerSecond, 0.1f) *
+                sampleDt);
+            float3 nextLinearMomentum = math.lerp(
+                _filteredFluidLinearMomentumWorld,
+                linearMomentumWorld,
+                response);
+            float3 nextAngularMomentum = math.lerp(
+                _filteredFluidAngularMomentumWorld,
+                angularMomentumWorld,
+                response);
+            float3 reactionLinearImpulse =
+                _filteredFluidLinearMomentumWorld -
+                nextLinearMomentum;
+            float3 reactionAngularImpulse =
+                _filteredFluidAngularMomentumWorld -
+                nextAngularMomentum;
+
+            _filteredFluidLinearMomentumWorld = nextLinearMomentum;
+            _filteredFluidAngularMomentumWorld = nextAngularMomentum;
+            _lastFluidMomentumSampleStep = sample.stepIndex;
+            _lastFluidMomentumSampleTime = sample.simulationTime;
+
+            float maximumLinearImpulse =
+                bucketSystem.State.mass *
+                Mathf.Max(config.maxFluidReactionDeltaVelocity, 0.01f);
+            float linearImpulseLength = math.length(
+                reactionLinearImpulse);
+            if (linearImpulseLength > maximumLinearImpulse &&
+                linearImpulseLength > 1e-7f)
+            {
+                reactionLinearImpulse *=
+                    maximumLinearImpulse / linearImpulseLength;
+            }
+
+            Vector3 angularImpulseVector = new Vector3(
+                reactionAngularImpulse.x,
+                reactionAngularImpulse.y,
+                reactionAngularImpulse.z);
+            float angularVelocityChange =
+                bucketSystem.MultiplyInverseInertiaWorld(
+                    angularImpulseVector).magnitude;
+            float maximumAngularVelocityChange = Mathf.Max(
+                config.maxFluidReactionDeltaAngularVelocity,
+                0.05f);
+            if (angularVelocityChange > maximumAngularVelocityChange &&
+                angularVelocityChange > 1e-7f)
+            {
+                reactionAngularImpulse *=
+                    maximumAngularVelocityChange /
+                    angularVelocityChange;
+            }
+
+            if (math.lengthsq(reactionLinearImpulse) > 1e-12f ||
+                math.lengthsq(reactionAngularImpulse) > 1e-12f)
+            {
+                bucketSystem.ApplyMomentumImpulse(
+                    reactionLinearImpulse,
+                    reactionAngularImpulse,
+                    sample.stepIndex);
+            }
+        }
+
+        private void ResetFluidCouplingHistory()
+        {
+            _latestBucketCouplingSample = default;
+            _hasFluidMomentumHistory = false;
+            _lastFluidMomentumSampleStep = -1;
+            _lastFluidMomentumSampleTime = 0.0f;
+            _filteredFluidLinearMomentumWorld = float3.zero;
+            _filteredFluidAngularMomentumWorld = float3.zero;
         }
 
         private float EstimateFillHeightFromMass(float mass, float radius)

@@ -21,6 +21,10 @@ namespace PaintBucketSim.Systems.Bucket
 
         private float3 _externalForce;
         private float3 _externalTorque;
+        private float3 _containedFluidInertiaAtCenter;
+        private float3 _lastFluidReactionLinearImpulse;
+        private float3 _lastFluidReactionAngularImpulse;
+        private int _lastFluidCouplingSampleStep;
         private float _bailHingeAngleRadians;
         private float _bailHingeAngularVelocity;
         private float3 _stepStartCenterOfMassWorld;
@@ -55,6 +59,11 @@ namespace PaintBucketSim.Systems.Bucket
 
             _data = new BucketData();
             _data.AllocateHoles(bucketConfig.holes != null ? bucketConfig.holes.Length : 0);
+
+            _containedFluidInertiaAtCenter = float3.zero;
+            _lastFluidReactionLinearImpulse = float3.zero;
+            _lastFluidReactionAngularImpulse = float3.zero;
+            _lastFluidCouplingSampleStep = -1;
 
             InitializeStateFromReference();
             UpdateAttachmentAndHoles();
@@ -162,6 +171,28 @@ namespace PaintBucketSim.Systems.Bucket
                 math.cross(r, impulseFloat));
 
             _data.State = state;
+            UpdateAttachmentAndHoles();
+            UpdateDiagnostics();
+        }
+
+        public void ApplyMomentumImpulse(
+            float3 linearImpulseWorld,
+            float3 angularImpulseWorld,
+            int fluidSampleStep)
+        {
+            if (!IsInitialized)
+                return;
+
+            BucketState state = _data.State;
+            state.velocity += linearImpulseWorld * state.inverseMass;
+            state.angularVelocity += WorldAngularAccelerationFromTorque(
+                state,
+                angularImpulseWorld);
+
+            _data.State = state;
+            _lastFluidReactionLinearImpulse = linearImpulseWorld;
+            _lastFluidReactionAngularImpulse = angularImpulseWorld;
+            _lastFluidCouplingSampleStep = fluidSampleStep;
             UpdateAttachmentAndHoles();
             UpdateDiagnostics();
         }
@@ -275,9 +306,53 @@ namespace PaintBucketSim.Systems.Bucket
             float3 force = _externalForce;
             float3 torque = _externalTorque;
 
-            if (bucketConfig.applyGravityInDynamicMode && context != null)
+            if (context != null &&
+                bucketConfig.gravityMode == BucketGravityMode.FullBody)
             {
                 force += state.mass * (float3)context.EnvironmentState.gravity;
+            }
+            else if (context != null &&
+                     bucketConfig.gravityMode ==
+                         BucketGravityMode.RopeSuspendedPayload)
+            {
+                float3 suspendedCenterOfMassWorld =
+                    GetCenterOfMassWorldFloat3();
+                float3 attachmentOffset =
+                    _data.Attachment.worldPosition -
+                    suspendedCenterOfMassWorld;
+                float3 supportForce =
+                    -state.mass * (float3)context.EnvironmentState.gravity;
+                float3 suspensionTorque = math.cross(
+                    attachmentOffset,
+                    supportForce);
+                float suspensionTorqueLength = math.length(
+                    suspensionTorque);
+                if (suspensionTorqueLength > 1e-7f)
+                {
+                    float3 axisWorld =
+                        suspensionTorque / suspensionTorqueLength;
+                    float3 axisBody = math.rotate(
+                        math.inverse(state.rotation),
+                        axisWorld);
+                    float centerInertia = math.max(
+                        math.dot(
+                            state.inertiaTensorBody * axisBody,
+                            axisBody),
+                        1e-6f);
+                    float perpendicularDistanceSquared = math.max(
+                        math.lengthsq(attachmentOffset) -
+                        math.pow(
+                            math.dot(attachmentOffset, axisWorld),
+                            2.0f),
+                        0.0f);
+                    float attachmentInertia =
+                        centerInertia +
+                        state.mass * perpendicularDistanceSquared;
+                    suspensionTorque *=
+                        centerInertia /
+                        math.max(attachmentInertia, centerInertia);
+                    torque += suspensionTorque;
+                }
             }
 
             float3 acceleration = force * state.inverseMass;
@@ -471,6 +546,11 @@ namespace PaintBucketSim.Systems.Bucket
                 totalMass = state.mass,
                 centerOfMassLocal = state.centerOfMassLocal,
                 centerOfMassWorld = GetCenterOfMassWorldFloat3(),
+                fluidCouplingSampleStep = _lastFluidCouplingSampleStep,
+                fluidReactionLinearImpulse =
+                    _lastFluidReactionLinearImpulse,
+                fluidReactionAngularImpulse =
+                    _lastFluidReactionAngularImpulse,
                 bailHingeAngleRadians = _bailHingeAngleRadians,
                 bailHingeAngularVelocity = _bailHingeAngularVelocity,
                 attachmentWorldPosition = _data.Attachment.worldPosition,
@@ -637,6 +717,39 @@ namespace PaintBucketSim.Systems.Bucket
             float estimatedFillHeightMeters,
             float dt)
         {
+            SetContainedFluidLoad(
+                fluidMassKg,
+                fluidCenterOfMassLocal,
+                estimatedFillHeightMeters,
+                dt,
+                float3.zero,
+                false);
+        }
+
+        public void SetContainedFluidLoad(
+            float fluidMassKg,
+            float3 fluidCenterOfMassLocal,
+            float estimatedFillHeightMeters,
+            float dt,
+            float3 fluidSecondMomentLocal)
+        {
+            SetContainedFluidLoad(
+                fluidMassKg,
+                fluidCenterOfMassLocal,
+                estimatedFillHeightMeters,
+                dt,
+                fluidSecondMomentLocal,
+                true);
+        }
+
+        private void SetContainedFluidLoad(
+            float fluidMassKg,
+            float3 fluidCenterOfMassLocal,
+            float estimatedFillHeightMeters,
+            float dt,
+            float3 fluidSecondMomentLocal,
+            bool hasMeasuredSecondMoment)
+        {
             if (!IsInitialized || bucketConfig == null)
                 return;
 
@@ -644,7 +757,12 @@ namespace PaintBucketSim.Systems.Bucket
             {
                 fluidMassKg = 0.0f;
                 fluidCenterOfMassLocal = float3.zero;
+                fluidSecondMomentLocal = float3.zero;
+                hasMeasuredSecondMoment = false;
             }
+
+            float rawFluidMass = math.max(fluidMassKg, 0.0f);
+            float3 measuredFluidCenter = fluidCenterOfMassLocal;
 
             float scaledMass = math.clamp(
                 fluidMassKg * math.max(bucketConfig.containedFluidMassScale, 0.0f),
@@ -681,6 +799,19 @@ namespace PaintBucketSim.Systems.Bucket
                 -math.max(bucketConfig.fluidLoadResponsePerSecond, 0.1f) *
                 math.max(dt, 0.0f));
 
+            float3 targetFluidInertiaAtCenter =
+                ComputeTargetFluidInertiaAtCenter(
+                    rawFluidMass,
+                    scaledMass,
+                    measuredFluidCenter,
+                    fluidSecondMomentLocal,
+                    estimatedFillHeightMeters,
+                    hasMeasuredSecondMoment);
+            _containedFluidInertiaAtCenter = math.lerp(
+                _containedFluidInertiaAtCenter,
+                targetFluidInertiaAtCenter,
+                response);
+
             state.containedFluidMass = math.lerp(
                 state.containedFluidMass,
                 scaledMass,
@@ -710,8 +841,7 @@ namespace PaintBucketSim.Systems.Bucket
 
             state.inertiaTensorBody = ComputeCombinedInertiaTensor(
                 state,
-                currentFluidCenter,
-                estimatedFillHeightMeters);
+                currentFluidCenter);
             state.inverseInertiaTensorBody = new float3(
                 1.0f / math.max(state.inertiaTensorBody.x, 1e-6f),
                 1.0f / math.max(state.inertiaTensorBody.y, 1e-6f),
@@ -827,8 +957,7 @@ namespace PaintBucketSim.Systems.Bucket
 
         private float3 ComputeCombinedInertiaTensor(
             BucketState state,
-            float3 fluidCenterLocal,
-            float estimatedFillHeightMeters)
+            float3 fluidCenterLocal)
         {
             float3 dryInertia = ComputeBodyInertiaTensor();
             float3 combinedCenter = state.centerOfMassLocal;
@@ -839,6 +968,49 @@ namespace PaintBucketSim.Systems.Bucket
             if (fluidMass <= 1e-6f)
                 return dryInertia;
 
+            float3 fluidInertia = math.max(
+                _containedFluidInertiaAtCenter,
+                new float3(1e-6f));
+            fluidInertia += ParallelAxisDiagonal(
+                fluidMass,
+                fluidCenterLocal - combinedCenter);
+
+            return dryInertia + fluidInertia;
+        }
+
+        private float3 ComputeTargetFluidInertiaAtCenter(
+            float rawFluidMass,
+            float scaledFluidMass,
+            float3 measuredFluidCenter,
+            float3 measuredSecondMoment,
+            float estimatedFillHeightMeters,
+            bool hasMeasuredSecondMoment)
+        {
+            if (scaledFluidMass <= 1e-6f)
+                return float3.zero;
+
+            float inertiaScale = math.max(
+                bucketConfig.fluidInertiaScale,
+                0.1f);
+            if (hasMeasuredSecondMoment && rawFluidMass > 1e-6f)
+            {
+                float massScale = scaledFluidMass / rawFluidMass;
+                float3 secondMoment =
+                    math.max(measuredSecondMoment, float3.zero) * massScale;
+                float3 inertiaAboutOrigin = new float3(
+                    secondMoment.y + secondMoment.z,
+                    secondMoment.x + secondMoment.z,
+                    secondMoment.x + secondMoment.y);
+                float3 inertiaAtFluidCenter =
+                    inertiaAboutOrigin -
+                    ParallelAxisDiagonal(
+                        scaledFluidMass,
+                        measuredFluidCenter);
+                return math.max(
+                    inertiaAtFluidCenter * inertiaScale,
+                    new float3(1e-6f));
+            }
+
             float radius = math.max(
                 bucketConfig.GetRepresentativeRadius() -
                 bucketConfig.wallThicknessMeters,
@@ -847,24 +1019,17 @@ namespace PaintBucketSim.Systems.Bucket
                 estimatedFillHeightMeters,
                 0.01f,
                 math.max(bucketConfig.heightMeters, 0.01f));
-            float inertiaScale = math.max(bucketConfig.fluidInertiaScale, 0.1f);
-
             float radialInertia =
                 (1.0f / 12.0f) *
-                fluidMass *
+                scaledFluidMass *
                 (3.0f * radius * radius + height * height) *
                 inertiaScale;
             float axialInertia =
-                0.5f * fluidMass * radius * radius * inertiaScale;
-            float3 fluidInertia = new float3(
+                0.5f * scaledFluidMass * radius * radius * inertiaScale;
+            return new float3(
                 radialInertia,
                 axialInertia,
                 radialInertia);
-            fluidInertia += ParallelAxisDiagonal(
-                fluidMass,
-                fluidCenterLocal - combinedCenter);
-
-            return dryInertia + fluidInertia;
         }
 
         private static float3 ParallelAxisDiagonal(float mass, float3 offset)

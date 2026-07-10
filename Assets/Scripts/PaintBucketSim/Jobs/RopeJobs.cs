@@ -319,9 +319,7 @@ namespace PaintBucketSim.Jobs
                 grabSegmentIndex >= 0 &&
                 grabSegmentIndex < stretchRestLengths.Length)
             {
-                // A grabbed point behaves like a temporary internal handle.
-                // Clamp each side independently so the upper section cannot
-                // push correction through the grab into the bucket side.
+                EnforceGrabAdjacentLengths(strain);
                 EnforceMaximumStretchRange(0, grabSegmentIndex, strain);
                 EnforceMaximumStretchRange(
                     grabSegmentIndex + 1,
@@ -331,6 +329,44 @@ namespace PaintBucketSim.Jobs
             }
 
             EnforceMaximumStretchRange(0, stretchRestLengths.Length, strain);
+        }
+
+        private void EnforceGrabAdjacentLengths(float strain)
+        {
+            int i0 = grabSegmentIndex;
+            int i1 = i0 + 1;
+            float t = math.saturate(grabSegmentT);
+            float restLength = stretchRestLengths[grabSegmentIndex];
+            float maximumScale = 1.0f + strain;
+
+            ProjectParticleToGrabRadius(
+                i0,
+                restLength * t * maximumScale);
+            ProjectParticleToGrabRadius(
+                i1,
+                restLength * (1.0f - t) * maximumScale);
+        }
+
+        private void ProjectParticleToGrabRadius(
+            int particleIndex,
+            float maximumDistance)
+        {
+            if (particleIndex < 0 ||
+                particleIndex >= positions.Length ||
+                inverseMasses[particleIndex] <= 0.0f)
+            {
+                return;
+            }
+
+            float3 offset = positions[particleIndex] - grabTarget;
+            float distance = math.length(offset);
+            float limit = math.max(maximumDistance, 0.0f);
+
+            if (distance <= limit || distance <= 1e-8f)
+                return;
+
+            positions[particleIndex] =
+                grabTarget + offset * (limit / distance);
         }
 
         private void EnforceMaximumStretchRange(
@@ -761,14 +797,57 @@ namespace PaintBucketSim.Jobs
 
         private void RebuildFrames()
         {
-            float3 baseNormal = ChooseInitialNormal(GetSegmentTangent(0));
+            float3 firstTangent = GetSegmentTangent(0);
+            float3 previousTangent = math.rotate(
+                segmentFrames[0],
+                new float3(0.0f, 0.0f, 1.0f));
+            float3 previousMaterialNormal = math.rotate(
+                segmentFrames[0],
+                new float3(0.0f, 1.0f, 0.0f));
+
+            if (!math.all(math.isfinite(previousTangent)) ||
+                math.lengthsq(previousTangent) < 1e-8f ||
+                !math.all(math.isfinite(previousMaterialNormal)) ||
+                math.lengthsq(previousMaterialNormal) < 1e-8f)
+            {
+                previousTangent = firstTangent;
+                previousMaterialNormal = ChooseInitialNormal(firstTangent);
+            }
+            else
+            {
+                previousTangent = math.normalize(previousTangent);
+                previousMaterialNormal = math.normalize(
+                    previousMaterialNormal);
+            }
+
+            float previousTwist = segmentPreviousTwistAngles.Length > 0
+                ? segmentPreviousTwistAngles[0]
+                : 0.0f;
+            float3 referenceNormal = RotateAroundAxis(
+                previousMaterialNormal,
+                previousTangent,
+                -previousTwist);
+            referenceNormal = TransportNormal(
+                referenceNormal,
+                previousTangent,
+                firstTangent);
+            float3 precedingTangent = firstTangent;
 
             for (int i = 0; i < segmentFrames.Length; i++)
             {
                 float3 tangent = GetSegmentTangent(i);
 
+                if (i > 0)
+                {
+                    referenceNormal = TransportNormal(
+                        referenceNormal,
+                        precedingTangent,
+                        tangent);
+                }
+
                 float3 transportedNormal =
-                    baseNormal - tangent * math.dot(baseNormal, tangent);
+                    referenceNormal -
+                    tangent * math.dot(referenceNormal, tangent);
 
                 if (math.lengthsq(transportedNormal) < 1e-8f)
                     transportedNormal = ChooseInitialNormal(tangent);
@@ -786,8 +865,57 @@ namespace PaintBucketSim.Jobs
 
                 segmentFrames[i] = quaternion.LookRotationSafe(tangent, materialNormal);
 
-                baseNormal = transportedNormal;
+                referenceNormal = transportedNormal;
+                precedingTangent = tangent;
             }
+        }
+
+        private static float3 TransportNormal(
+            float3 normal,
+            float3 fromTangent,
+            float3 toTangent)
+        {
+            float3 from = math.normalizesafe(
+                fromTangent,
+                new float3(0.0f, -1.0f, 0.0f));
+            float3 to = math.normalizesafe(toTangent, from);
+            float cosine = math.clamp(math.dot(from, to), -1.0f, 1.0f);
+            float3 axis = math.cross(from, to);
+            float axisLength = math.length(axis);
+
+            if (axisLength < 1e-7f)
+            {
+                if (cosine > 0.0f)
+                    return normal;
+
+                float3 fallbackAxis = ChooseInitialNormal(from);
+                return RotateAroundAxis(
+                    normal,
+                    fallbackAxis,
+                    math.PI);
+            }
+
+            return RotateAroundAxis(
+                normal,
+                axis / axisLength,
+                math.atan2(axisLength, cosine));
+        }
+
+        private static float3 RotateAroundAxis(
+            float3 value,
+            float3 axis,
+            float angle)
+        {
+            float3 unitAxis = math.normalizesafe(
+                axis,
+                new float3(0.0f, 1.0f, 0.0f));
+            float sine;
+            float cosine;
+            math.sincos(angle, out sine, out cosine);
+            return
+                value * cosine +
+                math.cross(unitAxis, value) * sine +
+                unitAxis * math.dot(unitAxis, value) * (1.0f - cosine);
         }
 
         private float3 GetSegmentTangent(int segmentIndex)

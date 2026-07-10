@@ -18,10 +18,20 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private FluidSolverStats _stats;
         private readonly Stopwatch _stepWatch = new Stopwatch();
         private readonly Stopwatch _sectionWatch = new Stopwatch();
+        private BucketFluidCouplingSample _latestBucketCouplingSample;
+        private int _couplingStepIndex;
+        private float _couplingSimulationTime;
 
         public FluidSolverType SolverType => FluidSolverType.CpuPbf;
         public bool IsInitialized { get; private set; }
         public FluidSolverStats Stats => _stats;
+
+        public bool TryGetLatestBucketCouplingSample(
+            out BucketFluidCouplingSample sample)
+        {
+            sample = _latestBucketCouplingSample;
+            return sample.valid;
+        }
 
         public void Initialize(FluidSolverContext context)
         {
@@ -45,6 +55,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 solverIterations = context.PbfConfig.solverIterations
             };
 
+            _latestBucketCouplingSample = default;
+            _couplingStepIndex = 0;
+            _couplingSimulationTime = 0.0f;
+
             IsInitialized = true;
         }
 
@@ -58,6 +72,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             DisposeHashMaps();
             IsInitialized = false;
             _stats.status = FluidSolverStatus.NotInitialized;
+            _latestBucketCouplingSample = default;
+            _couplingStepIndex = 0;
+            _couplingSimulationTime = 0.0f;
         }
 
         public void Step(
@@ -261,6 +278,17 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _stats.lastViscosityMilliseconds = (float)_sectionWatch.Elapsed.TotalMilliseconds;
             }
 
+            _couplingStepIndex++;
+            _couplingSimulationTime += dt;
+            int couplingInterval = solverContext.BucketSystem.Config != null
+                ? Mathf.Max(
+                    solverContext.BucketSystem.Config
+                        .fluidCouplingSampleIntervalSubsteps,
+                    1)
+                : 1;
+            if (_couplingStepIndex % couplingInterval == 0)
+                CollectBucketCouplingSample(solverContext);
+
             _stepWatch.Stop();
 
             _stats.status = FluidSolverStatus.Running;
@@ -270,6 +298,82 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _stats.usedBoundaryParticles = hasBoundary;
             _stats.usedAnalyticProjection = solverContext.PbfConfig.useAnalyticBucketProjection;
             _stats.usedXsphViscosity = solverContext.PbfConfig.enableXsphViscosity;
+        }
+
+        private void CollectBucketCouplingSample(
+            FluidSolverContext context)
+        {
+            FluidParticleData data = context.Particles;
+            BucketState bucket = context.BucketSystem.State;
+            quaternion inverseRotation = math.inverse(bucket.rotation);
+            float3 originVelocity =
+                bucket.velocity -
+                math.cross(
+                    bucket.angularVelocity,
+                    math.rotate(bucket.rotation, bucket.centerOfMassLocal));
+
+            int count = 0;
+            float mass = 0.0f;
+            float3 firstMoment = float3.zero;
+            float3 secondMoment = float3.zero;
+            float3 relativeMomentum = float3.zero;
+            float3 relativeAngularMomentum = float3.zero;
+
+            for (int i = 0; i < data.Count; i++)
+            {
+                FluidParticleState particleState =
+                    (FluidParticleState)data.States[i];
+                if (!FluidParticleStateUtility.IsFluidSolverState(
+                    particleState))
+                {
+                    continue;
+                }
+
+                float particleMass = math.max(data.Masses[i], 0.0f);
+                if (particleMass <= 0.0f)
+                    continue;
+
+                float3 worldOffset = data.Positions[i] - bucket.position;
+                float3 localPosition = math.rotate(
+                    inverseRotation,
+                    worldOffset);
+                float3 frameVelocity =
+                    originVelocity +
+                    math.cross(bucket.angularVelocity, worldOffset);
+                float3 relativeVelocityLocal = math.rotate(
+                    inverseRotation,
+                    data.Velocities[i] - frameVelocity);
+                float3 particleMomentum =
+                    relativeVelocityLocal * particleMass;
+
+                count++;
+                mass += particleMass;
+                firstMoment += localPosition * particleMass;
+                secondMoment +=
+                    localPosition * localPosition * particleMass;
+                relativeMomentum += particleMomentum;
+                relativeAngularMomentum += math.cross(
+                    localPosition,
+                    particleMomentum);
+            }
+
+            _latestBucketCouplingSample =
+                new BucketFluidCouplingSample
+                {
+                    valid = true,
+                    stepIndex = _couplingStepIndex,
+                    simulationTime = _couplingSimulationTime,
+                    containedParticleCount = count,
+                    massKg = mass,
+                    centerOfMassLocal = mass > 1e-7f
+                        ? firstMoment / mass
+                        : float3.zero,
+                    secondMomentLocal = secondMoment,
+                    relativeLinearMomentumLocal = relativeMomentum,
+                    relativeAngularMomentumLocal =
+                        relativeAngularMomentum,
+                    bucketRotationWorld = bucket.rotation
+                };
         }
 
         private void AllocateHashMaps(FluidSolverContext context)

@@ -26,10 +26,14 @@ MonoBehaviour:
   fluidLoadResponsePerSecond: 8
   fluidInertiaScale: 1
   maxFluidCenterOfMassOffsetMeters: 0.14
+  enableTwoWayFluidCoupling: 1
+  fluidCouplingSampleIntervalSubsteps: 2
+  maxFluidReactionDeltaVelocity: 0.65
+  maxFluidReactionDeltaAngularVelocity: 2.5
   motionMode: 1
-  applyGravityInDynamicMode: 1
-  linearDampingPerSecond: 0.22
-  angularDampingPerSecond: 0.8
+  gravityMode: 2
+  linearDampingPerSecond: 0.04
+  angularDampingPerSecond: 0.3
   autoPlaceAttachmentTopCenter: 1
   handleHeightMeters: 0.18
   localAttachmentPoint: {x: 0, y: 0.35, z: 0}

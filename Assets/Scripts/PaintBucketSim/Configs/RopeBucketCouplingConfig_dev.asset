@@ -14,25 +14,25 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeBucketCouplingConfig
   enableCoupling: 1
   snapBucketToRopeOnInitialize: 1
-  attachmentCompliance: 0.000001
+  attachmentCompliance: 0.0000002
   solverIterations: 8
   correctRopeEnd: 1
   correctBucket: 1
-  maxLinearCorrectionPerSubstep: 0.05
+  maxLinearCorrectionPerSubstep: 0.04
   maxAngularCorrectionPerSubstep: 0.06
-  updateVelocitiesFromCorrection: 1
+  updateVelocitiesFromCorrection: 0
   reconstructBucketVelocityFromFinalPose: 1
   enableVelocityStabilization: 1
-  attachmentVelocityDamping: 0.4
+  attachmentVelocityDamping: 0.1
   maxAttachmentImpulse: 3
   enableTwistCoupling: 1
-  twistTorqueStiffness: 0.18
-  twistTorqueDamping: 0.025
-  maxTwistTorque: 0.45
+  twistTorqueStiffness: 0.28
+  twistTorqueDamping: 0.16
+  maxTwistTorque: 0.75
   enableBailUprightTorque: 1
   bailUprightActivationAngleDegrees: 55
   bailUprightFullResponseAngleDegrees: 82
-  bailUprightStiffness: 5
-  bailUprightDamping: 0.65
-  maxBailUprightTorque: 8
+  bailUprightStiffness: 8
+  bailUprightDamping: 2
+  maxBailUprightTorque: 25
   enableDiagnostics: 1

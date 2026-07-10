@@ -12,8 +12,8 @@ namespace PaintBucketSim.Configs
         [Min(0.001f)]
         public float fixedDeltaTime = 1.0f / 60.0f;
 
-        [Tooltip("Internal substeps per fixed simulation step.")]
-        [Range(1, 8)]
+        [Tooltip("Internal substeps per fixed simulation step. Coupled rope, bucket, and MPM require at least two.")]
+        [Range(2, 8)]
         public int substeps = 2;
 
         [Tooltip("Internal simulation speed multiplier. Keep 1 for real-time.")]
@@ -48,8 +48,8 @@ namespace PaintBucketSim.Configs
             if (maximumAllowedTimestep < fixedDeltaTime)
                 maximumAllowedTimestep = fixedDeltaTime;
 
-            if (substeps < 1)
-                substeps = 1;
+            if (substeps < 2)
+                substeps = 2;
 
             if (!oneUnityUnitEqualsOneMeter)
             {

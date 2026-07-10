@@ -27,6 +27,7 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private GraphicsBuffer _adaptiveParticlePriorityBuffer;
         private GraphicsBuffer _adaptiveActivitySummaryBuffer;
         private GraphicsBuffer _diagnosticsBuffer;
+        private GraphicsBuffer _bucketCouplingBuffer;
         private GraphicsBuffer _mpmTileFlagsBuffer;
         private GraphicsBuffer _mpmActiveTileIndicesBuffer;
         private GraphicsBuffer _mpmTileDispatchArgsBuffer;
@@ -49,6 +50,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _uploadedBucketHoleCount;
 
         private int _kernelClearMpmDiagnostics = -1;
+        private int _kernelClearBucketCoupling = -1;
+        private int _kernelCollectBucketCoupling = -1;
         private int _kernelInitializeBucketLocalParticles = -1;
         private int _kernelClearAdaptiveActivity = -1;
         private int _kernelClassifyAdaptiveActivity = -1;
@@ -150,8 +153,14 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         private int _diagnosticsRequestedStepIndex;
         private int _lastDiagnosticsReadbackStep;
         private int _stepIndex;
+        private bool _bucketCouplingReadbackPending;
+        private BucketFluidCouplingSample _latestBucketCouplingSample;
+        private float _bucketCouplingSimulationTime;
+        private int _bucketCouplingGeneration;
 
         private const int DiagnosticsValueCount = 35;
+        private const int BucketCouplingValueCount = 14;
+        private const float BucketCouplingFixedScale = 1000000.0f;
         private const float DiagnosticsDivergenceScale = 100.0f;
         private const float DiagnosticsPressureScale = 1000000.0f;
         private const float DiagnosticsJScale = 1000.0f;
@@ -177,6 +186,13 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         public FluidSolverType SolverType => FluidSolverType.GpuMpm;
         public bool IsInitialized { get; private set; }
         public FluidSolverStats Stats => _stats;
+
+        public bool TryGetLatestBucketCouplingSample(
+            out BucketFluidCouplingSample sample)
+        {
+            sample = _latestBucketCouplingSample;
+            return sample.valid;
+        }
 
         public void Initialize(FluidSolverContext context)
         {
@@ -330,6 +346,12 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 _diagnosticsBuffer = null;
             }
 
+            if (_bucketCouplingBuffer != null)
+            {
+                _bucketCouplingBuffer.Release();
+                _bucketCouplingBuffer = null;
+            }
+
             if (_mpmTileFlagsBuffer != null)
             {
                 _mpmTileFlagsBuffer.Release();
@@ -428,6 +450,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             _bucketFrameAngularAccelerationLocal = Vector3.zero;
 
             _diagnosticsReadbackPending = false;
+            _bucketCouplingReadbackPending = false;
+            _latestBucketCouplingSample = default;
+            _bucketCouplingSimulationTime = 0.0f;
+            _bucketCouplingGeneration++;
             _hasPressureHistory = false;
             _mayHaveAirDomainParticles = false;
             _diagnosticsRequestedStepIndex = 0;
@@ -766,6 +792,12 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             solverContext.GpuBufferSet.SetUploadedParticleCount(particleCount);
 
             _stepIndex++;
+            _bucketCouplingSimulationTime += stepInput.dt;
+            int bucketCouplingDispatches =
+                RequestBucketCouplingReadbackIfDue(
+                    compute,
+                    solverContext,
+                    particleCount);
             RequestDiagnosticsReadbackIfDue(
                 solverContext,
                 runProjection
@@ -788,7 +820,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 adaptiveDispatches +
                 tileDispatches +
                 projectionDispatches +
-                airborneDispatches;
+                airborneDispatches +
+                bucketCouplingDispatches;
             _stats.gpuStageProfilingEnabled = profileGpuStages;
             _stats.gpuProfileMpmSetupMilliseconds =
                 gpuMpmSetupMilliseconds;
@@ -1068,6 +1101,10 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
             ComputeShader compute = context.GpuMpmConfig.denseLocalMpmCompute;
 
             _kernelClearMpmDiagnostics = compute.FindKernel("KClearMpmDiagnostics");
+            _kernelClearBucketCoupling =
+                compute.FindKernel("KClearBucketCoupling");
+            _kernelCollectBucketCoupling =
+                compute.FindKernel("KCollectBucketCoupling");
             _kernelInitializeBucketLocalParticles =
                 compute.FindKernel("KInitializeBucketLocalParticles");
             _kernelClearAdaptiveActivity = compute.FindKernel("KClearAdaptiveActivity");
@@ -1108,6 +1145,8 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         {
             bool baseKernelsValid =
                 _kernelClearMpmDiagnostics >= 0 &&
+                _kernelClearBucketCoupling >= 0 &&
+                _kernelCollectBucketCoupling >= 0 &&
                 _kernelInitializeBucketLocalParticles >= 0 &&
                 _kernelClearAdaptiveActivity >= 0 &&
                 _kernelClassifyAdaptiveActivity >= 0 &&
@@ -1231,6 +1270,12 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 GraphicsBuffer.Target.Structured,
                 DiagnosticsValueCount,
                 sizeof(uint)
+            );
+
+            _bucketCouplingBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                BucketCouplingValueCount,
+                sizeof(int)
             );
 
             UpdateMpmTileLayout(context.GpuMpmConfig);
@@ -1909,6 +1954,143 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
                 "_MpmDiagnostics",
                 _diagnosticsBuffer
             );
+        }
+
+        private int RequestBucketCouplingReadbackIfDue(
+            ComputeShader compute,
+            FluidSolverContext context,
+            int particleCount)
+        {
+            if (_bucketCouplingReadbackPending ||
+                _bucketCouplingBuffer == null ||
+                context.BucketSystem == null ||
+                context.BucketSystem.Config == null)
+            {
+                return 0;
+            }
+
+            BucketConfig config = context.BucketSystem.Config;
+            if (!config.enableContainedFluidLoad &&
+                !config.enableTwoWayFluidCoupling)
+            {
+                return 0;
+            }
+
+            int interval = Mathf.Max(
+                config.fluidCouplingSampleIntervalSubsteps,
+                1);
+            if (_stepIndex % interval != 0)
+                return 0;
+
+            compute.SetBuffer(
+                _kernelClearBucketCoupling,
+                "_BucketFluidCoupling",
+                _bucketCouplingBuffer);
+            compute.Dispatch(_kernelClearBucketCoupling, 1, 1, 1);
+
+            compute.SetBuffer(
+                _kernelCollectBucketCoupling,
+                "_ParticlePositionRadiusRead",
+                context.GpuBufferSet.PositionRadiusBuffer);
+            compute.SetBuffer(
+                _kernelCollectBucketCoupling,
+                "_ParticleVelocityMassRead",
+                context.GpuBufferSet.VelocityMassBuffer);
+            compute.SetBuffer(
+                _kernelCollectBucketCoupling,
+                "_ParticleStateAgeIdRead",
+                context.GpuBufferSet.StateAgeIdBuffer);
+            compute.SetBuffer(
+                _kernelCollectBucketCoupling,
+                "_BucketFluidCoupling",
+                _bucketCouplingBuffer);
+            compute.Dispatch(
+                _kernelCollectBucketCoupling,
+                Groups(particleCount),
+                1,
+                1);
+
+            _bucketCouplingReadbackPending = true;
+            int generation = _bucketCouplingGeneration;
+            int requestedStep = _stepIndex;
+            float requestedTime = _bucketCouplingSimulationTime;
+            quaternion requestedRotation =
+                context.BucketSystem.State.rotation;
+            AsyncGPUReadback.Request(
+                _bucketCouplingBuffer,
+                request => OnBucketCouplingReadback(
+                    request,
+                    generation,
+                    requestedStep,
+                    requestedTime,
+                    requestedRotation));
+            return 2;
+        }
+
+        private void OnBucketCouplingReadback(
+            AsyncGPUReadbackRequest request,
+            int generation,
+            int requestedStep,
+            float requestedTime,
+            quaternion requestedRotation)
+        {
+            if (generation != _bucketCouplingGeneration)
+                return;
+
+            _bucketCouplingReadbackPending = false;
+            if (request.hasError)
+                return;
+
+            var values = request.GetData<int>();
+            if (values.Length < BucketCouplingValueCount)
+                return;
+
+            float inverseScale = 1.0f / BucketCouplingFixedScale;
+            float mass = math.max(values[1] * inverseScale, 0.0f);
+            float3 firstMoment = new float3(
+                values[2],
+                values[3],
+                values[4]) * inverseScale;
+            float3 secondMoment = new float3(
+                values[5],
+                values[6],
+                values[7]) * inverseScale;
+            float3 linearMomentum = new float3(
+                values[8],
+                values[9],
+                values[10]) * inverseScale;
+            float3 angularMomentum = new float3(
+                values[11],
+                values[12],
+                values[13]) * inverseScale;
+
+            if (!math.isfinite(mass) ||
+                !math.all(math.isfinite(firstMoment)) ||
+                !math.all(math.isfinite(secondMoment)) ||
+                !math.all(math.isfinite(linearMomentum)) ||
+                !math.all(math.isfinite(angularMomentum)))
+            {
+                return;
+            }
+
+            _latestBucketCouplingSample =
+                new BucketFluidCouplingSample
+                {
+                    valid = true,
+                    stepIndex = requestedStep,
+                    simulationTime = requestedTime,
+                    containedParticleCount = math.max(values[0], 0),
+                    massKg = mass,
+                    centerOfMassLocal = mass > 1e-7f
+                        ? firstMoment / mass
+                        : float3.zero,
+                    secondMomentLocal = math.max(
+                        secondMoment,
+                        float3.zero),
+                    relativeLinearMomentumLocal = linearMomentum,
+                    relativeAngularMomentumLocal = angularMomentum,
+                    bucketRotationWorld = requestedRotation
+                };
         }
 
         private int RunMpmTileOccupancy(

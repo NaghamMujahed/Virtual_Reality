@@ -10,6 +10,9 @@ namespace PaintBucketSim.Systems.Fluid.Solvers
         bool IsInitialized { get; }
         FluidSolverStats Stats { get; }
 
+        bool TryGetLatestBucketCouplingSample(
+            out BucketFluidCouplingSample sample);
+
         void Initialize(FluidSolverContext context);
 
         void Step(

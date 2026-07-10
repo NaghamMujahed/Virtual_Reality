@@ -44,10 +44,10 @@ namespace PaintBucketSim.Configs
         public bool reconstructBucketVelocityFromFinalPose = true;
 
         [Tooltip("Resolve attachment relative velocity with a mass-aware impulse after positional projection.")]
-        public bool enableVelocityStabilization = false;
+        public bool enableVelocityStabilization = true;
 
         [Range(0.0f, 1.0f)]
-        public float attachmentVelocityDamping = 0.9f;
+        public float attachmentVelocityDamping = 0.1f;
 
         [Tooltip("Maximum attachment impulse per substep in N*s.")]
         [Min(0.01f)]
@@ -59,15 +59,15 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Torque applied back to the bucket around the rope axis per radian of twist error.")]
         [Min(0.0f)]
-        public float twistTorqueStiffness = 0.45f;
+        public float twistTorqueStiffness = 0.28f;
 
         [Tooltip("Angular damping torque around the rope axis.")]
         [Min(0.0f)]
-        public float twistTorqueDamping = 0.04f;
+        public float twistTorqueDamping = 0.16f;
 
         [Tooltip("Clamp for the bucket twist reaction torque.")]
         [Min(0.0f)]
-        public float maxTwistTorque = 1.2f;
+        public float maxTwistTorque = 0.75f;
 
         [Header("Bail Suspension")]
         [Tooltip("Prevent extreme bucket inversion while preserving natural free swing and axial twist.")]
@@ -83,14 +83,14 @@ namespace PaintBucketSim.Configs
 
         [Tooltip("Desired angular acceleration per radian beyond the natural-motion range.")]
         [Min(0.0f)]
-        public float bailUprightStiffness = 5.0f;
+        public float bailUprightStiffness = 8.0f;
 
         [Tooltip("Angular velocity damping used by the inertia-aware anti-inversion response.")]
         [Min(0.0f)]
-        public float bailUprightDamping = 0.65f;
+        public float bailUprightDamping = 2.0f;
 
         [Min(0.0f)]
-        public float maxBailUprightTorque = 8.0f;
+        public float maxBailUprightTorque = 25.0f;
 
         [Header("Diagnostics")]
         public bool enableDiagnostics = true;
