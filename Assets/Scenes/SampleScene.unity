@@ -2301,8 +2301,12 @@ MonoBehaviour:
   minPitch: -10
   maxPitch: 80
   zoomSpeed: 2.5
+  pinchZoomSpeed: 0.01
+  touchpadPinchZoomSpeed: 8
   zoomSmoothness: 10
   panSpeed: 0.015
+  touchpadPanSpeed: 0.0015
+  keyboardPanSpeed: 0.65
   positionSmoothTime: 0.06
   rotationSmoothTime: 0.04
   enableAutoOrbit: 0
@@ -2751,7 +2755,7 @@ MonoBehaviour:
   meshRenderer: {fileID: 0}
   ropeColor: {r: 0.85, g: 0.75, b: 0.55, a: 1}
   brokenPartColor: {r: 1, g: 0.45, b: 0.25, a: 1}
-  fallbackWidth: 0.02
+  defaultWidth: 0.02
   useProceduralTube: 1
   useBraidedStrands: 1
   radialSegments: 12
@@ -6787,8 +6791,12 @@ MonoBehaviour:
   minPitch: -10
   maxPitch: 80
   zoomSpeed: 2.5
+  pinchZoomSpeed: 0.01
+  touchpadPinchZoomSpeed: 8
   zoomSmoothness: 10
   panSpeed: 0.015
+  touchpadPanSpeed: 0.0015
+  keyboardPanSpeed: 0.65
   positionSmoothTime: 0.06
   rotationSmoothTime: 0.04
   enableAutoOrbit: 0
@@ -9625,7 +9633,6 @@ MonoBehaviour:
   _enableSurfaceImpactDiagnostics: 0
   _diagnosticLogEveryNFrames: 120
   _syncPaintMaterialEveryFrame: 1
-  _warnWhenGpuSolverPresetDiffersFromMaterial: 1
   _colorMixingMode: 1
   _pigmentMixStrength: 1
   _pigmentMinReflectance: 0.035
@@ -13018,7 +13025,7 @@ Transform:
   m_GameObject: {fileID: 1657576614}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 4.5, z: 0}
+  m_LocalPosition: {x: 0, y: 6.3, z: 3.51}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -13040,6 +13047,7 @@ MonoBehaviour:
   paintFluidSystem: {fileID: 303841553}
   meshFilter: {fileID: 0}
   meshRenderer: {fileID: 0}
+  showBucketMesh: 1
   showAttachmentJoint: 1
   showHoleRing: 1
   showBailHandle: 1
@@ -14778,8 +14786,12 @@ MonoBehaviour:
   minPitch: -10
   maxPitch: 80
   zoomSpeed: 2.5
+  pinchZoomSpeed: 0.01
+  touchpadPinchZoomSpeed: 8
   zoomSmoothness: 10
   panSpeed: 0.015
+  touchpadPanSpeed: 0.0015
+  keyboardPanSpeed: 0.65
   positionSmoothTime: 0.06
   rotationSmoothTime: 0.04
   enableAutoOrbit: 0
@@ -14941,8 +14953,12 @@ MonoBehaviour:
   minPitch: -10
   maxPitch: 80
   zoomSpeed: 2.5
+  pinchZoomSpeed: 0.01
+  touchpadPinchZoomSpeed: 8
   zoomSmoothness: 10
   panSpeed: 0.015
+  touchpadPanSpeed: 0.0015
+  keyboardPanSpeed: 0.65
   positionSmoothTime: 0.06
   rotationSmoothTime: 0.04
   enableAutoOrbit: 0

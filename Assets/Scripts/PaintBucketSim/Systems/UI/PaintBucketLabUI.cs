@@ -491,7 +491,7 @@ namespace PaintBucketSim.Systems.UI
             bg.color = new Color(0.045f, 0.050f, 0.054f, 0.90f);
 
             _hintText = CreateText(
-                "Space/P Pause  |  O Step  |  R Reset  |  M Board Motion  |  B/N Mode  |  C Clear Paint  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI",
+                "Space/P Pause  |  O Step  |  R Reset  |  M Board Motion  |  B/N Mode  |  C Clear Paint  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI | WASD Move",
                 hints.transform,
                 12,
                 FontStyle.Bold,

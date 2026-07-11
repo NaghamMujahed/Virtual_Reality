@@ -209,14 +209,14 @@ namespace PaintBucketSim.Core
             if (boardMotionController != null)
                 boardMotionController.ResetBoardPose(true);
 
-            if (ropeSystem != null)
-                ropeSystem.ResetSystem(Context);
+            // if (ropeSystem != null)
+            //     ropeSystem.ResetSystem(Context);
 
-            if (bucketSystem != null)
-                bucketSystem.ResetSystem(Context);
+            // if (bucketSystem != null)
+            //     bucketSystem.ResetSystem(Context);
 
-            if (ropeBucketCouplingSystem != null)
-                ropeBucketCouplingSystem.ResetSystem(Context);
+            // if (ropeBucketCouplingSystem != null)
+            //     ropeBucketCouplingSystem.ResetSystem(Context);
 
             if (boundarySystem != null)
                 boundarySystem.ResetSystem(Context);
