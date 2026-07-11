@@ -220,6 +220,7 @@ namespace PaintBucketSim.Jobs
         public int grabSegmentIndex;
         public float grabSegmentT;
         public float3 grabTarget;
+        public float3 grabVelocity;
         public float grabCompliance;
         public float maxGrabCorrectionPerIteration;
 
@@ -250,6 +251,9 @@ namespace PaintBucketSim.Jobs
 
             for (int iteration = 0; iteration < solverIterations; iteration++)
             {
+                if (enableGrabConstraint)
+                    SolveGrabConstraint(dt2);
+
                 SolveStretchConstraints(dt2, false);
                 SolveStretchConstraints(dt2, true);
 
@@ -260,9 +264,6 @@ namespace PaintBucketSim.Jobs
                     else
                         SolveDistanceBendConstraints(dt2);
                 }
-
-                if (enableGrabConstraint)
-                    SolveGrabConstraint(dt2);
             }
 
             if (enforceMaximumSegmentStrain)
@@ -281,34 +282,48 @@ namespace PaintBucketSim.Jobs
             int i0 = grabSegmentIndex;
             int i1 = grabSegmentIndex + 1;
             float t = math.saturate(grabSegmentT);
-            float b0 = 1.0f - t;
-            float b1 = t;
-            float w0 = inverseMasses[i0];
-            float w1 = inverseMasses[i1];
-            float weightedInverseMass =
-                b0 * b0 * w0 +
-                b1 * b1 * w1;
+            float restLength = stretchRestLengths[grabSegmentIndex];
+
+            // The virtual hand splits the segment into two tension-only cables.
+            SolveGrabCableConstraint(i0, restLength * t, dt2);
+            SolveGrabCableConstraint(i1, restLength * (1.0f - t), dt2);
+        }
+
+        private void SolveGrabCableConstraint(
+            int particleIndex,
+            float restLength,
+            float dt2)
+        {
+            float inverseMass = inverseMasses[particleIndex];
+            if (inverseMass <= 0.0f)
+                return;
+
+            float3 offset = positions[particleIndex] - grabTarget;
+            float length = math.length(offset);
+            if (length <= 1e-7f)
+                return;
+
+            float constraint = length - math.max(restLength, 0.0f);
+            if (constraint <= 0.0f)
+                return;
 
             float alphaTilde = math.max(grabCompliance, 0.0f) / dt2;
-            float denominator = weightedInverseMass + alphaTilde;
+            float denominator = inverseMass + alphaTilde;
             if (denominator <= 1e-8f)
                 return;
 
-            float3 p0 = positions[i0];
-            float3 p1 = positions[i1];
-            float3 point = p0 * b0 + p1 * b1;
-            float3 error = point - grabTarget;
-            float errorLength = math.length(error);
-            if (errorLength < 1e-6f)
-                return;
+            float correctionMagnitude =
+                -constraint * inverseMass / denominator;
+            float maximumCorrection = math.max(
+                maxGrabCorrectionPerIteration,
+                0.001f);
+            correctionMagnitude = math.clamp(
+                correctionMagnitude,
+                -maximumCorrection,
+                maximumCorrection);
 
-            float maxCorrection = math.max(maxGrabCorrectionPerIteration, 0.001f);
-            if (errorLength > maxCorrection)
-                error *= maxCorrection / errorLength;
-
-            float3 deltaLambda = -error / denominator;
-            positions[i0] = p0 + w0 * b0 * deltaLambda;
-            positions[i1] = p1 + w1 * b1 * deltaLambda;
+            positions[particleIndex] +=
+                offset / length * correctionMagnitude;
         }
 
         private void EnforceMaximumStretch()
@@ -317,39 +332,40 @@ namespace PaintBucketSim.Jobs
 
             if (enableGrabConstraint &&
                 grabSegmentIndex >= 0 &&
-                grabSegmentIndex < stretchRestLengths.Length)
+                grabSegmentIndex < stretchRestLengths.Length &&
+                grabSegmentIndex != brokenSegmentIndex)
             {
-                EnforceGrabAdjacentLengths(strain);
-                EnforceMaximumStretchRange(0, grabSegmentIndex, strain);
-                EnforceMaximumStretchRange(
-                    grabSegmentIndex + 1,
-                    stretchRestLengths.Length,
-                    strain);
+                float t = math.saturate(grabSegmentT);
+                float restLength = stretchRestLengths[grabSegmentIndex];
+                float maximumScale = 1.0f + strain;
+                int projectionPasses = math.clamp(
+                    solverIterations / 6,
+                    2,
+                    4);
+
+                for (int pass = 0; pass < projectionPasses; pass++)
+                {
+                    EnforceMaximumStretchRange(0, grabSegmentIndex, strain);
+                    EnforceMaximumStretchRange(
+                        grabSegmentIndex + 1,
+                        stretchRestLengths.Length,
+                        strain);
+                    EnforceGrabMaximumLength(
+                        grabSegmentIndex,
+                        restLength * t * maximumScale);
+                    EnforceGrabMaximumLength(
+                        grabSegmentIndex + 1,
+                        restLength * (1.0f - t) * maximumScale);
+                }
                 return;
             }
 
             EnforceMaximumStretchRange(0, stretchRestLengths.Length, strain);
         }
 
-        private void EnforceGrabAdjacentLengths(float strain)
-        {
-            int i0 = grabSegmentIndex;
-            int i1 = i0 + 1;
-            float t = math.saturate(grabSegmentT);
-            float restLength = stretchRestLengths[grabSegmentIndex];
-            float maximumScale = 1.0f + strain;
-
-            ProjectParticleToGrabRadius(
-                i0,
-                restLength * t * maximumScale);
-            ProjectParticleToGrabRadius(
-                i1,
-                restLength * (1.0f - t) * maximumScale);
-        }
-
-        private void ProjectParticleToGrabRadius(
+        private void EnforceGrabMaximumLength(
             int particleIndex,
-            float maximumDistance)
+            float maximumLength)
         {
             if (particleIndex < 0 ||
                 particleIndex >= positions.Length ||
@@ -358,15 +374,27 @@ namespace PaintBucketSim.Jobs
                 return;
             }
 
-            float3 offset = positions[particleIndex] - grabTarget;
-            float distance = math.length(offset);
-            float limit = math.max(maximumDistance, 0.0f);
-
-            if (distance <= limit || distance <= 1e-8f)
+            float3 position = positions[particleIndex];
+            float3 offset = position - grabTarget;
+            float length = math.length(offset);
+            float limit = math.max(maximumLength, 0.0f);
+            if (length <= limit || length <= 1e-8f)
                 return;
 
-            positions[particleIndex] =
-                grabTarget + offset * (limit / distance);
+            float3 direction = offset / length;
+            float3 corrected = grabTarget + direction * limit;
+            float safeDt = math.max(dt, 1e-8f);
+            float3 velocity =
+                (position - previousPositions[particleIndex]) / safeDt;
+            float separatingSpeed = math.dot(
+                velocity - grabVelocity,
+                direction);
+            if (separatingSpeed > 0.0f)
+                velocity -= direction * separatingSpeed;
+
+            positions[particleIndex] = corrected;
+            previousPositions[particleIndex] =
+                corrected - velocity * safeDt;
         }
 
         private void EnforceMaximumStretchRange(
@@ -379,7 +407,8 @@ namespace PaintBucketSim.Jobs
 
             for (int c = start; c < end; c++)
             {
-                if (c == brokenSegmentIndex)
+                if (c == brokenSegmentIndex ||
+                    (enableGrabConstraint && c == grabSegmentIndex))
                     continue;
 
                 int i0 = c;
@@ -425,7 +454,8 @@ namespace PaintBucketSim.Jobs
                     ? constraintCount - 1 - passIndex
                     : passIndex;
 
-                if (c == brokenSegmentIndex)
+                if (c == brokenSegmentIndex ||
+                    (enableGrabConstraint && c == grabSegmentIndex))
                     continue;
 
                 int i0 = c;
@@ -447,7 +477,11 @@ namespace PaintBucketSim.Jobs
 
             for (int c = 0; c < bendRestLengths.Length; c++)
             {
-                if (c == brokenSegmentIndex || c + 1 == brokenSegmentIndex)
+                if (c == brokenSegmentIndex ||
+                    c + 1 == brokenSegmentIndex ||
+                    (enableGrabConstraint &&
+                        (c == grabSegmentIndex ||
+                         c + 1 == grabSegmentIndex)))
                     continue;
 
                 int i0 = c;
@@ -469,7 +503,11 @@ namespace PaintBucketSim.Jobs
 
             for (int c = 0; c < bendRestAngles.Length; c++)
             {
-                if (c == brokenSegmentIndex || c + 1 == brokenSegmentIndex)
+                if (c == brokenSegmentIndex ||
+                    c + 1 == brokenSegmentIndex ||
+                    (enableGrabConstraint &&
+                        (c == grabSegmentIndex ||
+                         c + 1 == grabSegmentIndex)))
                     continue;
 
                 SolveArccosAngleConstraint(c, alphaTilde);

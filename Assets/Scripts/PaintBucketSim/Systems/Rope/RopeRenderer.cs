@@ -27,6 +27,7 @@ namespace PaintBucketSim.Systems.Rope
         [SerializeField, Range(5, 12)] private int strandRadialSegments = 8;
 
         private Vector3[] _positionsBuffer;
+        private Vector3[] _grabPositionsBuffer;
         private Vector3[] _topBuffer;
         private Vector3[] _bottomBuffer;
         private float[] _twistBuffer;
@@ -109,6 +110,9 @@ namespace PaintBucketSim.Systems.Rope
 
             ropeSystem.CopySegmentFramesTo(_frameBuffer);
 
+            Vector3[] renderPositions = BuildRenderPositions(
+                out int insertedGrabRingIndex);
+
             float width = ropeSystem.Config != null
                 ? ropeSystem.Config.visualRadiusMeters * 2.0f
                 : defaultWidth;
@@ -119,7 +123,10 @@ namespace PaintBucketSim.Systems.Rope
                 if (_detachedLineRenderer != null)
                     _detachedLineRenderer.positionCount = 0;
 
-                BuildProceduralTube(_positionsBuffer, width * 0.5f);
+                BuildProceduralTube(
+                    renderPositions,
+                    width * 0.5f,
+                    insertedGrabRingIndex);
                 return;
             }
 
@@ -137,8 +144,8 @@ namespace PaintBucketSim.Systems.Rope
 
             if (!ropeSystem.IsBroken)
             {
-                lineRenderer.positionCount = count;
-                lineRenderer.SetPositions(_positionsBuffer);
+                lineRenderer.positionCount = renderPositions.Length;
+                lineRenderer.SetPositions(renderPositions);
 
                 if (_detachedLineRenderer != null)
                     _detachedLineRenderer.positionCount = 0;
@@ -182,6 +189,36 @@ namespace PaintBucketSim.Systems.Rope
 
             _detachedLineRenderer.positionCount = bottomCount;
             _detachedLineRenderer.SetPositions(_bottomBuffer);
+        }
+
+        private Vector3[] BuildRenderPositions(out int insertedGrabRingIndex)
+        {
+            insertedGrabRingIndex = -1;
+            if (!ropeSystem.IsGrabActive || ropeSystem.IsBroken)
+                return _positionsBuffer;
+
+            int segmentIndex = ropeSystem.GrabSegmentIndex;
+            if (segmentIndex < 0 || segmentIndex >= _positionsBuffer.Length - 1)
+                return _positionsBuffer;
+
+            int renderCount = _positionsBuffer.Length + 1;
+            if (_grabPositionsBuffer == null ||
+                _grabPositionsBuffer.Length != renderCount)
+            {
+                _grabPositionsBuffer = new Vector3[renderCount];
+            }
+
+            insertedGrabRingIndex = segmentIndex + 1;
+            for (int i = 0; i <= segmentIndex; i++)
+                _grabPositionsBuffer[i] = _positionsBuffer[i];
+
+            _grabPositionsBuffer[insertedGrabRingIndex] =
+                ropeSystem.GetGrabTargetPosition();
+
+            for (int i = segmentIndex + 1; i < _positionsBuffer.Length; i++)
+                _grabPositionsBuffer[i + 1] = _positionsBuffer[i];
+
+            return _grabPositionsBuffer;
         }
 
         private void EnsureDetachedRenderer()
@@ -334,7 +371,10 @@ namespace PaintBucketSim.Systems.Rope
             return texture;
         }
 
-        private void BuildProceduralTube(Vector3[] positions, float radius)
+        private void BuildProceduralTube(
+            Vector3[] positions,
+            float radius,
+            int insertedGrabRingIndex)
         {
             if (meshFilter == null || meshRenderer == null || positions == null || positions.Length < 2)
                 return;
@@ -374,10 +414,19 @@ namespace PaintBucketSim.Systems.Rope
 
                 if (_frameBuffer != null && _frameBuffer.Length > 0)
                 {
-                    int frameIndex = Mathf.Clamp(i, 0, _frameBuffer.Length - 1);
+                    int sourceFrameIndex =
+                        insertedGrabRingIndex >= 0 && i >= insertedGrabRingIndex
+                            ? i - 1
+                            : i;
+                    int frameIndex = Mathf.Clamp(
+                        sourceFrameIndex,
+                        0,
+                        _frameBuffer.Length - 1);
                     Quaternion frame = _frameBuffer[frameIndex];
 
-                    tangent = frame * Vector3.forward;
+                    tangent = insertedGrabRingIndex >= 0
+                        ? ComputeTangent(positions, i)
+                        : frame * Vector3.forward;
                     ringNormal = frame * Vector3.up;
                     binormal = frame * Vector3.right;
 

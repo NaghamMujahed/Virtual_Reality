@@ -128,7 +128,7 @@ namespace PaintBucketSim.Systems.Rope
             float3 pivot = GetPivotPosition(context, dt);
             _data.Velocities[0] = float3.zero;
             float3 gravity = (float3)context.EnvironmentState.gravity * ropeConfig.gravityScale;
-            float3 grabTarget = UpdateGrabTarget(dt);
+            float3 grabTarget = UpdateGrabTarget(dt, pivot);
             TryBreakFromGrabOverextension(
                 pivot,
                 grabTarget,
@@ -208,6 +208,7 @@ namespace PaintBucketSim.Systems.Rope
                 grabSegmentIndex = _grabSegmentIndex,
                 grabSegmentT = _grabSegmentT,
                 grabTarget = grabTarget,
+                grabVelocity = _simulatedGrabVelocity,
                 grabCompliance = ropeConfig.grabCompliance,
                 maxGrabCorrectionPerIteration =
                     ropeConfig.maxGrabCorrectionPerIteration,
@@ -327,6 +328,24 @@ namespace PaintBucketSim.Systems.Rope
 
             float3 p = _data.Positions[index];
             return new Vector3(p.x, p.y, p.z);
+        }
+
+        public float GetSegmentExtensionStrain(int segmentIndex)
+        {
+            if (!IsInitialized ||
+                segmentIndex < 0 ||
+                segmentIndex >= _data.SegmentCount)
+            {
+                return 0.0f;
+            }
+
+            float restLength = Mathf.Max(
+                _data.StretchRestLengths[segmentIndex],
+                1e-6f);
+            float currentLength = math.distance(
+                _data.Positions[segmentIndex],
+                _data.Positions[segmentIndex + 1]);
+            return Mathf.Max(0.0f, currentLength / restLength - 1.0f);
         }
 
         public bool TryFindClosestSegment(
@@ -630,7 +649,7 @@ namespace PaintBucketSim.Systems.Rope
             return segmentRestLength / rigidity;
         }
 
-        private float3 UpdateGrabTarget(float dt)
+        private float3 UpdateGrabTarget(float dt, float3 pivot)
         {
             if (!_grabActive)
                 return float3.zero;
@@ -652,9 +671,52 @@ namespace PaintBucketSim.Systems.Rope
             else
                 _simulatedGrabTarget = _requestedGrabTarget;
 
+            _simulatedGrabTarget = ClampGrabTargetToReachableSpan(
+                _simulatedGrabTarget,
+                pivot);
+
             _simulatedGrabVelocity =
                 (_simulatedGrabTarget - previous) / safeDt;
             return _simulatedGrabTarget;
+        }
+
+        private float3 ClampGrabTargetToReachableSpan(
+            float3 target,
+            float3 pivot)
+        {
+            if (ropeConfig == null ||
+                !ropeConfig.enforceMaximumSegmentStrain ||
+                ropeConfig.enableBreakByStrain ||
+                _grabSegmentIndex < 0 ||
+                _grabSegmentIndex >= _data.SegmentCount ||
+                (IsBroken && _grabSegmentIndex > BrokenSegmentIndex))
+            {
+                return target;
+            }
+
+            float upperRestLength = 0.0f;
+            for (int segmentIndex = 0;
+                segmentIndex < _grabSegmentIndex;
+                segmentIndex++)
+            {
+                upperRestLength += _data.StretchRestLengths[segmentIndex];
+            }
+
+            upperRestLength +=
+                _data.StretchRestLengths[_grabSegmentIndex] *
+                Mathf.Clamp01(_grabSegmentT);
+            float maximumLength = upperRestLength *
+                (1.0f + Mathf.Clamp(
+                    ropeConfig.maximumSegmentStrain,
+                    0.0f,
+                    0.6f));
+            float3 offset = target - pivot;
+            float distance = math.length(offset);
+
+            if (distance <= maximumLength || distance <= 1e-8f)
+                return target;
+
+            return pivot + offset * (maximumLength / distance);
         }
 
         private bool TryBreakFromGrabOverextension(

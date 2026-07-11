@@ -22,7 +22,7 @@ MonoBehaviour:
   manualInertiaTensor: {x: 0.025, y: 0.02, z: 0.025}
   enableContainedFluidLoad: 1
   containedFluidMassScale: 1
-  maxContainedFluidMassKg: 45
+  maxContainedFluidMassKg: 100
   fluidLoadResponsePerSecond: 8
   fluidInertiaScale: 1
   maxFluidCenterOfMassOffsetMeters: 0.14

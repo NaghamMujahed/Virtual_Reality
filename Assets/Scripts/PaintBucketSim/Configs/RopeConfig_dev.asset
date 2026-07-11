@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc4381032b6c39d4bb73f9237a106ba1, type: 3}
   m_Name: RopeConfig_dev
   m_EditorClassIdentifier: Assembly-CSharp::PaintBucketSim.Configs.RopeConfig
-  lengthMeters: 4
+  lengthMeters: 5
   segmentCount: 56
   physicalRadiusMeters: 0.016
   visualRadiusMeters: 0.018
@@ -26,7 +26,7 @@ MonoBehaviour:
   youngModulusPa: 100000000
   stretchComplianceScale: 1
   bendComplianceScale: 1
-  solverIterations: 18
+  solverIterations: 12
   enforceMaximumSegmentStrain: 1
   maximumSegmentStrain: 0.02
   bendingModel: 1
@@ -35,7 +35,7 @@ MonoBehaviour:
   dampingMode: 1
   exponentialDampingPerSecond: 0.05
   segmentDampingRatio: 0
-  enableBreakByTension: 0
+  enableBreakByTension: 1
   breakTensionNewton: 850
   enableBreakByStrain: 0
   breakStrain: 0.25
@@ -46,9 +46,9 @@ MonoBehaviour:
   pivotNoiseSpeed: 0.5
   maxPivotSpeedMetersPerSecond: 0.6
   enableInteractiveGrab: 1
-  grabCompliance: 0.000001
+  grabCompliance: 0.00001
   maxGrabCorrectionPerIteration: 0.065
-  maxGrabSpeedMetersPerSecond: 1.5
+  maxGrabSpeedMetersPerSecond: 2
   airDragMode: 2
   linearAirDragKgPerSecond: 0
   quadraticDragCoefficient: 1.1
