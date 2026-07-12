@@ -101,7 +101,10 @@ public class InteractiveCamera : MonoBehaviour
     {
         controlledCamera = GetComponent<Camera>();
         WindowsTouchpadGestures.Acquire();
-        InitializeCamera();
+        if (controlledCamera != null && !controlledCamera.enabled)
+            InitializeFromAuthoredTransform();
+        else
+            InitializeCamera();
     }
 
     private void OnDestroy()
@@ -136,6 +139,36 @@ public class InteractiveCamera : MonoBehaviour
 
         initialized = true;
 
+        ApplyCameraTransform(true);
+    }
+
+    private void InitializeFromAuthoredTransform()
+    {
+        Vector3 authoredFocus = target != null
+            ? target.position + targetOffset
+            : transform.position + transform.forward * defaultDistance;
+        Vector3 toFocus = authoredFocus - transform.position;
+        if (toFocus.sqrMagnitude < 0.0001f)
+        {
+            InitializeCamera();
+            return;
+        }
+
+        Vector3 euler = Quaternion.LookRotation(toFocus, Vector3.up).eulerAngles;
+        yaw = Mathf.DeltaAngle(0f, euler.y);
+        pitch = Mathf.Clamp(
+            Mathf.DeltaAngle(0f, euler.x),
+            minPitch,
+            maxPitch);
+        distance = Mathf.Clamp(toFocus.magnitude, minDistance, maxDistance);
+        targetDistance = distance;
+        defaultYaw = yaw;
+        defaultPitch = pitch;
+        defaultDistance = distance;
+        panOffset = Vector3.zero;
+        focusPoint = authoredFocus;
+        lastInputTime = Time.unscaledTime;
+        initialized = true;
         ApplyCameraTransform(true);
     }
 

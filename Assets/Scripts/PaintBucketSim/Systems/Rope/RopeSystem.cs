@@ -998,6 +998,22 @@ namespace PaintBucketSim.Systems.Rope
                 _simulatedPivotVelocity.z);
         }
 
+        public float GetMaximumReachableLength()
+        {
+            if (ropeConfig == null ||
+                !ropeConfig.enforceMaximumSegmentStrain)
+            {
+                return float.PositiveInfinity;
+            }
+
+            float strain = Mathf.Clamp(
+                ropeConfig.maximumSegmentStrain,
+                0.0f,
+                0.6f);
+            return Mathf.Max(ropeConfig.lengthMeters, 0.05f) *
+                (1.0f + strain);
+        }
+
         public float GetRopeEndInverseMass()
         {
             if (!IsInitialized)

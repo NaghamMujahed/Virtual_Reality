@@ -1,3 +1,4 @@
+using PaintBucketSim.Systems.Bucket;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -9,6 +10,7 @@ namespace PaintBucketSim.Systems.Rope
     {
         [Header("References")]
         [SerializeField] private RopeSystem ropeSystem;
+        [SerializeField] private BucketSystem bucketSystem;
         [SerializeField] private Camera targetCamera;
 
         [Header("Picking")]
@@ -24,10 +26,12 @@ namespace PaintBucketSim.Systems.Rope
         [SerializeField] private Color grabGizmoColor = new Color(1.0f, 0.72f, 0.15f, 1.0f);
 
         private bool _dragging;
+        private bool _draggingBucket;
         private Plane _dragPlane;
         private Vector3 _dragPlaneNormal;
         private float _depthOffset;
         private Vector3 _lastTarget;
+        private Vector3 _bucketGrabToAttachmentOffset;
         private Vector3[] _positionsBuffer;
 
         public bool IsDragging => _dragging;
@@ -68,8 +72,16 @@ namespace PaintBucketSim.Systems.Rope
             if (ropeSystem == null)
                 ropeSystem = GetComponent<RopeSystem>();
 
+            if (bucketSystem == null)
+                bucketSystem = FindAnyObjectByType<BucketSystem>();
+
             if (targetCamera == null)
                 targetCamera = ResolveCamera();
+        }
+
+        private void OnDisable()
+        {
+            EndGrab();
         }
 
         private void Update()
@@ -77,7 +89,11 @@ namespace PaintBucketSim.Systems.Rope
             if (!enableGameViewInput || !Application.isPlaying)
                 return;
 
-            Camera camera = targetCamera != null ? targetCamera : ResolveCamera();
+            Camera camera = targetCamera != null && targetCamera.isActiveAndEnabled
+                ? targetCamera
+                : ResolveCamera();
+            if (camera != null && camera != targetCamera)
+                targetCamera = camera;
             if (camera == null || ropeSystem == null)
                 return;
 
@@ -103,41 +119,92 @@ namespace PaintBucketSim.Systems.Rope
 
         public bool TryBeginGrab(Ray ray, Camera camera)
         {
-            if (ropeSystem == null || !ropeSystem.IsInitialized)
+            Vector3 grabPoint;
+            if (ropeSystem != null && ropeSystem.IsInitialized)
+            {
+                float radius = pickRadiusMeters;
+                if (ropeSystem.Config != null)
+                {
+                    radius = Mathf.Max(
+                        radius,
+                        ropeSystem.Config.visualRadiusMeters * 3.0f);
+                }
+
+                bool hitRope = ropeSystem.TryFindClosestSegment(
+                    ray,
+                    radius,
+                    out int segmentIndex,
+                    out float segmentT,
+                    out grabPoint,
+                    out _);
+                if (hitRope &&
+                    ropeSystem.BeginGrab(segmentIndex, segmentT, grabPoint))
+                {
+                    BeginDrag(ray, camera, grabPoint, false);
+                    return true;
+                }
+            }
+
+            if (bucketSystem == null ||
+                !TryPickBucket(ray, out grabPoint) ||
+                !bucketSystem.BeginGrab(grabPoint))
+            {
                 return false;
+            }
 
-            float radius = pickRadiusMeters;
-            if (ropeSystem.Config != null)
-                radius = Mathf.Max(radius, ropeSystem.Config.visualRadiusMeters * 3.0f);
+            BeginDrag(ray, camera, grabPoint, true);
+            return true;
+        }
 
-            bool hit = ropeSystem.TryFindClosestSegment(
-                ray,
-                radius,
-                out int segmentIndex,
-                out float segmentT,
-                out Vector3 grabPoint,
-                out _);
-
-            if (!hit || !ropeSystem.BeginGrab(segmentIndex, segmentT, grabPoint))
-                return false;
-
+        private void BeginDrag(
+            Ray ray,
+            Camera camera,
+            Vector3 grabPoint,
+            bool bucket)
+        {
             SetupDragPlane(ray, camera, grabPoint);
             _dragging = true;
+            _draggingBucket = bucket;
             _lastTarget = grabPoint;
+            _bucketGrabToAttachmentOffset = bucket && bucketSystem != null
+                ? bucketSystem.GetAttachmentWorldPosition() - grabPoint
+                : Vector3.zero;
+        }
+
+        private bool TryPickBucket(Ray ray, out Vector3 grabPoint)
+        {
+            grabPoint = Vector3.zero;
+            Renderer bucketRenderer =
+                bucketSystem != null
+                    ? bucketSystem.GetComponent<Renderer>()
+                    : null;
+            if (bucketRenderer == null ||
+                !bucketRenderer.bounds.IntersectRay(ray, out float distance))
+                return false;
+
+            grabPoint = ray.GetPoint(distance);
             return true;
         }
 
         public void UpdateGrab(Ray ray, Camera camera)
         {
-            if (!_dragging || ropeSystem == null)
+            if (!_dragging ||
+                (ropeSystem == null && bucketSystem == null))
                 return;
 
             if (!_dragPlane.Raycast(ray, out float enter))
                 return;
 
             Vector3 target = ray.GetPoint(enter) + _dragPlaneNormal * _depthOffset;
-            ropeSystem.MoveGrab(target);
-            _lastTarget = target;
+            Vector3 pointerTarget = target;
+            if (_draggingBucket)
+            {
+                target = ConstrainBucketTargetToRopeReach(target);
+                bucketSystem?.MoveGrab(target);
+            }
+            else
+                ropeSystem?.MoveGrab(target);
+            _lastTarget = pointerTarget;
         }
 
         public void AdjustGrabDepth(float scrollSteps)
@@ -147,11 +214,42 @@ namespace PaintBucketSim.Systems.Rope
 
         public void EndGrab()
         {
-            if (ropeSystem != null)
-                ropeSystem.EndGrab();
+            ropeSystem?.EndGrab();
+            bucketSystem?.EndGrab();
 
             _dragging = false;
+            _draggingBucket = false;
             _depthOffset = 0.0f;
+            _bucketGrabToAttachmentOffset = Vector3.zero;
+        }
+
+        private Vector3 ConstrainBucketTargetToRopeReach(Vector3 target)
+        {
+            if (ropeSystem == null || ropeSystem.Config == null ||
+                ropeSystem.IsBroken)
+            {
+                return target;
+            }
+
+            Vector3 pivot = ropeSystem.GetSimulatedPivotPosition();
+            Vector3 desiredAttachment =
+                target + _bucketGrabToAttachmentOffset;
+            Vector3 pivotToAttachment = desiredAttachment - pivot;
+            if (pivotToAttachment.sqrMagnitude < 1e-8f)
+                return target;
+
+            float maximumLength = ropeSystem.GetMaximumReachableLength();
+            float distance = pivotToAttachment.magnitude;
+            if (float.IsInfinity(maximumLength) ||
+                distance <= maximumLength)
+            {
+                return target;
+            }
+
+            desiredAttachment =
+                pivot +
+                pivotToAttachment * (maximumLength / distance);
+            return desiredAttachment - _bucketGrabToAttachmentOffset;
         }
 
         private void SetupDragPlane(Ray ray, Camera camera, Vector3 grabPoint)

@@ -100,6 +100,8 @@ namespace PaintBucketSim.Systems.UI
         private LabDropdown _renderModeDropdown;
         private LabDropdown _boardModeDropdown;
         private LabDropdown _colorAxisDropdown;
+        private LabDropdown _compartmentColorDropdown;
+        private LabDropdown _cameraSelectorDropdown;
         private LabDropdown _ropePivotDropdown;
         private LabDropdown _ropeDampingDropdown;
         private LabDropdown _bucketMotionDropdown;
@@ -121,8 +123,10 @@ namespace PaintBucketSim.Systems.UI
         private Toggle _surfaceEvolutionToggle;
         private Toggle _surfaceInertiaToggle;
         private Toggle _depositOnlyAirToggle;
+        private Image _compartmentColorSwatch;
         private Vector2Int _lastLayoutSize;
         private int _selectedHoleIndex;
+        private int _selectedCompartmentIndex;
         private float _userPanelWidth = -1.0f;
         private string _lastExportPath;
 
@@ -266,6 +270,18 @@ namespace PaintBucketSim.Systems.UI
                     HideDropdownPopup();
                 }
             }
+
+            if (EventSystem.current != null &&
+                EventSystem.current.currentSelectedGameObject != null &&
+                EventSystem.current.currentSelectedGameObject.GetComponent<InputField>() != null)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.H))
+                ToggleAllHoles();
+            if (Input.GetKeyDown(KeyCode.K))
+                CycleCamera();
 
             if (Input.GetKeyDown(KeyCode.Alpha1))
                 SelectTab(LabTab.Run);
@@ -491,7 +507,7 @@ namespace PaintBucketSim.Systems.UI
             bg.color = new Color(0.045f, 0.050f, 0.054f, 0.90f);
 
             _hintText = CreateText(
-                "Space/P Pause  |  O Step  |  R Reset  |  M Board Motion  |  B/N Mode  |  C Clear Paint  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI | WASD Move",
+                "Space/P Pause  |  O Step  |  R Reset  |  M Board  |  B/N Mode  |  C Clear  |  H Holes  |  K Camera  |  F Focus  |  V Orbit  |  F1 Debug  |  F10 UI  |  WASD Pan",
                 hints.transform,
                 12,
                 FontStyle.Bold,
@@ -550,6 +566,8 @@ namespace PaintBucketSim.Systems.UI
             _materialPresetDropdown = null;
             _renderModeDropdown = null;
             _colorAxisDropdown = null;
+            _compartmentColorDropdown = null;
+            _cameraSelectorDropdown = null;
             _ropePivotDropdown = null;
             _ropeDampingDropdown = null;
             _bucketMotionDropdown = null;
@@ -567,6 +585,7 @@ namespace PaintBucketSim.Systems.UI
             _surfaceEvolutionToggle = null;
             _surfaceInertiaToggle = null;
             _depositOnlyAirToggle = null;
+            _compartmentColorSwatch = null;
 
             HideDropdownPopup();
 
@@ -889,11 +908,23 @@ namespace PaintBucketSim.Systems.UI
                         _fluidConfig.enableColorCompartments = value;
                 });
 
-            AddSlider(colors.transform, "Compartments", 1f, 8f, 2f, value =>
-            {
-                if (_fluidConfig != null)
-                    _fluidConfig.colorCompartmentCount = Mathf.Clamp(Mathf.RoundToInt(value), 1, 8);
-            }, () => _fluidConfig != null ? _fluidConfig.colorCompartmentCount : 1.0f, "0");
+            LabDropdown compartmentCountDropdown = AddDropdown(
+                colors.transform,
+                "Compartments",
+                new[] { "1", "2", "3", "4", "5", "6", "7", "8" },
+                index =>
+                {
+                    if (_fluidConfig == null)
+                        return;
+                    _fluidConfig.colorCompartmentCount = index + 1;
+                    EnsureCompartmentColorCapacity();
+                    _selectedCompartmentIndex = Mathf.Min(
+                        _selectedCompartmentIndex,
+                        index);
+                    RebuildCurrentTab();
+                });
+            compartmentCountDropdown.SetValueWithoutNotify(
+                GetColorCompartmentCount() - 1);
 
             _colorAxisDropdown = AddDropdown(
                 colors.transform,
@@ -904,6 +935,24 @@ namespace PaintBucketSim.Systems.UI
                     if (_fluidConfig != null)
                         _fluidConfig.colorCompartmentAxis = (FluidColorCompartmentAxis)index;
                 });
+
+            EnsureCompartmentColorCapacity();
+            _compartmentColorDropdown = AddDropdown(
+                colors.transform,
+                "Edit color",
+                BuildCompartmentColorOptions(),
+                index => _selectedCompartmentIndex = index);
+            _selectedCompartmentIndex = Mathf.Clamp(
+                _selectedCompartmentIndex,
+                0,
+                Mathf.Max(0, GetColorCompartmentCount() - 1));
+            _compartmentColorDropdown.SetValueWithoutNotify(
+                _selectedCompartmentIndex);
+
+            AddCompartmentColorPreview(colors.transform);
+            AddColorChannelSlider(colors.transform, "Red", 0);
+            AddColorChannelSlider(colors.transform, "Green", 1);
+            AddColorChannelSlider(colors.transform, "Blue", 2);
 
             AddSlider(colors.transform, "Divider gap", 0.0f, 0.35f, 0.04f, value =>
             {
@@ -930,7 +979,7 @@ namespace PaintBucketSim.Systems.UI
             AddActionGrid(
                 ("Blue / Red", () => SetCompartmentColors(new Color(0.1f, 0.35f, 1f, 1f), new Color(1f, 0.12f, 0.08f, 1f)), Accent),
                 ("CMY Lab", () => SetCompartmentColors(Color.cyan, Color.magenta, Color.yellow), ControlBg),
-                ("Apply + Reset Fluid", ApplyParticleBudget, Accent2));
+                ("Apply Colors + Reset", ApplyParticleBudget, Accent2));
 
             _dynamicRefreshers.Add(() =>
             {
@@ -942,6 +991,8 @@ namespace PaintBucketSim.Systems.UI
                     _physicalDividersToggle.SetIsOnWithoutNotify(_fluidConfig.enablePhysicalColorDividers);
                 if (_colorAxisDropdown != null && _fluidConfig != null)
                     _colorAxisDropdown.SetValueWithoutNotify((int)_fluidConfig.colorCompartmentAxis);
+                if (_compartmentColorSwatch != null)
+                    _compartmentColorSwatch.color = GetSelectedCompartmentColor();
             });
         }
 
@@ -1313,7 +1364,9 @@ namespace PaintBucketSim.Systems.UI
                 }
             }, () => GetSelectedHole() != null ? GetSelectedHole().exitVelocityBoostMetersPerSecond : 0.0f, "0.00 m/s");
 
-            AddActionGrid(("Apply + Reset Bucket", ResetAll, Accent));
+            AddActionGrid(
+                ("Toggle All Holes (H)", ToggleAllHoles, Accent2),
+                ("Apply + Reset Bucket", ResetAll, Accent));
 
             _dynamicRefreshers.Add(() =>
             {
@@ -1407,12 +1460,20 @@ namespace PaintBucketSim.Systems.UI
             AddTitle("View And Rendering", "Control camera behavior and particle/fluid visual presentation.");
 
             GameObject camera = AddSection("Camera");
+            _cameraSelectorDropdown = AddDropdown(
+                camera.transform,
+                "Active camera",
+                BuildCameraOptions(),
+                ActivateCamera);
+            _cameraSelectorDropdown.SetValueWithoutNotify(
+                GetActiveCameraIndex(GetLabCameras()));
             _autoOrbitToggle = AddToggle(camera.transform, "Auto orbit", false, value =>
             {
                 if (_interactiveCamera != null)
                     _interactiveCamera.AutoOrbitEnabled = value;
             });
             AddActionGrid(
+                ("Next Camera (K)", CycleCamera, Accent2),
                 ("Focus View", FocusCamera, Accent),
                 ("Reset View", () => _interactiveCamera?.ResetView(), ControlBg));
 
@@ -1692,6 +1753,67 @@ namespace PaintBucketSim.Systems.UI
             _interactiveCamera?.FocusTarget();
         }
 
+        private void CycleCamera()
+        {
+            global::InteractiveCamera[] cameras = GetLabCameras();
+            if (cameras.Length > 0)
+                ActivateCamera((GetActiveCameraIndex(cameras) + 1) % cameras.Length);
+        }
+
+        private void ActivateCamera(int index)
+        {
+            global::InteractiveCamera[] cameras = GetLabCameras();
+            if (cameras.Length == 0)
+                return;
+
+            int selectedIndex = Mathf.Clamp(index, 0, cameras.Length - 1);
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                bool active = i == selectedIndex;
+                Camera camera = cameras[i].GetComponent<Camera>();
+                if (camera != null)
+                    camera.enabled = active;
+
+            }
+
+            _interactiveCamera = cameras[selectedIndex];
+            _interactiveCamera.enabled = true;
+            _cameraSelectorDropdown?.SetValueWithoutNotify(selectedIndex);
+            RefreshDynamicContent();
+        }
+
+        private string[] BuildCameraOptions()
+        {
+            global::InteractiveCamera[] cameras = GetLabCameras();
+            if (cameras.Length == 0)
+                return new[] { "No cameras" };
+
+            return Array.ConvertAll(
+                cameras,
+                item => item.name.Replace("Camera_", string.Empty).Replace('_', ' '));
+        }
+
+        private static global::InteractiveCamera[] GetLabCameras()
+        {
+            global::InteractiveCamera[] cameras =
+                UnityEngine.Object.FindObjectsByType<global::InteractiveCamera>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None);
+            Array.Sort(
+                cameras,
+                (left, right) => string.CompareOrdinal(left.name, right.name));
+            return cameras;
+        }
+
+        private static int GetActiveCameraIndex(
+            global::InteractiveCamera[] cameras)
+        {
+            int index = cameras != null
+                ? Array.FindIndex(cameras, item => item.IsViewActive)
+                : -1;
+            return Mathf.Max(index, 0);
+        }
+
         private void ToggleBoardMotion()
         {
             _boardController?.ToggleMotion();
@@ -1823,6 +1945,27 @@ namespace PaintBucketSim.Systems.UI
             }
 
             return activeCount;
+        }
+
+        private void ToggleAllHoles()
+        {
+            if (_bucketConfig == null || _bucketConfig.holes == null ||
+                _bucketConfig.holes.Length == 0)
+            {
+                return;
+            }
+
+            bool open = CountActiveHoles() < _bucketConfig.holes.Length;
+            for (int i = 0; i < _bucketConfig.holes.Length; i++)
+            {
+                if (_bucketConfig.holes[i] == null)
+                    _bucketConfig.holes[i] = CreateDefaultHole(i);
+                _bucketConfig.holes[i].active = open;
+            }
+
+            NotifyHoleConfigurationChanged();
+            if (_activeTab == LabTab.Bucket)
+                RebuildCurrentTab();
         }
 
         private int GetMaximumRuntimeHoleCount()
@@ -1997,6 +2140,98 @@ namespace PaintBucketSim.Systems.UI
             _bucketSystem?.RefreshHoleConfiguration();
         }
 
+        private int GetColorCompartmentCount()
+        {
+            return _fluidConfig != null
+                ? Mathf.Clamp(_fluidConfig.colorCompartmentCount, 1, 8)
+                : 1;
+        }
+
+        private void EnsureCompartmentColorCapacity()
+        {
+            if (_fluidConfig == null)
+                return;
+
+            int count = GetColorCompartmentCount();
+            Color[] current = _fluidConfig.compartmentColors;
+            if (current != null && current.Length == count)
+                return;
+
+            int copyCount = current != null
+                ? Mathf.Min(current.Length, count)
+                : 0;
+            Color[] colors = new Color[count];
+            if (copyCount > 0)
+                Array.Copy(current, colors, copyCount);
+
+            for (int i = copyCount; i < count; i++)
+            {
+                colors[i] = Color.HSVToRGB(
+                    Mathf.Repeat(0.58f + i * 0.31f, 1f),
+                    0.78f,
+                    0.96f);
+                colors[i].a = 1f;
+            }
+            _fluidConfig.compartmentColors = colors;
+        }
+
+        private string[] BuildCompartmentColorOptions()
+        {
+            int count = GetColorCompartmentCount();
+            string[] options = new string[count];
+            for (int i = 0; i < count; i++)
+                options[i] = $"Compartment {i + 1}";
+            return options;
+        }
+
+        private Color GetSelectedCompartmentColor()
+        {
+            EnsureCompartmentColorCapacity();
+            if (_fluidConfig == null || _fluidConfig.compartmentColors == null ||
+                _fluidConfig.compartmentColors.Length == 0)
+            {
+                return Color.white;
+            }
+
+            int index = Mathf.Clamp(
+                _selectedCompartmentIndex,
+                0,
+                GetColorCompartmentCount() - 1);
+            return _fluidConfig.compartmentColors[index];
+        }
+
+        private void AddCompartmentColorPreview(Transform parent)
+        {
+            GameObject row = CreateRow(parent, 38f);
+            Text label = CreateText(
+                "Selected color", row.transform, 12, FontStyle.Bold, TextColor);
+            label.alignment = TextAnchor.MiddleLeft;
+            label.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+            GameObject swatch = CreateUiObject("ColorSwatch", row.transform);
+            _compartmentColorSwatch = swatch.AddComponent<Image>();
+            _compartmentColorSwatch.raycastTarget = false;
+            LayoutElement layout = swatch.AddComponent<LayoutElement>();
+            layout.minWidth = layout.preferredWidth = 72f;
+        }
+
+        private void AddColorChannelSlider(
+            Transform parent,
+            string label,
+            int channel)
+        {
+            AddSlider(parent, label, 0f, 1f, GetSelectedCompartmentColor()[channel], value =>
+            {
+                if (_fluidConfig == null)
+                    return;
+                Color color = GetSelectedCompartmentColor();
+                color[channel] = value;
+                color.a = 1f;
+                _fluidConfig.compartmentColors[_selectedCompartmentIndex] = color;
+                _fluidConfig.enableColorCompartments = true;
+            }, () => GetSelectedCompartmentColor()[channel], "0%");
+        }
+
         private void SetCompartmentColors(params Color[] colors)
         {
             if (_fluidConfig == null || colors == null || colors.Length == 0)
@@ -2005,7 +2240,12 @@ namespace PaintBucketSim.Systems.UI
             _fluidConfig.compartmentColors = colors;
             _fluidConfig.colorCompartmentCount = Mathf.Clamp(colors.Length, 1, 8);
             _fluidConfig.enableColorCompartments = true;
-            RefreshDynamicContent();
+            _selectedCompartmentIndex = Mathf.Clamp(
+                _selectedCompartmentIndex,
+                0,
+                GetColorCompartmentCount() - 1);
+            if (_activeTab == LabTab.Fluid)
+                RebuildCurrentTab();
         }
 
         private void ExportBoard()

@@ -259,7 +259,9 @@ namespace PaintBucketSim.Systems.Surface
             if (keyboard.homeKey.wasPressedThisFrame)
                 ResetBoardPose(false);
 
-            float pitchInput = ReadAxis(keyboard.iKey.isPressed, keyboard.kKey.isPressed);
+            float pitchInput = ReadAxis(
+                keyboard.pageUpKey.isPressed,
+                keyboard.pageDownKey.isPressed);
             float rollInput = ReadAxis(keyboard.jKey.isPressed, keyboard.lKey.isPressed);
             float yawInput = ReadAxis(keyboard.eKey.isPressed, keyboard.qKey.isPressed);
 

@@ -107,6 +107,7 @@ namespace PaintBucketSim.Systems.Coupling
             _diagnostics.active = 1;
             _diagnostics.iterations = couplingConfig.solverIterations;
             UpdateEndpointPayload();
+            ConstrainGrabbedBucketToRopeReach(dt);
             bucketSystem.DriveBailTowardWorldPoint(
                 ropeSystem.GetRopeEndPosition(),
                 dt);
@@ -158,6 +159,11 @@ namespace PaintBucketSim.Systems.Coupling
                 );
             }
 
+            CloseGrabAttachmentResidual(
+                dt,
+                ref totalBucketLinearCorrection,
+                ref maxError);
+
             Vector3 ropeEnd = ropeSystem.GetRopeEndPosition();
             Vector3 attach = bucketSystem.GetAttachmentWorldPosition();
             float finalError = (ropeEnd - attach).magnitude;
@@ -167,6 +173,8 @@ namespace PaintBucketSim.Systems.Coupling
             {
                 bucketSystem.ReconstructVelocityFromConstrainedPose(dt);
             }
+
+            SynchronizeGrabHandoffVelocity(dt);
 
             Vector3 gravity = context != null
                 ? context.EnvironmentState.gravity
@@ -189,6 +197,55 @@ namespace PaintBucketSim.Systems.Coupling
 
             ApplyTwistCoupling(dt);
             ApplyBailUprightTorque();
+        }
+
+        private void ConstrainGrabbedBucketToRopeReach(float dt)
+        {
+            if (!bucketSystem.IsGrabActive || !couplingConfig.correctBucket)
+                return;
+
+            float maximumLength = ropeSystem.GetMaximumReachableLength();
+            if (float.IsInfinity(maximumLength))
+                return;
+
+            Vector3 pivot = ropeSystem.GetSimulatedPivotPosition();
+            Vector3 offset =
+                bucketSystem.GetAttachmentWorldPosition() - pivot;
+            float distance = offset.magnitude;
+            if (distance <= maximumLength || distance <= 1e-6f)
+                return;
+
+            Vector3 correction =
+                -offset * ((distance - maximumLength) / distance);
+            bucketSystem.ApplyCouplingCorrection(
+                correction,
+                Vector3.zero,
+                dt,
+                false);
+        }
+
+        private void CloseGrabAttachmentResidual(
+            float dt,
+            ref Vector3 totalBucketLinearCorrection,
+            ref float maxError)
+        {
+            if (!bucketSystem.IsGrabActive || !couplingConfig.correctBucket)
+                return;
+
+            Vector3 residual =
+                ropeSystem.GetRopeEndPosition() -
+                bucketSystem.GetAttachmentWorldPosition();
+            float error = residual.magnitude;
+            if (error <= 1e-6f)
+                return;
+
+            maxError = Mathf.Max(maxError, error);
+            bucketSystem.ApplyCouplingCorrection(
+                residual,
+                Vector3.zero,
+                dt,
+                false);
+            totalBucketLinearCorrection += residual;
         }
 
         private void UpdateEndpointPayload()
@@ -247,14 +304,15 @@ namespace PaintBucketSim.Systems.Coupling
 
             BucketState state = bucketSystem.State;
             Vector3 bucketAngularVelocity = ToVector3(state.angularVelocity);
-            float axialAngularVelocity = Vector3.Dot(bucketAngularVelocity, tangent);
-            float ropeAxialAngularVelocity = ropeSystem.GetRopeEndTwistAngularVelocity();
-            float relativeAngularVelocity =
-                axialAngularVelocity - ropeAxialAngularVelocity;
+            // The light endpoint frame carries solver-scale torsional velocity;
+            // its damping belongs to the rod solve, not the bucket joint.
+            float bucketAxialAngularVelocity =
+                Vector3.Dot(bucketAngularVelocity, tangent);
 
             float torqueMagnitude =
                 error * couplingConfig.twistTorqueStiffness +
-                relativeAngularVelocity * couplingConfig.twistTorqueDamping;
+                bucketAxialAngularVelocity *
+                couplingConfig.twistTorqueDamping;
 
             torqueMagnitude = Mathf.Clamp(
                 torqueMagnitude,
@@ -401,15 +459,24 @@ namespace PaintBucketSim.Systems.Coupling
                 float wRope = couplingConfig.correctRopeEnd
                     ? ropeSystem.GetRopeEndInverseMass()
                     : 0.0f;
-                float wBucketLinear = couplingConfig.correctBucket
-                    ? bucketSystem.GetInverseMass()
+                float bucketDynamicWeight = GetBucketDynamicWeight();
+                bool correctBucketVelocity =
+                    couplingConfig.correctBucket &&
+                    bucketDynamicWeight > 1e-5f;
+                float wBucketLinear = correctBucketVelocity
+                    ? bucketSystem.GetInverseMass() * bucketDynamicWeight
                     : 0.0f;
+                // Partial rotational ownership creates an artificial release kick.
+                bool allowBucketRotation =
+                    correctBucketVelocity &&
+                    bucketSystem.GrabConstraintInfluence <= 1e-5f;
 
                 Vector3 rxn = Vector3.Cross(r, axis);
-                Vector3 inverseInertiaRxn = couplingConfig.correctBucket
-                    ? bucketSystem.MultiplyInverseInertiaWorld(rxn)
+                Vector3 inverseInertiaRxn = allowBucketRotation
+                    ? bucketSystem.MultiplyInverseInertiaWorld(rxn) *
+                      bucketDynamicWeight
                     : Vector3.zero;
-                float wBucketAngular = couplingConfig.correctBucket
+                float wBucketAngular = allowBucketRotation
                     ? Vector3.Dot(rxn, inverseInertiaRxn)
                     : 0.0f;
 
@@ -441,8 +508,15 @@ namespace PaintBucketSim.Systems.Coupling
                 Vector3 impulse = axis * impulseScalar;
                 if (couplingConfig.correctRopeEnd)
                     ropeSystem.ApplyRopeEndImpulse(impulse, dt);
-                if (couplingConfig.correctBucket)
-                    bucketSystem.ApplyImpulseAtWorldPoint(-impulse, attachment);
+                if (correctBucketVelocity)
+                {
+                    Vector3 bucketImpulsePoint = allowBucketRotation
+                        ? attachment
+                        : center;
+                    bucketSystem.ApplyImpulseAtWorldPoint(
+                        -impulse * bucketDynamicWeight,
+                        bucketImpulsePoint);
+                }
 
                 totalImpulse += Mathf.Abs(impulseScalar);
             }
@@ -473,20 +547,29 @@ namespace PaintBucketSim.Systems.Coupling
                 ? ropeSystem.GetRopeEndInverseMass()
                 : 0.0f;
 
-            float wBucketLinear = couplingConfig.correctBucket
-                ? bucketSystem.GetInverseMass()
+            float bucketDynamicWeight = GetBucketDynamicWeight();
+            float grabInfluence = Mathf.Clamp01(
+                bucketSystem.GrabConstraintInfluence);
+            bool correctBucketPose =
+                couplingConfig.correctBucket &&
+                bucketDynamicWeight > 1e-5f;
+            float wBucketLinear = correctBucketPose
+                ? bucketSystem.GetInverseMass() * bucketDynamicWeight
                 : 0.0f;
+            bool allowBucketRotation =
+                correctBucketPose && grabInfluence <= 1e-5f;
 
             Vector3 r = attachment - bucketCenter;
 
             // Effective rotational inverse mass:
             // (r x n)^T I^-1 (r x n)
             Vector3 rxn = Vector3.Cross(r, axis);
-            Vector3 iInvRxn = couplingConfig.correctBucket
-                ? bucketSystem.MultiplyInverseInertiaWorld(rxn)
+            Vector3 iInvRxn = allowBucketRotation
+                ? bucketSystem.MultiplyInverseInertiaWorld(rxn) *
+                  bucketDynamicWeight
                 : Vector3.zero;
 
-            float wBucketAngular = couplingConfig.correctBucket
+            float wBucketAngular = allowBucketRotation
                 ? Vector3.Dot(rxn, iInvRxn)
                 : 0.0f;
 
@@ -512,7 +595,7 @@ namespace PaintBucketSim.Systems.Coupling
                         couplingConfig.maxLinearCorrectionPerSubstep));
             }
 
-            if (couplingConfig.correctBucket)
+            if (correctBucketPose)
             {
                 correctionScale = Mathf.Min(
                     correctionScale,
@@ -520,12 +603,15 @@ namespace PaintBucketSim.Systems.Coupling
                         totalBucketLinearCorrection,
                         bucketLinearCorrection,
                         couplingConfig.maxLinearCorrectionPerSubstep));
-                correctionScale = Mathf.Min(
-                    correctionScale,
-                    GetCorrectionScale(
-                        totalBucketAngularCorrection,
-                        bucketAngularCorrection,
-                        couplingConfig.maxAngularCorrectionPerSubstep));
+                if (allowBucketRotation)
+                {
+                    correctionScale = Mathf.Min(
+                        correctionScale,
+                        GetCorrectionScale(
+                            totalBucketAngularCorrection,
+                            bucketAngularCorrection,
+                            couplingConfig.maxAngularCorrectionPerSubstep));
+                }
             }
 
             deltaLambda *= correctionScale;
@@ -547,7 +633,7 @@ namespace PaintBucketSim.Systems.Coupling
                 totalRopeCorrection += ropeCorrection;
             }
 
-            if (couplingConfig.correctBucket)
+            if (correctBucketPose)
             {
                 bucketSystem.ApplyCouplingCorrection(
                     bucketLinearCorrection,
@@ -581,6 +667,31 @@ namespace PaintBucketSim.Systems.Coupling
             float discriminant = Mathf.Max(b * b - 4.0f * a * c, 0.0f);
             float exitScale = (-b + Mathf.Sqrt(discriminant)) / (2.0f * a);
             return Mathf.Clamp01(exitScale);
+        }
+
+        private float GetBucketDynamicWeight()
+        {
+            float weight = 1.0f - Mathf.Clamp01(
+                bucketSystem.GrabConstraintInfluence);
+            return weight * weight * (3.0f - 2.0f * weight);
+        }
+
+        private void SynchronizeGrabHandoffVelocity(float dt)
+        {
+            if (bucketSystem.GrabConstraintInfluence <= 1e-5f ||
+                !couplingConfig.correctRopeEnd)
+                return;
+
+            float inverseMass = ropeSystem.GetRopeEndInverseMass();
+            if (inverseMass <= 1e-8f)
+                return;
+
+            Vector3 velocityDelta =
+                bucketSystem.GetAttachmentWorldVelocity() -
+                ropeSystem.GetRopeEndVelocity();
+            ropeSystem.ApplyRopeEndImpulse(
+                velocityDelta / inverseMass,
+                dt);
         }
 
         private float3 ToFloat3(Vector3 v)

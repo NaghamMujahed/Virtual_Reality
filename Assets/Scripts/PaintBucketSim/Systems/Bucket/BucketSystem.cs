@@ -9,6 +9,10 @@ namespace PaintBucketSim.Systems.Bucket
 {
     public class BucketSystem : MonoBehaviour
     {
+        private const float GrabAngularFrequency = 12.0f;
+        private const float GrabMaxAcceleration = 25.0f;
+        private const float GrabReleaseBlendSeconds = 0.2f;
+
         [Header("Config")]
         [SerializeField] private BucketConfig bucketConfig;
 
@@ -30,6 +34,12 @@ namespace PaintBucketSim.Systems.Bucket
         private float3 _stepStartCenterOfMassWorld;
         private quaternion _stepStartRotation;
         private bool _hasStepStartPose;
+        private bool _grabActive;
+        private float3 _grabRequestedTarget;
+        private float3 _grabTarget;
+        private float3 _grabTargetVelocity;
+        private float3 _grabCenterOffsetWorld;
+        private float _grabConstraintInfluence;
 
         public BucketConfig Config => bucketConfig;
         public bool IsInitialized => _initialized && _data != null;
@@ -38,6 +48,8 @@ namespace PaintBucketSim.Systems.Bucket
         public BucketHoleWorldState[] Holes => _data != null ? _data.Holes : null;
         public BucketDiagnostics Diagnostics => _data != null ? _data.Diagnostics : default;
         public float BailHingeAngleRadians => _bailHingeAngleRadians;
+        public bool IsGrabActive => _grabActive;
+        public float GrabConstraintInfluence => _grabConstraintInfluence;
 
         private void OnDestroy()
         {
@@ -76,6 +88,12 @@ namespace PaintBucketSim.Systems.Bucket
             _stepStartCenterOfMassWorld = GetCenterOfMassWorldFloat3();
             _stepStartRotation = _data.State.rotation;
             _hasStepStartPose = false;
+            _grabActive = false;
+            _grabRequestedTarget = float3.zero;
+            _grabTarget = float3.zero;
+            _grabTargetVelocity = float3.zero;
+            _grabCenterOffsetWorld = float3.zero;
+            _grabConstraintInfluence = 0.0f;
 
             _initialized = true;
         }
@@ -106,9 +124,12 @@ namespace PaintBucketSim.Systems.Bucket
                 return;
 
             CaptureStepStartPose();
+            UpdateGrabConstraintInfluence(dt);
 
             if (bucketConfig.motionMode == BucketMotionMode.KinematicFollowTransform)
             {
+                EndGrab();
+                _grabConstraintInfluence = 0.0f;
                 ReadStateFromReferenceTransform(dt);
                 UpdateAttachmentAndHoles();
                 UpdateDiagnostics();
@@ -117,10 +138,15 @@ namespace PaintBucketSim.Systems.Bucket
 
             if (bucketConfig.motionMode == BucketMotionMode.LockedInitialPose)
             {
+                EndGrab();
+                _grabConstraintInfluence = 0.0f;
                 UpdateAttachmentAndHoles();
                 UpdateDiagnostics();
                 return;
             }
+
+            if (_grabActive)
+                ApplyGrabForce(dt);
 
             IntegrateDynamic(context, dt);
 
@@ -166,7 +192,7 @@ namespace PaintBucketSim.Systems.Bucket
             float3 r = pointFloat - GetCenterOfMassWorldFloat3();
 
             state.velocity += impulseFloat * state.inverseMass;
-            state.angularVelocity += WorldAngularAccelerationFromTorque(
+            state.angularVelocity += MultiplyInverseInertiaWorld(
                 state,
                 math.cross(r, impulseFloat));
 
@@ -185,7 +211,7 @@ namespace PaintBucketSim.Systems.Bucket
 
             BucketState state = _data.State;
             state.velocity += linearImpulseWorld * state.inverseMass;
-            state.angularVelocity += WorldAngularAccelerationFromTorque(
+            state.angularVelocity += MultiplyInverseInertiaWorld(
                 state,
                 angularImpulseWorld);
 
@@ -201,6 +227,42 @@ namespace PaintBucketSim.Systems.Bucket
         {
             _externalForce = float3.zero;
             _externalTorque = float3.zero;
+        }
+
+        public bool BeginGrab(Vector3 worldPoint)
+        {
+            if (!IsInitialized ||
+                bucketConfig == null ||
+                bucketConfig.motionMode != BucketMotionMode.DynamicFree)
+            {
+                return false;
+            }
+
+            float3 point = new float3(worldPoint.x, worldPoint.y, worldPoint.z);
+            _grabActive = true;
+            _grabRequestedTarget = point;
+            _grabTarget = point;
+            _grabTargetVelocity = float3.zero;
+            _grabCenterOffsetWorld = GetCenterOfMassWorldFloat3() - point;
+            _grabConstraintInfluence = 1.0f;
+            return true;
+        }
+
+        public void MoveGrab(Vector3 worldTarget)
+        {
+            if (!_grabActive)
+                return;
+
+            _grabRequestedTarget = new float3(
+                worldTarget.x,
+                worldTarget.y,
+                worldTarget.z);
+        }
+
+        public void EndGrab()
+        {
+            _grabActive = false;
+            _grabTargetVelocity = float3.zero;
         }
 
         public float3 LocalToWorldPoint(float3 localPoint)
@@ -299,6 +361,81 @@ namespace PaintBucketSim.Systems.Bucket
             _data.State = state;
         }
 
+        private void ApplyGrabForce(float dt)
+        {
+            BucketState state = _data.State;
+            float safeDt = math.max(dt, 1e-6f);
+            UpdateGrabTarget(safeDt);
+
+            float3 desiredCenter =
+                _grabTarget + _grabCenterOffsetWorld;
+            float3 center = GetCenterOfMassWorldFloat3();
+            float3 centerError = desiredCenter - center;
+            float3 relativeVelocity =
+                _grabTargetVelocity - state.velocity;
+            float3 force = state.mass * (
+                GrabAngularFrequency * GrabAngularFrequency * centerError +
+                2.0f * GrabAngularFrequency * relativeVelocity);
+            float maximumForce = state.mass * GrabMaxAcceleration;
+            float forceLength = math.length(force);
+            if (forceLength > maximumForce && forceLength > 1e-6f)
+                force *= maximumForce / forceLength;
+
+            AddForce(force);
+        }
+
+        private void UpdateGrabTarget(float dt)
+        {
+            float3 toRequested = _grabRequestedTarget - _grabTarget;
+            float distance = math.length(toRequested);
+            float maximumSpeed =
+                GrabMaxAcceleration / GrabAngularFrequency;
+            float stoppingSpeed = math.sqrt(
+                2.0f * GrabMaxAcceleration * distance);
+            float3 desiredVelocity = distance > 1e-6f
+                ? toRequested / distance *
+                  math.min(
+                      math.min(maximumSpeed, stoppingSpeed),
+                      distance / dt)
+                : float3.zero;
+
+            float3 velocityDelta = desiredVelocity - _grabTargetVelocity;
+            float maximumVelocityChange = GrabMaxAcceleration * dt;
+            float velocityDeltaLength = math.length(velocityDelta);
+            if (velocityDeltaLength > maximumVelocityChange &&
+                velocityDeltaLength > 1e-6f)
+            {
+                velocityDelta *=
+                    maximumVelocityChange / velocityDeltaLength;
+            }
+
+            _grabTargetVelocity += velocityDelta;
+            float3 movement = _grabTargetVelocity * dt;
+            if (math.lengthsq(movement) >= distance * distance &&
+                math.dot(movement, toRequested) > 0.0f)
+            {
+                _grabTarget = _grabRequestedTarget;
+                _grabTargetVelocity = float3.zero;
+                return;
+            }
+
+            _grabTarget += movement;
+        }
+
+        private void UpdateGrabConstraintInfluence(float dt)
+        {
+            if (_grabActive)
+            {
+                _grabConstraintInfluence = 1.0f;
+                return;
+            }
+
+            _grabConstraintInfluence = math.max(
+                0.0f,
+                _grabConstraintInfluence -
+                math.max(dt, 0.0f) / GrabReleaseBlendSeconds);
+        }
+
         private void IntegrateDynamic(SimulationContext context, float dt)
         {
             BucketState state = _data.State;
@@ -366,7 +503,9 @@ namespace PaintBucketSim.Systems.Bucket
                 math.rotate(state.rotation, state.centerOfMassLocal);
             centerOfMassWorld += state.velocity * dt;
 
-            float3 angularAcceleration = WorldAngularAccelerationFromTorque(state, torque);
+            float3 angularAcceleration = ComputeWorldAngularAcceleration(
+                state,
+                torque);
             state.angularVelocity += angularAcceleration * dt;
 
             float angularDamping = math.exp(-math.max(bucketConfig.angularDampingPerSecond, 0.0f) * dt);
@@ -387,14 +526,34 @@ namespace PaintBucketSim.Systems.Bucket
             _data.State = state;
         }
 
-        private float3 WorldAngularAccelerationFromTorque(BucketState state, float3 worldTorque)
+        private float3 MultiplyInverseInertiaWorld(
+            BucketState state,
+            float3 worldVector)
         {
             quaternion invRot = math.inverse(state.rotation);
+            float3 localVector = math.rotate(invRot, worldVector);
+            return math.rotate(
+                state.rotation,
+                localVector * state.inverseInertiaTensorBody);
+        }
 
-            float3 localTorque = math.rotate(invRot, worldTorque);
-            float3 localAlpha = localTorque * state.inverseInertiaTensorBody;
+        private float3 ComputeWorldAngularAcceleration(
+            BucketState state,
+            float3 worldTorque)
+        {
+            quaternion inverseRotation = math.inverse(state.rotation);
+            float3 localTorque = math.rotate(inverseRotation, worldTorque);
+            float3 localAngularVelocity = math.rotate(
+                inverseRotation,
+                state.angularVelocity);
+            float3 localAngularMomentum =
+                state.inertiaTensorBody * localAngularVelocity;
+            float3 localAngularAcceleration =
+                (localTorque -
+                 math.cross(localAngularVelocity, localAngularMomentum)) *
+                state.inverseInertiaTensorBody;
 
-            return math.rotate(state.rotation, localAlpha);
+            return math.rotate(state.rotation, localAngularAcceleration);
         }
 
         private float3 ComputeBodyInertiaTensor()
@@ -414,10 +573,9 @@ namespace PaintBucketSim.Systems.Bucket
             float h = math.max(bucketConfig.heightMeters, 0.01f);
             float r = math.max(bucketConfig.GetRepresentativeRadius(), 0.01f);
 
-            // Solid cylinder approximation.
-            // For a real thin-walled bucket this is not perfect, but good enough for B1.
-            float iXz = (1.0f / 12.0f) * m * (3.0f * r * r + h * h);
-            float iY = 0.5f * m * r * r;
+            // Thin cylindrical shell approximation for the empty bucket body.
+            float iXz = m * (0.5f * r * r + h * h / 12.0f);
+            float iY = m * r * r;
 
             return new float3(iXz, iY, iXz);
         }

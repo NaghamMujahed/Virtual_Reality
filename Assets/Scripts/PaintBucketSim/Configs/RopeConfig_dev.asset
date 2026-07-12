@@ -26,7 +26,7 @@ MonoBehaviour:
   youngModulusPa: 100000000
   stretchComplianceScale: 1
   bendComplianceScale: 1
-  solverIterations: 12
+  solverIterations: 10
   enforceMaximumSegmentStrain: 1
   maximumSegmentStrain: 0.02
   bendingModel: 1
@@ -35,7 +35,7 @@ MonoBehaviour:
   dampingMode: 1
   exponentialDampingPerSecond: 0.05
   segmentDampingRatio: 0
-  enableBreakByTension: 1
+  enableBreakByTension: 0
   breakTensionNewton: 850
   enableBreakByStrain: 0
   breakStrain: 0.25
@@ -48,7 +48,7 @@ MonoBehaviour:
   enableInteractiveGrab: 1
   grabCompliance: 0.00001
   maxGrabCorrectionPerIteration: 0.065
-  maxGrabSpeedMetersPerSecond: 2
+  maxGrabSpeedMetersPerSecond: 1.5
   airDragMode: 2
   linearAirDragKgPerSecond: 0
   quadraticDragCoefficient: 1.1
